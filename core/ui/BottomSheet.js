@@ -3,9 +3,10 @@
 //
 // A menu is plain data the game builds when it opens (and again every frame while open, so numbers stay live):
 //   { title, subtitle, art (image key), accent,
-//     sections: [ { title?, lines?: [text], buttons?: [{ id, label, sub?, icon?, disabled?, badge?, accent?, onTap }],
+//     sections: [ { title?, lines?: [text], buttons?: [{ id, label, sub?, icon?, disabled?, locked?, badge?, accent?, onTap }],
 //                   columns? (buttons per row, default 2) } ],
-//     tabs?: [{ id, label, badge?, sections }] }   tabs inside the sheet (Milestone 21): a row of tabs under the header,
+//     tabs?: [{ id, label, badge?, sections }] }   locked (Milestone DEVWORKS-3): greyed like disabled, faded icon and a
+//                                                  padlock on the right; not tappable   tabs inside the sheet (Milestone 21): a row of tabs under the header,
 //                                                  each with its own sections (then menu.sections is not used)
 // A MenuRegistry maps what was tapped (a station type, 'worker', 'floor'…) to the function that builds its menu.
 //   sheet.open(builder) — builder() → menu        sheet.close()        sheet.active
@@ -13,7 +14,7 @@
 //   sheet.update(dt)  sheet.render(ctx)           sheet.buttonRect(id) → screen rect (tests, the guide)
 //   sheet.onBack() → closes it (the back button, Milestone 21)   sheet.setTab(id), sheet.tab, sheet.tabRect(id)
 import { THEME, font, lineH } from '../Theme.js';
-import { drawButton, hitRect } from './Button.js';
+import { drawButton, drawPadlock, hitRect } from './Button.js';
 
 export class MenuRegistry {
   constructor() {
@@ -184,7 +185,7 @@ export class BottomSheet {
         const sr = { x: b.x + x.rect.x, y: b.y + x.rect.y - this.scrollY, w: x.rect.w, h: x.rect.h };
         if (sr.y < b.y - 1 || sr.y > b.y + b.h) continue;
         if (hitRect(p, sr)) {
-          if (!x.button.disabled) x.button.onTap?.();
+          if (!x.button.disabled && !x.button.locked) x.button.onTap?.();
           return true;
         }
       }
@@ -338,23 +339,30 @@ export class BottomSheet {
   _button(ctx, bt, rect) {
     const C = THEME.color;
     const S = THEME.size;
-    drawButton(ctx, rect, '', { accent: bt.accent, disabled: bt.disabled, badge: bt.badge ?? null });
+    const off = bt.disabled || bt.locked;
+    drawButton(ctx, rect, '', { accent: bt.accent, disabled: off, badge: bt.badge ?? null });
     const iconS = Math.min(rect.h - 36, 96);
     let x = rect.x + 20;
     if (bt.icon) {
+      if (bt.locked) ctx.globalAlpha = 0.4;
       this.assets.drawContained(ctx, bt.icon, { x, y: rect.y + (rect.h - 8 - iconS) / 2, w: iconS, h: iconS });
+      ctx.globalAlpha = 1;
       x += iconS + 16;
     }
-    const w = rect.x + rect.w - 16 - x;
+    let w = rect.x + rect.w - 16 - x;
+    if (bt.locked) {
+      drawPadlock(ctx, rect.x + rect.w - 56, rect.y + (rect.h - 8) / 2, 32, C.textFaint);
+      w -= 60;
+    }
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = bt.disabled ? C.textFaint : C.textOnAction;
+    ctx.fillStyle = off ? C.textFaint : C.textOnAction;
     ctx.font = font(S.button, true);
     const cy = rect.y + (rect.h - 8) / 2;
     ctx.fillText(bt.label, x, bt.sub ? cy - 22 : cy, w);
     if (bt.sub) {
       ctx.font = font(S.small, true);
-      ctx.fillStyle = bt.disabled ? C.textFaint : C.textOnAction;
+      ctx.fillStyle = off ? C.textFaint : C.textOnAction;
       ctx.fillText(bt.sub, x, cy + 24, w);
     }
   }

@@ -85,19 +85,20 @@ export function para(ctx, str, x, y, w, { size = S.body, bold = false, color = C
 
 // --- list rows -------------------------------------------------------------------------------------------------------
 // row: { art, title, lines: [string | { text, color, bold, size }], right, rightColor, state, dimArt, locked, badge,
-//        artSize (default 130) }
+//        artSize (default 130), rightArt (a small picture in the top-right corner, e.g. a grade crate) }
 const ROW_PAD = 20;
 function rowParts(w, row) {
   const art = row.artSize ?? 130;
   const x = ROW_PAD + art + 24;
-  const rightW = row.right ? Math.min(260, w * 0.3) : 0;
+  const rightW = row.right || row.rightArt ? Math.min(260, w * 0.3) : 0;
   const tw = w - x - ROW_PAD - (rightW ? rightW + 16 : 0);
+  const lineW = row.rightArt ? tw : w - x - ROW_PAD; // a picture in the corner keeps its column clear all the way down
   const lines = (row.lines ?? []).flatMap((l) => {
     const o = typeof l === 'string' ? { text: l } : l;
     const size = o.size ?? S.body;
-    return wrapLines(o.text, w - x - ROW_PAD, size, !!o.bold).map((t) => ({ ...o, text: t, size }));
+    return wrapLines(o.text, lineW, size, !!o.bold).map((t) => ({ ...o, text: t, size }));
   });
-  return { art, x, tw, rightW, lines };
+  return { art, x, tw, rightW, lines, lineW };
 }
 
 export function listRowHeight(w, row) {
@@ -119,10 +120,15 @@ export function listRow(ctx, assets, r, row) {
   text(ctx, row.title ?? '', r.x + p.x, y, { size: S.button, bold: true, color: row.locked ? C.textMuted : C.text, maxWidth: p.tw });
   y += lineH(S.button, 1.25);
   for (const l of p.lines) {
-    text(ctx, l.text, r.x + p.x, y, { size: l.size, bold: !!l.bold, color: l.color ?? (row.locked ? C.textMuted : C.text), maxWidth: r.w - p.x - ROW_PAD });
+    text(ctx, l.text, r.x + p.x, y, { size: l.size, bold: !!l.bold, color: l.color ?? (row.locked ? C.textMuted : C.text), maxWidth: p.lineW });
     y += lineH(l.size, 1.25);
   }
-  if (row.right) text(ctx, row.right, r.x + r.w - ROW_PAD, r.y + ROW_PAD, { size: S.body, bold: true, align: 'right', color: row.rightColor ?? C.progress, maxWidth: p.rightW });
+  let ry = r.y + ROW_PAD;
+  if (row.rightArt) {
+    assets.drawContained(ctx, row.rightArt, { x: r.x + r.w - ROW_PAD - 84, y: ry, w: 84, h: 84 });
+    ry += 90;
+  }
+  if (row.right) text(ctx, row.right, r.x + r.w - ROW_PAD, ry, { size: row.rightArt ? S.small : S.body, bold: true, align: 'right', color: row.rightColor ?? C.progress, maxWidth: p.rightW });
 }
 
 // --- empty and error states ----------------------------------------------------------------------------------------

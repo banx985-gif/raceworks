@@ -254,6 +254,12 @@ export class StaffSystem {
     s.energy = round1(clamp(s.energy + delta, 0, 100));
   }
 
+  // Re-check Tired / Stressed straight away (after Energy or Morale changed outside the daily tick).
+  // Inspired can only be lost here; it is only ever gained by the daily roll.
+  refreshStatus(s) {
+    this._updateStatus(s, false);
+  }
+
   _applyMoraleFloor(s) {
     const floor = this.traitEffect(s, 'moraleFloor') + (this.moraleFloorBonus?.(s) ?? 0);
     if (s.morale < floor) s.morale = floor;

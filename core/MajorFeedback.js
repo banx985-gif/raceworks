@@ -3,7 +3,8 @@
 // Moments queue up (max 20, bible §40); while one is showing it takes every tap.
 // The game supplies the words and an optional drawFn for its own art; this draws the dim layer,
 // the banner card and the "tap to continue" hint.
-//   show({ title, subtitle, accent, drawFn(ctx, t), onShow(), onAck() })
+//   show({ title, subtitle, accent, drawFn(ctx, t), onShow(), onAck(), minShowSec? })   minShowSec: this moment's own
+//   guard time (e.g. a reveal that must finish first); without it the constructor's value is used
 // Plug into ScreenRouter as its modal so input reaches this first.
 import { THEME } from './Theme.js';
 const COL = THEME.color;
@@ -47,7 +48,7 @@ export class MajorFeedback {
   }
 
   get canAck() {
-    return this.active && this.time >= this.minShowSec;
+    return this.active && this.time >= (this.current.minShowSec ?? this.minShowSec);
   }
 
   // Returns true when the tap closed the moment.

@@ -1,7 +1,8 @@
 // RACEWORKS — boot.
 // Starts the shared series engine from core/ and opens the garage. Add ?debug=1 for the FPS/state overlay,
 // ?screen=test for the Milestone 0 scaling/tap test screen. Debug badge check: ?debug=1 then B cycles a red badge
-// through the bottom-bar buttons (or ?debug=1&badge=staff on a phone).
+// through the bottom-bar buttons (or ?debug=1&badge=staff on a phone). ?debug=1&reset=1 starts a new team (clears the save);
+// with ?debug=1 the staff detail screen has stat / Energy / Morale nudge buttons.
 import { THEME, font } from '../../../core/Theme.js';
 import { EventBus } from '../../../core/EventBus.js';
 import { Rng } from '../../../core/Rng.js';
@@ -15,7 +16,8 @@ import { DebugOverlay } from '../../../core/DebugOverlay.js';
 import { BottomSheet } from '../../../core/ui/BottomSheet.js';
 import { createTopBar } from '../../../core/ui/TopBar.js';
 import { createBottomBar } from '../../../core/ui/BottomBar.js';
-import { Clock } from '../../../core/Clock.js';
+import { createStorageAdapter } from '../../../core/StorageAdapter.js';
+import { Autosave } from '../../../core/Autosave.js';
 import { drawButton, hitRect, setPressPoint, clearPress } from '../../../core/ui/Button.js';
 import { ASSETS } from '../data/assets.js';
 import { BOTTOM_SLOTS, TOP_BAR } from '../data/home.js';
@@ -24,6 +26,10 @@ import { createGarageScreen } from './screens/GarageScreen.js';
 import { createTestScreen } from './screens/TestScreen.js';
 import { createRouteTestScreen } from './screens/RouteTestScreen.js';
 import { createGarageMenus } from './ui/garageMenus.js';
+import { createRosterScreen } from './screens/RosterScreen.js';
+import { createStaffDetailScreen } from './screens/StaffDetailScreen.js';
+import { loadStatusIcons } from './ui/statusIcons.js';
+import { Team } from './app/Team.js';
 const COL = THEME.color;
 
 const W = 1080;
@@ -31,6 +37,7 @@ const BASE_H = 1920; // 9:16; taller phones grow the height (see Renderer)
 const MAX_H = 2640; // up to 9:22 fills edge to edge; taller still gets thin bars top and bottom
 const START_SCREEN = new URLSearchParams(window.location.search).get('screen') === 'test' ? 'test' : 'garage';
 const TEST_SCREENS = ['test', 'route']; // the Milestone 0 screens: pause button, full debug box
+const GAME_SCREENS = ['garage', 'roster', 'staff']; // the game's own screens: P pauses the game clock here
 const PARAMS = new URLSearchParams(window.location.search);
 
 const bus = new EventBus();
@@ -61,6 +68,11 @@ const loop = new FixedStepLoop({
   stepHz: 60,
   bus,
   update: (dt) => {
+    if (teamReady) {
+      clock.update(dt); // days tick at the game speed (core/Clock) → the staff's daily Energy / Morale
+      garage.tick(dt); // everyone walks, works and rests
+      autosave.tick(dt);
+    }
     router.update(dt);
     sheet.update(dt);
     backNav.sync();
@@ -83,10 +95,23 @@ bus.on('loop:pause', () => input.reset());
 debug.log(`seeded rng check: ${rng.int(0, 9999)} (same every reload)`);
 
 // ---------------------------------------------------------------------------
-// Game speed (Milestone 2): the top bar's Pause / 1× / 2× / 4× drive a core Clock. Only its speed is used for now —
-// the calendar is not ticked yet (the date stays Year 1 · Month 1 · Day 1), so nothing here calls clock.update().
-const clock = new Clock({ bus, speeds: TOP_BAR.speeds });
+// The team (Milestone 3): the calendar, the three starters and the save (src/app/Team.js). The top bar's
+// Pause / 1× / 2× / 4× drive its core Clock, which now ticks days.
+const team = new Team({ bus, seed: 'raceworks' });
+const clock = team.clock;
+let teamReady = false;
 bus.on('clock:speed', ({ speed }) => debug.log(speed ? `speed ${speed}×` : 'game paused'));
+// Autosave (core/Autosave): every game day and after any change, plus when the app goes to the background.
+const autosave = new Autosave({
+  bus,
+  triggers: ['clock:day', 'team:changed'],
+  save: () => team.save(),
+  stamp: () => JSON.stringify(team.serialize()),
+  running: () => !clock.paused,
+  enabled: () => teamReady,
+});
+autosave.installBackground();
+bus.on('autosave:failed', ({ error }) => debug.log(`save failed: ${error?.message ?? error}`));
 
 // ---------------------------------------------------------------------------
 // Test-screen pause: the M0 button pauses/resumes the whole fixed-step loop; while paused any tap resumes. Hiding the
@@ -120,7 +145,7 @@ router.layers.push(
 );
 window.addEventListener('keydown', (e) => {
   if (e.key === 'p' || e.key === 'P' || e.key === ' ') {
-    if (router.currentName === 'garage' && !loop.paused) clock.togglePause();
+    if (GAME_SCREENS.includes(router.currentName) && !loop.paused) clock.togglePause();
     else loop.togglePause();
   }
   if ((e.key === 'b' || e.key === 'B') && debug.enabled) cycleDebugBadge();
@@ -146,29 +171,55 @@ function drawPaused(ctx) {
 // ---------------------------------------------------------------------------
 // Sheets: the stations, Tessa, the five bottom-bar slots, Inbox and Help — one registry, one sheet (a new one
 // replaces the open one). Plus the M0 test sheet.
-const openMenu = (kind) => {
-  const build = menus.for(kind);
+const openMenu = (kind, target = null) => {
+  const build = menus.for(kind, target);
   if (build) sheet.open(build);
 };
-const menus = createGarageMenus({ garage: () => garage, open: openMenu });
+// The staff screens (Milestone 3): the roster, and one person's details (from = where Back returns to).
+const goRoster = () => router.go('roster');
+const goStaff = (id, from = router.currentName === 'roster' ? 'roster' : 'garage') => router.go('staff', { id, from });
+const menus = createGarageMenus({ garage: () => garage, team, open: openMenu, goRoster, goStaff });
 
 // ---------------------------------------------------------------------------
 // The shared bars (core/ui), filled with RACEWORKS content.
+const topBarStats = () => [
+  { icon: TOP_BAR.icons.credits, iconSize: 60, text: TOP_BAR.credits.toLocaleString('en-US'), gap: 14 },
+  { icon: TOP_BAR.icons.tokens, text: String(TOP_BAR.tokens) },
+  { text: `Rank ${TOP_BAR.rank}`, color: COL.actionDark },
+];
 const badges = Object.fromEntries(BOTTOM_SLOTS.map((s) => [s.id, null])); // slot → badge text (data; nothing sets them yet)
 const topBar = createTopBar({
   layout,
   assets,
   clock,
   home: true,
-  stats: () => [
-    { icon: TOP_BAR.icons.credits, iconSize: 60, text: TOP_BAR.credits.toLocaleString('en-US'), gap: 14 },
-    { icon: TOP_BAR.icons.tokens, text: String(TOP_BAR.tokens) },
-    { text: `Rank ${TOP_BAR.rank}`, color: COL.actionDark },
-  ],
+  stats: () => topBarStats(),
   onStats: () => openMenu('money'),
   onInbox: () => openMenu('inbox'),
   onHelp: () => openMenu('help'),
 });
+// The staff screens show the same bar with a back button (‹ Garage / ‹ Roster) instead of the long date.
+const screenBar = createTopBar({
+  layout,
+  assets,
+  clock,
+  home: false,
+  back: {
+    get label() {
+      return router.currentName === 'staff' && staffScreen.from === 'roster' ? '‹ Roster' : '‹ Garage';
+    },
+    onTap: () => back(),
+  },
+  stats: () => topBarStats(),
+  // From a staff screen these return to the garage and open their sheet there.
+  onStats: () => fromScreen('money'),
+  onInbox: () => fromScreen('inbox'),
+  onHelp: () => fromScreen('help'),
+});
+function fromScreen(kind) {
+  router.go('garage');
+  openMenu(kind);
+}
 const bottomBar = createBottomBar({
   layout,
   assets,
@@ -200,16 +251,19 @@ const testSheet = () => ({
 });
 bus.on('screen:change', () => sheet.close());
 
-// Back one level: close the sheet, leave Build Mode, or leave the second test screen.
+// Back one level: close the sheet, leave Build Mode, a person's details (to where they came from), the roster, or the
+// second test screen.
 function back() {
   if (sheet.active) sheet.close();
   else if (router.currentName === 'garage' && garage.buildMode) garage.setBuildMode(false);
+  else if (router.currentName === 'staff') router.go(staffScreen.from === 'roster' ? 'roster' : 'garage');
+  else if (router.currentName === 'roster') router.go('garage');
   else if (router.currentName === 'route') router.go('test');
   else return false;
   return true;
 }
 const backNav = createBackNav({
-  depth: () => (sheet.active || router.currentName === 'route' || (router.currentName === 'garage' && garage.buildMode) ? 1 : 0),
+  depth: () => (sheet.active || ['route', 'roster', 'staff'].includes(router.currentName) || (router.currentName === 'garage' && garage.buildMode) ? 1 : 0),
   back,
 });
 
@@ -223,7 +277,13 @@ const bootScreen = {
       .loadImages(ASSETS, (done, total) => (this.progress = done / total))
       .then((r) => {
         debug.log(`assets: ${r.loaded} loaded, ${r.missing.length} missing`);
-        router.go(START_SCREEN);
+        return loadStatusIcons(assets);
+      })
+      .then(startTeam)
+      .then(() => router.go(START_SCREEN))
+      .catch((err) => {
+        console.error('[boot] failed', err);
+        debug.log(`boot failed: ${err.message}`);
       });
   },
   render(ctx) {
@@ -240,14 +300,40 @@ const bootScreen = {
   },
 };
 
-const garage = createGarageScreen({ renderer, layout, assets, bus, sheet, openMenu, clock, topBar, bottomBar, debug });
+const garage = createGarageScreen({ renderer, layout, assets, bus, sheet, openMenu, clock, team, topBar, bottomBar, debug });
+const rosterScreen = createRosterScreen({ layout, assets, team, garage, topBar: screenBar, goStaff });
+const staffScreen = createStaffDetailScreen({ layout, assets, team, garage, topBar: screenBar, debugEnabled: debug.enabled });
+{
+  // Remember where the details screen was opened from (for its back button).
+  const enter = staffScreen.enter;
+  staffScreen.enter = (params = {}) => {
+    staffScreen.from = params.from ?? 'garage';
+    enter(params);
+  };
+}
+// The garage tells the daily tick what each person is doing, and its workers' places travel in the save.
+team.activityOf = (s) => garage.activityOf(s.id);
+team.garageSnapshot = () => garage.snapshot();
+
+// The save: IndexedDB (or localStorage / memory where that is missing). ?debug=1&reset=1 starts again.
+async function startTeam() {
+  const adapter = await createStorageAdapter({ dbName: 'raceworks', prefix: 'raceworks:' });
+  await team.attachSave(adapter);
+  if (debug.enabled && PARAMS.get('reset') === '1') await team.clearSave();
+  const loaded = await team.loadOrNew();
+  debug.log(`team ${loaded ? 'loaded' : 'new'} (${adapter.kind}), day ${clock.totalDays}`);
+  teamReady = true;
+  if (!loaded) await team.save();
+}
 
 // Test hook for automated checks (debug builds only).
-if (debug.enabled) window.__rw = { renderer, layout, input, loop, router, assets, sheet, garage, clock, badges, cycleDebugBadge, taps: [] };
+if (debug.enabled) window.__rw = { renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, screenBar, badges, cycleDebugBadge, taps: [] };
 
 router
   .register('boot', bootScreen)
   .register('garage', garage)
+  .register('roster', rosterScreen)
+  .register('staff', staffScreen)
   .register('test', createTestScreen({ renderer, layout, assets, openSheet: () => sheet.open(testSheet), onTapLogged: (p) => window.__rw?.taps.push({ x: p.x, y: p.y }) }))
   .register('route', createRouteTestScreen({ renderer, layout, onBack: back }));
 router.go('boot');

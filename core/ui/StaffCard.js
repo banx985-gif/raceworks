@@ -3,6 +3,7 @@
 // view = {
 //   title, subtitle,                         name, "Engineer · Lv 3 · Standard"
 //   portraitKey, badgeKey,                   AssetManager keys (missing → placeholder)
+//   badge2Key,                               optional second badge, bottom-left of the portrait (e.g. rarity)
 //   xp: { value, max },                      optional XP bar
 //   stats: [{ label, value }],               e.g. ENG 58
 //   bars:  [{ label, value, max, color }],   e.g. Energy / Morale
@@ -36,6 +37,7 @@ export function drawStaffCard(ctx, r, view, assets, { highlight = false, accent 
   ctx.fill();
   assets.drawContained(ctx, view.portraitKey, { x: pr.x + 8, y: pr.y + 8, w: pr.w - 16, h: pr.h - 16 }, 'bottom');
   if (view.badgeKey) drawContained(ctx, assets, view.badgeKey, pr.x - 6, pr.y - 6, 84, 84);
+  if (view.badge2Key) drawContained(ctx, assets, view.badge2Key, pr.x - 6, pr.y + pr.h - 78, 84, 84);
 
   // Text column.
   const tx = pr.x + pr.w + 28;

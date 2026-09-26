@@ -1,13 +1,17 @@
 // RACEWORKS image list: key → path (relative to index.html).
-import { STATIONS, WORKER } from './garage.js';
+import { STATIONS } from './garage.js';
+import { STAFF, ROLES } from './staff.js';
 import { BOTTOM_SLOTS, TOP_BAR } from './home.js';
 
 const art = (folder, key) => [key, `assets/images/${folder}/${key}.png`];
 
 export const ASSETS = {
-  // Garage (Milestone 1): the two stations and Tessa.
-  ...Object.fromEntries(STATIONS.map((s) => art('facilities', s.art))),
-  ...Object.fromEntries([art('staff', WORKER.art)]),
+  // Garage: the stations with art (the rest spot is drawn by code).
+  ...Object.fromEntries(STATIONS.filter((s) => s.art).map((s) => art('facilities', s.art))),
+  // Staff (Milestone 3): the three starters' portraits and the five role badges.
+  // (The Tired / Stressed / Inspired icons are drawn by code at start: src/ui/statusIcons.js.)
+  ...Object.fromEntries(STAFF.map((s) => art('staff', s.art))),
+  ...Object.fromEntries(Object.values(ROLES).map((r) => art('badges', r.badge))),
   // Home bars (Milestone 2): the five bottom-bar icons, Credits and Racing Tokens.
   ...Object.fromEntries(BOTTOM_SLOTS.map((s) => art('ui', s.icon))),
   ...Object.fromEntries(Object.values(TOP_BAR.icons).map((k) => art('rewards', k))),

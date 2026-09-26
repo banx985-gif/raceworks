@@ -1,10 +1,12 @@
-// The garage (Milestones 1–2): the home screen. A small room on a hidden grid, seen in the 3/4 "dollhouse" view,
-// with the Pit Bay, the Strategy Desk and Tessa walking her loop, between the shared top bar and five-button bottom
-// bar (core/ui). Drag pans, pinch/wheel zooms (clamped to the room, in the space between the bars), tapping a station
-// or Tessa opens her sheet, and a long press on empty floor enters the placeholder Build Mode.
-// Tessa's time runs at the top bar's speed (Pause / 1× / 2× / 4×).
+// The garage (Milestones 1–3): the home screen. A small room on a hidden grid, seen in the 3/4 "dollhouse" view,
+// with the Pit Bay, the Strategy Desk and a placeholder rest spot, between the shared top bar and five-button bottom
+// bar (core/ui). The three starters walk their routines (data/garage.js ROUTINES) with the core Agent pathing, each
+// with a name tag and status icons; when their Energy runs low they go and rest until it is back up.
+// Drag pans, pinch/wheel zooms (clamped to the room, in the space between the bars), tapping a station or a worker
+// opens their sheet, and a long press on empty floor enters the placeholder Build Mode.
+// Everyone's time runs at the top bar's speed (Pause / 1× / 2× / 4×); tick() runs every step, whichever screen shows.
 //
-// Plan space (grid, pathing, Tessa's position) is flat; only drawing and tapping go through the IsoProjection.
+// Plan space (grid, pathing, positions) is flat; only drawing and tapping go through the IsoProjection.
 import { THEME, font } from '../../../../core/Theme.js';
 import { Grid } from '../../../../core/Grid.js';
 import { IsoProjection } from '../../../../core/IsoProjection.js';
@@ -15,13 +17,15 @@ import { CachedLayer } from '../../../../core/CachedLayer.js';
 import { Agent } from '../../../../core/Agent.js';
 import { Selection } from '../../../../core/Selection.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
-import { GARAGE, GARAGE_LOOK, STATIONS, WORKER } from '../../data/garage.js';
+import { GARAGE, GARAGE_LOOK, STATIONS, REST_STATION, WALK, ROUTINES, WORKER_STATE_TEXT } from '../../data/garage.js';
+import { REST } from '../../data/balance.js';
+import { statusIconsOf } from '../ui/statusIcons.js';
 
 const C = THEME.color;
 const S = THEME.size;
 const L = GARAGE_LOOK;
 
-export function createGarageScreen({ renderer, layout, assets, bus, sheet, openMenu, clock, topBar, bottomBar, debug }) {
+export function createGarageScreen({ renderer, layout, assets, bus, sheet, openMenu, clock, team, topBar, bottomBar, debug }) {
   const W = renderer.width;
   const { cols, rows, cellSize: CELL, wallH, margin } = GARAGE;
   const { halfW: HW, halfH: HH } = GARAGE.view;
@@ -37,15 +41,24 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
   camera.minZoom = GARAGE.zoom.min;
   camera.maxZoom = GARAGE.zoom.max;
 
-  // --- stations and Tessa ------------------------------------------------------
+  // --- stations ------------------------------------------------------------------
   const stations = STATIONS.map((def) => {
     grid.blockRect(def.fp.col, def.fp.row, def.fp.w, def.fp.h);
     return { kind: 'station', id: def.id, def, rect: null, depth: (def.fp.col + def.fp.w / 2 + def.fp.row + def.fp.h / 2) * CELL };
   });
   // Where the art is drawn (projected world): centred on the footprint, base just below its front corner.
+  // A station drawn by code (the rest spot) is a box on its footprint, draw.height tall.
   const placeStations = () => {
     for (const st of stations) {
       const { fp, draw } = st.def;
+      if (!st.def.art) {
+        const left = iso.corner(fp.col, fp.row + fp.h).x;
+        const right = iso.corner(fp.col + fp.w, fp.row).x;
+        const top = iso.corner(fp.col, fp.row).y;
+        const bottom = iso.corner(fp.col + fp.w, fp.row + fp.h).y;
+        st.rect = { x: left, y: top - draw.height, w: right - left, h: bottom - top + draw.height };
+        continue;
+      }
       const w = (fp.w + fp.h) * HW * draw.width;
       const h = w / assets.aspect(st.def.art);
       const cx = iso.corner(fp.col + fp.w / 2, fp.row + fp.h / 2).x;
@@ -54,53 +67,135 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     }
   };
   const stationById = (id) => stations.find((s) => s.id === id);
+  const spotOf = (stationId, name) => {
+    const def = stationById(stationId).def;
+    return !name || name === 'spot' ? def.spot : def.spots[name];
+  };
 
-  const worker = new Agent({ id: WORKER.id, name: WORKER.name, speed: WORKER.speed });
-  worker.kind = 'worker';
-  worker.phase = 'idle';
-  worker.loops = 0; // completed idle → Pit Bay → idle rounds
-  worker.placeAtTile(grid, WORKER.idle.col, WORKER.idle.row);
-  const workerRect = () => {
-    const f = iso.toWorld(worker.x, worker.y);
-    const h = WORKER.height;
-    const w = h * assets.aspect(WORKER.art);
+  // --- the workers -------------------------------------------------------------------
+  // One Agent per staff member with a routine. Phases: idle → toWork → working → back → idle, or (a rest stop, or
+  // Energy below REST.goBelowEnergy) idle → toRest → resting → back. Arrivals move them on; timers run on stateTime.
+  const workers = Object.entries(ROUTINES).map(([staffId, routine]) => {
+    const a = new Agent({ id: staffId, speed: WALK.speed });
+    a.kind = 'worker';
+    a.staffId = staffId;
+    a.routine = routine;
+    a.phase = 'idle';
+    a.stop = null; // the stop being walked to / used: { at, spot, sec, activity }
+    a.nextStop = 0; // index of the next routine stop
+    a.loops = 0; // completed trips (back at the idle spot)
+    a.placeAtTile(grid, routine.idle.col, routine.idle.row);
+    return a;
+  });
+  const workerById = (id) => workers.find((a) => a.staffId === id);
+  const worker = workerById('MEC01'); // Tessa: the Milestone 1 loop (the M1 checks follow her)
+  const staffOf = (a) => team.get(a.staffId);
+  const workerRect = (a) => {
+    const f = iso.toWorld(a.x, a.y);
+    const h = WALK.height;
+    const w = h * assets.aspect(staffOf(a)?.art ?? 'staff_mec01');
     return { x: f.x - w / 2, y: f.y - h + HH * 0.25, w, h };
   };
 
-  // Tessa's loop: idle spot → Pit Bay → work a few seconds → back. Arrivals move her on; timers run on stateTime.
-  const phaseLog = []; // recent phase changes (tests / debug)
+  const phaseLog = []; // Tessa's recent phase changes (tests / debug)
   let simTime = 0; // game seconds since the garage started (scaled by the speed)
-  const setPhase = (phase) => {
-    worker.phase = phase;
-    phaseLog.push({ phase, t: +simTime.toFixed(2), teleports: worker.teleports });
-    if (phaseLog.length > 40) phaseLog.shift();
-    debug?.log(`Tessa: ${phase}`);
+  const setPhase = (a, phase) => {
+    a.phase = phase;
+    if (a === worker) {
+      phaseLog.push({ phase, t: +simTime.toFixed(2), teleports: a.teleports });
+      if (phaseLog.length > 40) phaseLog.shift();
+    }
+    debug?.log(`${staffOf(a)?.name.split(' ')[0] ?? a.staffId}: ${phase}`);
   };
-  function updateWorker(dt) {
-    worker.update(dt, grid);
-    if (worker.phase === 'idle' && worker.stateTime >= WORKER.idleSec) {
-      const spot = stationById(WORKER.workAt).def.spot;
-      setPhase('toWork');
-      worker.walkTo(grid, spot.col, spot.row, () => {
-        setPhase('working');
-        worker.setState('working');
-      });
-    } else if (worker.phase === 'working' && worker.stateTime >= WORKER.workSec) {
-      setPhase('back');
-      worker.walkTo(grid, WORKER.idle.col, WORKER.idle.row, () => {
-        worker.loops++;
-        setPhase('idle');
-      });
+  const goTo = (a, stop, walkPhase, atPhase) => {
+    const spot = spotOf(stop.at, stop.spot);
+    a.stop = stop;
+    setPhase(a, walkPhase);
+    a.walkTo(grid, spot.col, spot.row, () => {
+      setPhase(a, atPhase);
+      a.setState(atPhase === 'resting' ? 'resting' : 'working');
+    });
+  };
+  const goBack = (a) => {
+    setPhase(a, 'back');
+    a.walkTo(grid, a.routine.idle.col, a.routine.idle.row, () => {
+      a.loops++;
+      a.stop = null;
+      setPhase(a, 'idle');
+    });
+  };
+  function updateWorker(a, dt) {
+    a.update(dt, grid);
+    const s = staffOf(a);
+    if (!s) return;
+    const r = a.routine;
+    if (a.phase === 'idle' && a.stateTime >= r.idleSec) {
+      if (s.energy < REST.goBelowEnergy) {
+        goTo(a, { at: REST_STATION, spot: r.restSpot, activity: 'resting', untilRested: true }, 'toRest', 'resting');
+      } else {
+        const stop = r.stops[a.nextStop % r.stops.length];
+        a.nextStop = (a.nextStop + 1) % r.stops.length;
+        if (stop.activity === 'resting') goTo(a, stop, 'toRest', 'resting');
+        else goTo(a, stop, 'toWork', 'working');
+      }
+    } else if (a.phase === 'working' || a.phase === 'resting') {
+      const done = a.stop?.untilRested ? s.energy >= REST.backAtEnergy : a.stateTime >= a.stop.sec;
+      if (done) goBack(a);
+    }
+  }
+
+  // What the daily tick counts them as doing (core/StaffSystem planActivity).
+  const activityOf = (staffId) => {
+    const a = workerById(staffId);
+    return a?.phase === 'working' ? 'working' : a?.phase === 'resting' ? 'resting' : 'idle';
+  };
+  const stateText = (staffId) => {
+    const a = workerById(staffId);
+    if (!a) return '';
+    const place = a.stop ? stationById(a.stop.at).def.name : '';
+    return WORKER_STATE_TEXT[a.phase].replace('{place}', place);
+  };
+
+  // Save / load: where everyone is and what they are doing. Someone who was walking sets off again from there.
+  function snapshot() {
+    return Object.fromEntries(
+      workers.map((a) => [a.staffId, { x: +a.x.toFixed(1), y: +a.y.toFixed(1), phase: a.phase, stop: a.stop, nextStop: a.nextStop, stateTime: +a.stateTime.toFixed(2), loops: a.loops }]),
+    );
+  }
+  function restore(snap) {
+    for (const a of workers) {
+      const w = snap?.[a.staffId];
+      if (!w) continue;
+      a.x = w.x;
+      a.y = w.y;
+      a.path = [];
+      a.nextStop = w.nextStop ?? 0;
+      a.loops = w.loops ?? 0;
+      a.stop = w.stop ?? null;
+      a.phase = w.phase;
+      const t = a.tile(grid);
+      if (!t || grid.isBlocked(t.col, t.row)) a.placeAtTile(grid, a.routine.idle.col, a.routine.idle.row);
+      if ((w.phase === 'toWork' || w.phase === 'toRest') && a.stop) goTo(a, a.stop, w.phase, w.phase === 'toRest' ? 'resting' : 'working');
+      else if (w.phase === 'back') goBack(a);
+      else if ((w.phase === 'working' || w.phase === 'resting') && a.stop) {
+        a.setState(w.phase);
+        a.stateTime = w.stateTime ?? 0;
+      } else {
+        a.phase = 'idle';
+        a.stop = null;
+        a.setState('idle');
+        a.stateTime = w.stateTime ?? 0;
+      }
     }
   }
 
   // Tapping: everything is hit-tested where it is drawn (projected), nearest-to-viewer first.
   const selection = new Selection(bus, {
-    boundsOf: (item) => (item.kind === 'worker' ? workerRect() : item.rect),
-    depthOf: (item) => (item.kind === 'worker' ? worker.x + worker.y : item.depth),
+    boundsOf: (item) => (item.kind === 'worker' ? workerRect(item) : item.rect),
+    depthOf: (item) => depthOf(item),
   });
   stations.forEach((s) => selection.add(s));
-  selection.add(worker);
+  workers.forEach((a) => selection.add(a));
   const menuKind = (item) => (item.kind === 'worker' ? 'worker' : item.id);
 
   // --- Build Mode (placeholder) ------------------------------------------------
@@ -146,6 +241,8 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     iso,
     stations,
     worker,
+    workers,
+    workerById,
     selection,
     taps,
     phaseLog,
@@ -159,9 +256,15 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     bottomBar,
     doneRect,
 
-    // Screen point at the middle of a station's art / Tessa (tests).
+    activityOf,
+    stateText,
+    snapshot,
+    restore,
+
+    // Screen point at the middle of a station's art or a worker ('worker' = Tessa, or a staff id) (tests).
     screenPointOf(id) {
-      const r = id === 'worker' ? workerRect() : stationById(id).rect;
+      const a = id === 'worker' ? worker : workerById(id);
+      const r = a ? workerRect(a) : stationById(id).rect;
       return camera.worldToScreen(r.x + r.w / 2, r.y + r.h * 0.6);
     },
     // Screen point at the centre of a floor cell (tests).
@@ -190,6 +293,7 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
       active = true;
       if (!stations[0].rect) {
         placeStations(); // needs the art's shapes, so after loading
+        restore(team.garageState);
         screen.resize();
         resetView();
       } else screen.resize(); // the window may have changed while another screen was up
@@ -211,12 +315,13 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
       camera.centerOn(cx, cy);
     },
 
-    // Fixed step: Tessa walks and works at the game speed (stops while the game is paused).
-    update(dt) {
+    // Fixed step, every step whichever screen shows: everyone walks, works and rests at the game speed
+    // (stops while the game is paused).
+    tick(dt) {
       if (clock.paused) return;
       const gdt = dt * clock.speed;
       simTime += gdt;
-      updateWorker(gdt);
+      for (const a of workers) updateWorker(a, gdt);
     },
 
     onDown(p) {
@@ -258,11 +363,11 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
       const w = camera.screenToWorld(p.x, p.y);
       const picked = selection.handleTap(w.x, w.y);
       if (picked) openMenu(menuKind(picked), picked);
-      taps.push({ x: p.x, y: p.y, picked: picked ? (picked.kind === 'worker' ? 'worker' : picked.id) : null });
+      taps.push({ x: p.x, y: p.y, picked: picked ? (picked.kind === 'worker' ? picked.staffId : picked.id) : null });
       if (taps.length > 50) taps.shift();
     },
 
-    // Long press on empty floor → Build Mode. On a station or Tessa it just opens their sheet.
+    // Long press on empty floor → Build Mode. On a station or a worker it just opens their sheet.
     onHold(p) {
       if (gestures.multiTouch || gestures.fingers > 1 || buildMode || onUi(p)) return;
       const w = camera.screenToWorld(p.x, p.y);
@@ -278,17 +383,19 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
       room.render(ctx, 0, 0);
       if (buildMode) drawGridLines(ctx);
       drawSelectionMark(ctx);
-      // Stations and Tessa, back to front. Sprites are cached at full-zoom size so they stay sharp when zoomed.
-      const items = [...stations, worker].sort((a, b) => depthOf(a) - depthOf(b));
+      // Stations and workers, back to front. Sprites are cached at full-zoom size so they stay sharp when zoomed.
+      const items = [...stations, ...workers].sort((a, b) => depthOf(a) - depthOf(b));
       assets.detail = GARAGE.zoom.max;
       for (const it of items) {
         if (it.kind === 'worker') {
-          const r = workerRect();
-          assets.draw(ctx, WORKER.art, r.x, r.y, r.w, r.h);
-        } else assets.draw(ctx, it.def.art, it.rect.x, it.rect.y, it.rect.w, it.rect.h);
+          const r = workerRect(it);
+          assets.draw(ctx, staffOf(it)?.art, r.x, r.y, r.w, r.h);
+        } else if (it.def.art) assets.draw(ctx, it.def.art, it.rect.x, it.rect.y, it.rect.w, it.rect.h);
+        else drawRestSpot(ctx, it.def);
       }
       assets.detail = 1;
       camera.restore(ctx);
+      if (!buildMode) drawTags(ctx);
 
       // Build Mode's banner takes the top bar's place; the bottom bar steps aside until Done.
       if (buildMode) drawBuildBanner(ctx);
@@ -299,7 +406,7 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     },
   };
 
-  const depthOf = (it) => (it.kind === 'worker' ? worker.x + worker.y : it.depth);
+  const depthOf = (it) => (it.kind === 'worker' ? it.x + it.y : it.depth);
 
   // --- drawing -------------------------------------------------------------------
   // Floor and the two back walls (with the team stripes), drawn once into the cached layer (world units).
@@ -334,7 +441,7 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
   function drawSelectionMark(ctx) {
     const it = selection.selected;
     if (!it || !sheet.active) return;
-    const pts = it.kind === 'worker' ? cellOutline(worker.tile(grid)) : iso.outline(it.def.fp.col, it.def.fp.row, it.def.fp.w, it.def.fp.h);
+    const pts = it.kind === 'worker' ? cellOutline(it.tile(grid)) : iso.outline(it.def.fp.col, it.def.fp.row, it.def.fp.w, it.def.fp.h);
     if (!pts) return;
     diamond(ctx, pts);
     ctx.fillStyle = C.glow;
@@ -344,6 +451,76 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     ctx.stroke();
   }
   const cellOutline = (t) => (t ? iso.outline(t.col, t.row) : null);
+
+  // The placeholder rest spot: a padded bench on its footprint, drawn as a 3/4 box (top, left and right faces).
+  function drawRestSpot(ctx, def) {
+    const { col, row, w, h } = def.fp;
+    const up = (p) => ({ x: p.x, y: p.y - def.draw.height });
+    const [t, r, b, l] = iso.outline(col, row, w, h);
+    ctx.lineWidth = 3 / camera.zoom;
+    ctx.strokeStyle = C.outline;
+    for (const [pts, fill] of [
+      [[l, b, up(b), up(l)], L.benchSide],
+      [[b, r, up(r), up(b)], L.benchFront],
+      [[up(t), up(r), up(b), up(l)], L.benchTop],
+    ]) {
+      diamond(ctx, pts);
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
+  // Name tags and status icons over each worker, in screen space (so they stay readable at any zoom), kept inside
+  // the garage's view between the bars. Tags that would overlap (people standing together) stack upwards.
+  // A placeholder station drawn by code gets its name under it, so it's clear what it is.
+  function drawTags(ctx) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(camera.viewX, camera.viewY, camera.viewW, camera.viewH);
+    ctx.clip();
+    const tagH = 44;
+    const chip = (label, x, y, w) => {
+      ctx.fillStyle = C.chip;
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, tagH, tagH / 2);
+      ctx.fill();
+      ctx.fillStyle = C.textOnDark;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, x + w / 2, y + tagH / 2 + 1);
+    };
+    ctx.font = font(S.small, true);
+    for (const st of stations.filter((x) => !x.def.art)) {
+      const foot = camera.worldToScreen(st.rect.x + st.rect.w / 2, st.rect.y + st.rect.h);
+      const tw = ctx.measureText(st.def.name).width + 28;
+      chip(st.def.name, foot.x - tw / 2, foot.y + 8, tw);
+    }
+    const placed = [];
+    // Nearest the viewer first, so they keep their tag right above their head.
+    for (const a of [...workers].sort((p, q) => depthOf(q) - depthOf(p))) {
+      const s = staffOf(a);
+      if (!s) continue;
+      const r = workerRect(a);
+      const head = camera.worldToScreen(r.x + r.w / 2, r.y);
+      const label = s.name.split(' ')[0];
+      ctx.font = font(S.small, true);
+      const tw = ctx.measureText(label).width + 28;
+      const icons = statusIconsOf(s);
+      const iconS = 46;
+      const total = tw + icons.length * (iconS + 6);
+      const box = { x: head.x - total / 2, y: head.y - tagH - 8, w: total, h: tagH };
+      while (placed.some((p) => box.x < p.x + p.w + 6 && p.x < box.x + box.w + 6 && box.y < p.y + p.h + 4 && p.y < box.y + box.h + 4)) box.y -= tagH + 6;
+      placed.push(box);
+      chip(label, box.x, box.y, tw);
+      let x = box.x + tw + 6;
+      for (const key of icons) {
+        assets.drawContained(ctx, key, { x, y: box.y + (tagH - iconS) / 2, w: iconS, h: iconS });
+        x += iconS + 6;
+      }
+    }
+    ctx.restore();
+  }
 
   function drawBuildBanner(ctx) {
     const b = bannerRect();
