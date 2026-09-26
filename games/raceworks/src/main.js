@@ -1,6 +1,7 @@
 // RACEWORKS — boot.
 // Starts the shared series engine from core/ and opens the garage. Add ?debug=1 for the FPS/state overlay,
-// ?screen=test for the Milestone 0 scaling/tap test screen.
+// ?screen=test for the Milestone 0 scaling/tap test screen. Debug badge check: ?debug=1 then B cycles a red badge
+// through the bottom-bar buttons (or ?debug=1&badge=staff on a phone).
 import { THEME, font } from '../../../core/Theme.js';
 import { EventBus } from '../../../core/EventBus.js';
 import { Rng } from '../../../core/Rng.js';
@@ -12,8 +13,12 @@ import { AssetManager } from '../../../core/AssetManager.js';
 import { FixedStepLoop } from '../../../core/FixedStepLoop.js';
 import { DebugOverlay } from '../../../core/DebugOverlay.js';
 import { BottomSheet } from '../../../core/ui/BottomSheet.js';
+import { createTopBar } from '../../../core/ui/TopBar.js';
+import { createBottomBar } from '../../../core/ui/BottomBar.js';
+import { Clock } from '../../../core/Clock.js';
 import { drawButton, hitRect, setPressPoint, clearPress } from '../../../core/ui/Button.js';
 import { ASSETS } from '../data/assets.js';
+import { BOTTOM_SLOTS, TOP_BAR } from '../data/home.js';
 import { createBackNav } from './app/backNav.js';
 import { createGarageScreen } from './screens/GarageScreen.js';
 import { createTestScreen } from './screens/TestScreen.js';
@@ -26,6 +31,7 @@ const BASE_H = 1920; // 9:16; taller phones grow the height (see Renderer)
 const MAX_H = 2640; // up to 9:22 fills edge to edge; taller still gets thin bars top and bottom
 const START_SCREEN = new URLSearchParams(window.location.search).get('screen') === 'test' ? 'test' : 'garage';
 const TEST_SCREENS = ['test', 'route']; // the Milestone 0 screens: pause button, full debug box
+const PARAMS = new URLSearchParams(window.location.search);
 
 const bus = new EventBus();
 const rng = new Rng('raceworks-m0');
@@ -77,8 +83,14 @@ bus.on('loop:pause', () => input.reset());
 debug.log(`seeded rng check: ${rng.int(0, 9999)} (same every reload)`);
 
 // ---------------------------------------------------------------------------
-// Pause: the test screen's button pauses/resumes the fixed-step loop; P / Space anywhere; while paused any tap
-// resumes. Hiding the app pauses too (core). The real Pause / 1× / 2× / 4× buttons come with the top bar (Milestone 2).
+// Game speed (Milestone 2): the top bar's Pause / 1× / 2× / 4× drive a core Clock. Only its speed is used for now —
+// the calendar is not ticked yet (the date stays Year 1 · Month 1 · Day 1), so nothing here calls clock.update().
+const clock = new Clock({ bus, speeds: TOP_BAR.speeds });
+bus.on('clock:speed', ({ speed }) => debug.log(speed ? `speed ${speed}×` : 'game paused'));
+
+// ---------------------------------------------------------------------------
+// Test-screen pause: the M0 button pauses/resumes the whole fixed-step loop; while paused any tap resumes. Hiding the
+// app pauses too (core). P / Space: the game's Pause on the garage, the loop pause on the test screens.
 const pauseButton = () => layout.anchor('top-right', 240, THEME.button.minH, 80);
 router.modal = {
   get active() {
@@ -98,10 +110,20 @@ router.layers.push(
       return true;
     },
   },
-  { get active() { return sheet.active; }, handleInput: (hook, p) => sheet.handleInput(hook, p) },
+  {
+    get active() {
+      return sheet.active;
+    },
+    // The top bar stays usable over an open sheet: Inbox / Help / the speeds reach the garage (a new sheet replaces this one).
+    handleInput: (hook, p) => (hook === 'onTap' && router.currentName === 'garage' && !garage.buildMode && garage.topBar.contains(p) ? false : sheet.handleInput(hook, p)),
+  },
 );
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'p' || e.key === 'P' || e.key === ' ') loop.togglePause();
+  if (e.key === 'p' || e.key === 'P' || e.key === ' ') {
+    if (router.currentName === 'garage' && !loop.paused) clock.togglePause();
+    else loop.togglePause();
+  }
+  if ((e.key === 'b' || e.key === 'B') && debug.enabled) cycleDebugBadge();
 });
 
 function drawPaused(ctx) {
@@ -122,12 +144,46 @@ function drawPaused(ctx) {
 }
 
 // ---------------------------------------------------------------------------
-// Sheets. The garage's stations and Tessa (one registry for world taps and the shortcut), and the M0 test sheet.
-const menus = createGarageMenus({ garage: () => garage });
+// Sheets: the stations, Tessa, the five bottom-bar slots, Inbox and Help — one registry, one sheet (a new one
+// replaces the open one). Plus the M0 test sheet.
 const openMenu = (kind) => {
   const build = menus.for(kind);
   if (build) sheet.open(build);
 };
+const menus = createGarageMenus({ garage: () => garage, open: openMenu });
+
+// ---------------------------------------------------------------------------
+// The shared bars (core/ui), filled with RACEWORKS content.
+const badges = Object.fromEntries(BOTTOM_SLOTS.map((s) => [s.id, null])); // slot → badge text (data; nothing sets them yet)
+const topBar = createTopBar({
+  layout,
+  assets,
+  clock,
+  home: true,
+  stats: () => [
+    { icon: TOP_BAR.icons.credits, iconSize: 60, text: TOP_BAR.credits.toLocaleString('en-US'), gap: 14 },
+    { icon: TOP_BAR.icons.tokens, text: String(TOP_BAR.tokens) },
+    { text: `Rank ${TOP_BAR.rank}`, color: COL.actionDark },
+  ],
+  onStats: () => openMenu('money'),
+  onInbox: () => openMenu('inbox'),
+  onHelp: () => openMenu('help'),
+});
+const bottomBar = createBottomBar({
+  layout,
+  assets,
+  items: BOTTOM_SLOTS.map((s) => ({ id: s.id, label: s.label, icon: s.icon, badge: () => badges[s.id] })),
+  open: openMenu,
+});
+// Debug: B moves one red badge along the five buttons, then clears it; ?badge=<slot> starts with one showing.
+function cycleDebugBadge() {
+  const ids = BOTTOM_SLOTS.map((s) => s.id);
+  const i = ids.findIndex((id) => badges[id]);
+  ids.forEach((id) => (badges[id] = null));
+  if (i < ids.length - 1) badges[ids[i + 1]] = '!';
+  debug.log(`debug badge: ${ids.find((id) => badges[id]) ?? 'off'}`);
+}
+if (debug.enabled && badges[PARAMS.get('badge')] !== undefined) badges[PARAMS.get('badge')] = '!';
 const testSheet = () => ({
   title: 'Test sheet',
   subtitle: 'Placeholder bottom sheet for Milestone 0.',
@@ -184,10 +240,10 @@ const bootScreen = {
   },
 };
 
-const garage = createGarageScreen({ renderer, layout, assets, bus, sheet, openMenu, debug });
+const garage = createGarageScreen({ renderer, layout, assets, bus, sheet, openMenu, clock, topBar, bottomBar, debug });
 
 // Test hook for automated checks (debug builds only).
-if (debug.enabled) window.__rw = { renderer, layout, input, loop, router, assets, sheet, garage, taps: [] };
+if (debug.enabled) window.__rw = { renderer, layout, input, loop, router, assets, sheet, garage, clock, badges, cycleDebugBadge, taps: [] };
 
 router
   .register('boot', bootScreen)

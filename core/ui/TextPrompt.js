@@ -64,6 +64,47 @@ export class TextPrompt {
     el.select();
   }
 
+  // A multi-line box (Milestone 22 save inspector: export / import a save as text). readOnly: the text is selected for
+  // copying. Tapping away (blur) finishes; onDone gets the text.
+  openArea({ rect, value = '', readOnly = false, placeholder = '', onDone = () => {} }) {
+    this.close();
+    const r = this.renderer;
+    const s = r.scale;
+    const el = document.createElement('textarea');
+    el.value = value;
+    el.readOnly = readOnly;
+    el.placeholder = placeholder;
+    el.spellcheck = false;
+    el.style.cssText = [
+      'position:fixed',
+      `left:${r.cssBox.x + rect.x * s}px`,
+      `top:${r.cssBox.y + rect.y * s}px`,
+      `width:${rect.w * s}px`,
+      `height:${rect.h * s}px`,
+      'box-sizing:border-box',
+      `padding:${12 * s}px`,
+      `font:${Math.max(11, 24 * s)}px ui-monospace, Consolas, monospace`,
+      `color:${THEME.color.text}`,
+      `background:${THEME.color.panel}`,
+      `border:${Math.max(2, 5 * s)}px solid ${THEME.color.progress}`,
+      `border-radius:${20 * s}px`,
+      'z-index:10',
+    ].join(';');
+    let settled = false;
+    el.addEventListener('keydown', (e) => e.stopPropagation());
+    el.addEventListener('blur', () => {
+      if (settled) return;
+      settled = true;
+      const v = el.value;
+      this.close();
+      onDone(v);
+    });
+    document.body.appendChild(el);
+    this.el = el;
+    el.focus();
+    if (readOnly) el.select();
+  }
+
   close() {
     const el = this.el;
     this.el = null;

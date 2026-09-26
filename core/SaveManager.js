@@ -1,4 +1,6 @@
-// One save slot with a version number. Every load goes through migrate() so old saves
+import { migrateSave } from './SaveStore.js';
+// One save slot with a version number (the pre-Milestone 22 single-key slot; the game now uses core/SaveStore.js
+// SaveSlot, which reads this layout too). Every load goes through migrate() so old saves
 // are upgraded step by step (bible §37.6). The game decides what goes inside `data`.
 //
 //   migrations: { 1: (record) => record at version 2, 2: (record) => version 3, ... }
@@ -32,16 +34,7 @@ export class SaveManager {
   }
 
   migrate(raw) {
-    let record = raw;
-    let v = record.saveVersion ?? 0;
-    if (v > this.version) throw new Error(`Save version ${v} is newer than this game (${this.version})`);
-    while (v < this.version) {
-      const step = this.migrations[v];
-      if (!step) throw new Error(`No save migration from version ${v}`);
-      record = { ...step(record), saveVersion: v + 1 };
-      v++;
-    }
-    return record;
+    return migrateSave(raw, { version: this.version, migrations: this.migrations });
   }
 
   async has() {

@@ -12,6 +12,15 @@ export class AssetManager {
     this.missing = new Map(); // key → src that failed
     this.sprites = new SpriteCache();
     this.detail = 1; // extra resolution for world drawing under a zoomed camera (see sprite())
+    this.fallbacks = new Map(); // key → { draw, aspect }: a stand-in drawn while the file is missing
+  }
+
+  // A readable stand-in for art that is not drawn yet (a labelled block, a simple figure…). While the file is
+  // missing, draw(ctx, x, y, w, h) is called wherever the image would go, and aspect() reports its shape; once
+  // the real file loads, the image wins, with no code change. Keys without one get the pink placeholder box.
+  setFallback(key, draw, { aspect = 1 } = {}) {
+    this.fallbacks.set(key, { draw, aspect });
+    return this;
   }
 
   // manifest: { key: 'path/to/file.png', ... }. Always resolves, even if files fail.
@@ -57,10 +66,10 @@ export class AssetManager {
     return this.images.get(key) || null;
   }
 
-  // Width ÷ height of an image (1 if it is missing).
+  // Width ÷ height of an image (its fallback's shape, or 1, if it is missing).
   aspect(key) {
     const img = this.images.get(key);
-    return img ? img.naturalWidth / img.naturalHeight : 1;
+    return img ? img.naturalWidth / img.naturalHeight : (this.fallbacks.get(key)?.aspect ?? 1);
   }
 
   // Real screen pixels per logical unit; call after every resize (clears the size cache).
@@ -117,6 +126,13 @@ export class AssetManager {
   }
 
   drawPlaceholder(ctx, label, x, y, w, h) {
+    const fb = this.fallbacks.get(label);
+    if (fb) {
+      ctx.save();
+      fb.draw(ctx, x, y, w, h);
+      ctx.restore();
+      return;
+    }
     ctx.save();
     ctx.fillStyle = '#3a1d3f';
     ctx.fillRect(x, y, w, h);

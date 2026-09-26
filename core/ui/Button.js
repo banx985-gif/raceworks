@@ -47,7 +47,7 @@ export function drawButton(ctx, r, label, opts = {}) {
   // Layout audit (tests only): every button drawn, in screen units.
   if (globalThis.__uiAudit) {
     const m = ctx.getTransform();
-    globalThis.__uiAudit.buttons.push({ label, h: r.h * (m.d / (globalThis.__uiAudit.ps || 1)), w: r.w * (m.a / (globalThis.__uiAudit.ps || 1)), x: (r.x * m.a + m.e) / (globalThis.__uiAudit.ps || 1), y: (r.y * m.d + m.f) / (globalThis.__uiAudit.ps || 1) });
+    globalThis.__uiAudit.buttons.push({ label, h: r.h * (m.d / (globalThis.__uiAudit.ps || 1)), w: r.w * (m.a / (globalThis.__uiAudit.ps || 1)), x: (r.x * m.a + m.e) / (globalThis.__uiAudit.ps || 1), y: (r.y * m.d + m.f) / (globalThis.__uiAudit.ps || 1), clipped: !!ctx.__clipDepth }); // clipped: drawn inside a clip (a scroll panel)
   }
   const { disabled = false, locked = false, badge = null } = opts;
   const accent = opts.accent && opts.accent.startsWith('#') ? opts.accent : C.action;

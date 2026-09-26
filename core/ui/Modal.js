@@ -5,6 +5,8 @@
 //     a button's onTap runs after the dialog closes (so it can open another one)
 //   dialog.confirm({ title, body, yes, no = 'Cancel', danger, onYes, onNo })
 //   dialog.active · close() · onTap(p) · onBack() · render(ctx) · buttonRect(id)
+//   A button with hold: seconds must be pressed and held that long (it fills as it is held) — for things that
+//   cannot be undone (Milestone 22 "Reset everything"). onDown / onUp / update drive it.
 import { THEME, font, lineH } from '../Theme.js';
 import { drawButton, hitRect } from './Button.js';
 import { card, text, wrapLines } from './Kit.js';
@@ -22,6 +24,7 @@ export class Dialog {
     this.assets = assets;
     this.spec = null;
     this.t = 0;
+    this.holding = null; // { id, t }
   }
 
   get active() {
@@ -31,6 +34,7 @@ export class Dialog {
   show(spec) {
     this.spec = { dismissible: true, buttons: [], ...spec };
     this.t = 0;
+    this.holding = null;
     return this;
   }
 
@@ -52,7 +56,32 @@ export class Dialog {
   }
 
   update(dt) {
-    if (this.spec) this.t += dt;
+    if (!this.spec) return;
+    this.t += dt;
+    if (this.holding) {
+      this.holding.t += dt;
+      const b = this.spec.buttons.find((x) => x.id === this.holding.id);
+      if (b && this.holding.t >= b.hold) {
+        this.holding = null;
+        this.close();
+        b.onTap?.();
+      }
+    }
+  }
+
+  _buttonAt(p) {
+    const L = this._layout();
+    return L.buttons.find(({ r }) => hitRect(p, { x: L.box.x + r.x, y: L.box.y + r.y, w: r.w, h: r.h }))?.b ?? null;
+  }
+
+  onDown(p) {
+    if (!this.spec) return;
+    const b = this._buttonAt(p);
+    if (b?.hold && !b.disabled) this.holding = { id: b.id, t: 0 };
+  }
+
+  onUp() {
+    this.holding = null; // let go too soon: nothing happens
   }
 
   _layout() {
@@ -92,7 +121,7 @@ export class Dialog {
     const L = this._layout();
     for (const { b, r } of L.buttons) {
       if (hitRect(p, { x: L.box.x + r.x, y: L.box.y + r.y, w: r.w, h: r.h })) {
-        if (b.disabled) return;
+        if (b.disabled || b.hold) return; // a hold button only works by holding it
         this.close();
         b.onTap?.();
         return;
@@ -128,6 +157,13 @@ export class Dialog {
     for (const { b: bt, r } of L.buttons) {
       const rr = { x: b.x + r.x, y: b.y + r.y, w: r.w, h: r.h };
       drawButton(ctx, rr, bt.sub ? '' : bt.label, { accent: bt.accent, disabled: bt.disabled, font: font(S.button, true) });
+      if (bt.hold && this.holding?.id === bt.id) {
+        ctx.save();
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = C.outline;
+        ctx.fillRect(rr.x + 6, rr.y + 6, (rr.w - 12) * Math.min(1, this.holding.t / bt.hold), rr.h - 20);
+        ctx.restore();
+      }
       if (bt.sub) {
         text(ctx, bt.label, rr.x + rr.w / 2, rr.y + 26, { size: S.button, bold: true, align: 'center', color: bt.disabled ? C.textFaint : C.textOnAction, maxWidth: rr.w - 30 });
         text(ctx, bt.sub, rr.x + rr.w / 2, rr.y + 26 + lineH(S.button, 1.2), { size: S.small, bold: true, align: 'center', color: bt.disabled ? C.textFaint : C.textOnAction, maxWidth: rr.w - 30 });

@@ -3,7 +3,7 @@
 //   drawToasts(ctx, toasts, { x, y, w, life, drawIcon(ctx, entry, rect), accent(entry) → colour })
 // Stacks downwards from (x, y) (anchor: 'bottom' stacks upwards from y instead). A toast whose t.more > 0 adds a line
 // "+N more in the Inbox" (moreText(n) changes the words). Returns the height used.
-import { THEME, font } from '../Theme.js';
+import { THEME, font as themeFont } from '../Theme.js';
 const COL = THEME.color;
 const H = 104;
 const GAP = 14;
@@ -42,16 +42,16 @@ export function drawToasts(ctx, toasts, { x, y, w, life = 3.6, drawIcon = null, 
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = accent(t.entry);
-    ctx.font = font(THEME.size.body, true);
+    ctx.font = themeFont(THEME.size.body, true);
     ctx.fillText(t.entry.title, tx, r.y + 34, r.x + r.w - 20 - tx);
     if (t.entry.body) {
       ctx.fillStyle = COL.text;
-      ctx.font = font(THEME.size.small);
+      ctx.font = themeFont(THEME.size.small);
       ctx.fillText(t.entry.body, tx, r.y + 74, r.x + r.w - 20 - tx);
     }
     if (t.more > 0) {
       ctx.fillStyle = COL.textMuted;
-      ctx.font = font(THEME.size.small, true);
+      ctx.font = themeFont(THEME.size.small, true);
       ctx.fillText(moreText(t.more), tx, r.y + H + 12, r.x + r.w - 20 - tx);
     }
     ctx.restore();

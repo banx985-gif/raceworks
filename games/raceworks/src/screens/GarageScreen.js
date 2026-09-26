@@ -1,14 +1,16 @@
-// The garage (Milestone 1): the home screen. A small room on a hidden grid, seen in the 3/4 "dollhouse" view,
-// with the Pit Bay, the Strategy Desk and Tessa walking her loop. Drag pans, pinch/wheel zooms (clamped to the room),
-// tapping a station or Tessa opens her sheet, the Pit Bay shortcut opens the same sheet, and a long press on empty
-// floor enters the placeholder Build Mode.
+// The garage (Milestones 1–2): the home screen. A small room on a hidden grid, seen in the 3/4 "dollhouse" view,
+// with the Pit Bay, the Strategy Desk and Tessa walking her loop, between the shared top bar and five-button bottom
+// bar (core/ui). Drag pans, pinch/wheel zooms (clamped to the room, in the space between the bars), tapping a station
+// or Tessa opens her sheet, and a long press on empty floor enters the placeholder Build Mode.
+// Tessa's time runs at the top bar's speed (Pause / 1× / 2× / 4×).
 //
 // Plan space (grid, pathing, Tessa's position) is flat; only drawing and tapping go through the IsoProjection.
 import { THEME, font } from '../../../../core/Theme.js';
 import { Grid } from '../../../../core/Grid.js';
 import { IsoProjection } from '../../../../core/IsoProjection.js';
 import { Camera } from '../../../../core/Camera.js';
-import { PinchZoom } from '../../../../core/PinchZoom.js';
+import { WorldGestures } from '../../../../core/WorldGestures.js';
+import { drawIsoRoom, isoPath as diamond } from '../../../../core/IsoRoom.js';
 import { CachedLayer } from '../../../../core/CachedLayer.js';
 import { Agent } from '../../../../core/Agent.js';
 import { Selection } from '../../../../core/Selection.js';
@@ -19,7 +21,7 @@ const C = THEME.color;
 const S = THEME.size;
 const L = GARAGE_LOOK;
 
-export function createGarageScreen({ renderer, layout, assets, bus, sheet, openMenu, debug }) {
+export function createGarageScreen({ renderer, layout, assets, bus, sheet, openMenu, clock, topBar, bottomBar, debug }) {
   const W = renderer.width;
   const { cols, rows, cellSize: CELL, wallH, margin } = GARAGE;
   const { halfW: HW, halfH: HH } = GARAGE.view;
@@ -34,7 +36,6 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
   const camera = new Camera({ viewW: W, viewH: renderer.height, worldW, worldH });
   camera.minZoom = GARAGE.zoom.min;
   camera.maxZoom = GARAGE.zoom.max;
-  const pinch = new PinchZoom(camera);
 
   // --- stations and Tessa ------------------------------------------------------
   const stations = STATIONS.map((def) => {
@@ -68,10 +69,10 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
 
   // Tessa's loop: idle spot → Pit Bay → work a few seconds → back. Arrivals move her on; timers run on stateTime.
   const phaseLog = []; // recent phase changes (tests / debug)
-  let clock = 0; // sim seconds since the garage started
+  let simTime = 0; // game seconds since the garage started (scaled by the speed)
   const setPhase = (phase) => {
     worker.phase = phase;
-    phaseLog.push({ phase, t: +clock.toFixed(2), teleports: worker.teleports });
+    phaseLog.push({ phase, t: +simTime.toFixed(2), teleports: worker.teleports });
     if (phaseLog.length > 40) phaseLog.shift();
     debug?.log(`Tessa: ${phase}`);
   };
@@ -113,13 +114,18 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     return { x: b.x + b.w - 250, y: b.y + (b.h - 120) / 2, w: 226, h: 120 };
   };
 
-  // --- the Pit Bay shortcut (the real five-button bar is Milestone 2) --------------
-  const shortcutRect = () => layout.anchor('bottom', 380, 150, 40);
-
   // --- camera helpers ------------------------------------------------------------
+  // The camera sees the space between the two bars, so its clamp keeps every room edge reachable.
+  function fitView() {
+    const top = topBar.rect();
+    const bottom = bottomBar.rect();
+    camera.viewX = 0;
+    camera.viewY = top.y + top.h + 8;
+    camera.setView(W, bottom.y - 8 - camera.viewY);
+  }
   // Start between the stations (the working corner of the room), at the starting zoom.
   function resetView() {
-    camera.setView(W, renderer.height);
+    fitView();
     camera.zoom = GARAGE.zoom.start;
     const xs = stations.flatMap((s) => [s.rect.x, s.rect.x + s.rect.w]);
     const ys = stations.flatMap((s) => [s.rect.y, s.rect.y + s.rect.h]);
@@ -128,20 +134,9 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
 
   // Gestures: one finger pans, two fingers pinch. A gesture that ever had two fingers never becomes a tap or hold.
   let active = false; // only while the garage is the current screen
-  let dragId = null;
-  let multiTouch = false;
+  const gestures = new WorldGestures({ camera, bus, isActive: () => active });
   const overSheet = (p) => sheet.active && p.y >= sheet.rect().y;
-  const onUi = (p) => (!sheet.active && hitRect(p, shortcutRect())) || (buildMode && hitRect(p, bannerRect()));
-  bus.on('input:move', (p) => {
-    if (active && pinch.points.has(p.id)) pinch.move(p.id, p.x, p.y);
-  });
-  const dropGestures = () => {
-    pinch.points.clear();
-    pinch.last = null;
-    camera.endDrag();
-    dragId = null;
-  };
-  bus.on('loop:pause', dropGestures); // Input drops its presses on pause without an 'up'
+  const onUi = (p) => (buildMode ? hitRect(p, bannerRect()) : topBar.contains(p) || bottomBar.contains(p));
 
   const taps = []; // recent taps and what they hit (tests / debug)
 
@@ -157,7 +152,11 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     get buildMode() {
       return buildMode;
     },
-    shortcutRect,
+    get simTime() {
+      return simTime;
+    },
+    topBar,
+    bottomBar,
     doneRect,
 
     // Screen point at the middle of a station's art / Tessa (tests).
@@ -198,7 +197,7 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
 
     exit() {
       active = false;
-      dropGestures();
+      gestures.reset();
       buildMode = false;
     },
 
@@ -208,76 +207,52 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
       // Keep looking at the same spot in the new view.
       const cx = camera.x + camera.visibleW / 2;
       const cy = camera.y + camera.visibleH / 2;
-      camera.setView(W, renderer.height);
+      fitView();
       camera.centerOn(cx, cy);
     },
 
-    // Fixed step: Tessa walks and works (freezes while the game is paused).
+    // Fixed step: Tessa walks and works at the game speed (stops while the game is paused).
     update(dt) {
-      clock += dt;
-      updateWorker(dt);
+      if (clock.paused) return;
+      const gdt = dt * clock.speed;
+      simTime += gdt;
+      updateWorker(gdt);
     },
 
     onDown(p) {
-      if (overSheet(p)) return;
-      pinch.down(p.id, p.x, p.y);
-      if (pinch.points.size === 1) multiTouch = false; // a new gesture starts
-      if (pinch.active) {
-        multiTouch = true;
-        camera.endDrag(); // two fingers: zoom instead of pan
-        dragId = null;
-      }
+      if (overSheet(p) || onUi(p)) return; // the bars and the sheet never pan or pinch the garage
+      gestures.down(p);
     },
 
     onUp(p) {
-      pinch.up(p.id);
-      if (p.id === dragId) {
-        camera.endDrag();
-        dragId = null;
-      }
+      gestures.up(p);
     },
 
     onDragStart(p) {
-      if (pinch.active || dragId !== null || !pinch.points.has(p.id)) return;
-      dragId = p.id;
-      camera.beginDrag(p.startX, p.startY);
-      camera.dragTo(p.x, p.y);
+      gestures.dragStart(p);
     },
 
     onDrag(p) {
-      if (pinch.active || !pinch.points.has(p.id)) return;
-      if (dragId === null) {
-        // One finger left after a pinch: carry on panning from here.
-        dragId = p.id;
-        camera.beginDrag(p.x, p.y);
-      }
-      if (p.id === dragId) camera.dragTo(p.x, p.y);
+      gestures.drag(p);
     },
 
     onDragEnd(p) {
-      if (!p.cancelled) return; // a normal release is handled in onUp
-      pinch.up(p.id);
-      if (p.id === dragId) {
-        camera.endDrag();
-        dragId = null;
-      }
+      gestures.dragEnd(p);
     },
 
     onWheel(p) {
-      camera.zoomBy(p.deltaY > 0 ? 1 / 1.1 : 1.1, p.x, p.y);
+      gestures.wheel(p);
     },
 
     onTap(p) {
-      if (multiTouch) return;
+      if (gestures.multiTouch) return;
       if (buildMode) {
         if (hitRect(p, doneRect())) screen.setBuildMode(false);
         taps.push({ x: p.x, y: p.y, picked: null, build: true });
         return;
       }
-      if (hitRect(p, shortcutRect())) {
-        selection.select(stationById('F02'));
-        openMenu('F02', stationById('F02'));
-        taps.push({ x: p.x, y: p.y, picked: 'shortcut' });
+      if (topBar.handleTap(p) || bottomBar.handleTap(p)) {
+        taps.push({ x: p.x, y: p.y, picked: 'bar' });
         return;
       }
       const w = camera.screenToWorld(p.x, p.y);
@@ -289,7 +264,7 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
 
     // Long press on empty floor → Build Mode. On a station or Tessa it just opens their sheet.
     onHold(p) {
-      if (multiTouch || pinch.points.size > 1 || buildMode || onUi(p)) return;
+      if (gestures.multiTouch || gestures.fingers > 1 || buildMode || onUi(p)) return;
       const w = camera.screenToWorld(p.x, p.y);
       const picked = selection.pick(w.x, w.y);
       if (picked) {
@@ -315,80 +290,30 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
       assets.detail = 1;
       camera.restore(ctx);
 
+      // Build Mode's banner takes the top bar's place; the bottom bar steps aside until Done.
       if (buildMode) drawBuildBanner(ctx);
-      else if (!sheet.active) drawShortcut(ctx);
+      else {
+        topBar.render(ctx);
+        bottomBar.render(ctx);
+      }
     },
   };
 
   const depthOf = (it) => (it.kind === 'worker' ? worker.x + worker.y : it.depth);
 
   // --- drawing -------------------------------------------------------------------
-  function diamond(g, pts) {
-    g.beginPath();
-    g.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) g.lineTo(pts[i].x, pts[i].y);
-    g.closePath();
-  }
-
-  // Floor and the two back walls, drawn once into the cached layer (world units).
+  // Floor and the two back walls (with the team stripes), drawn once into the cached layer (world units).
   function drawRoom(g) {
-    // Floor: checkered concrete tiles with grout lines.
-    for (let r = 0; r < rows; r++)
-      for (let c = 0; c < cols; c++) {
-        diamond(g, iso.outline(c, r));
-        g.fillStyle = (c + r) % 2 ? L.floorA : L.floorB;
-        g.fill();
-      }
-    g.strokeStyle = L.grout;
-    g.lineWidth = 1.5;
-    for (let c = 0; c <= cols; c++) line(g, iso.corner(c, 0), iso.corner(c, rows));
-    for (let r = 0; r <= rows; r++) line(g, iso.corner(0, r), iso.corner(cols, r));
-
-    // Back walls: along row 0 (right) and col 0 (left), with a team stripe.
-    const top = iso.corner(0, 0);
-    const right = iso.corner(cols, 0);
-    const left = iso.corner(0, rows);
-    const up = (p, h) => ({ x: p.x, y: p.y - h });
-    wall(g, top, right, L.wallFace);
-    wall(g, left, top, L.wallSide);
-    for (const [a, b] of [
-      [top, right],
-      [left, top],
-    ]) {
-      diamond(g, [up(a, wallH * 0.52), up(b, wallH * 0.52), up(b, wallH * 0.42), up(a, wallH * 0.42)]);
-      g.fillStyle = L.stripe;
-      g.fill();
-      diamond(g, [up(a, wallH * 0.4), up(b, wallH * 0.4), up(b, wallH * 0.37), up(a, wallH * 0.37)]);
-      g.fillStyle = L.stripe2;
-      g.fill();
-    }
-    // Wall caps and the floor's front edges.
-    g.strokeStyle = L.wallCap;
-    g.lineWidth = 5;
-    g.lineJoin = 'round';
-    g.beginPath();
-    g.moveTo(left.x, left.y);
-    g.lineTo(left.x, left.y - wallH);
-    g.lineTo(top.x, top.y - wallH);
-    g.lineTo(right.x, right.y - wallH);
-    g.lineTo(right.x, right.y);
-    g.stroke();
-    line(g, up(top, 0), up(top, wallH));
-    const bottom = iso.corner(cols, rows);
-    g.beginPath();
-    g.moveTo(left.x, left.y);
-    g.lineTo(bottom.x, bottom.y);
-    g.lineTo(right.x, right.y);
-    g.stroke();
-  }
-
-  function wall(g, a, b, fill) {
-    diamond(g, [a, b, { x: b.x, y: b.y - wallH }, { x: a.x, y: a.y - wallH }]);
-    g.fillStyle = fill;
-    g.fill();
-    g.strokeStyle = C.line;
-    g.lineWidth = 2;
-    g.stroke();
+    drawIsoRoom(g, iso, {
+      cols,
+      rows,
+      wallH,
+      look: { floorA: L.floorA, floorB: L.floorB, grout: L.grout, wallFace: L.wallFace, wallSide: L.wallSide, wallLine: C.line, wallCap: L.wallCap },
+      bands: [
+        { from: 0.42, to: 0.52, color: L.stripe },
+        { from: 0.37, to: 0.4, color: L.stripe2 },
+      ],
+    });
   }
 
   function line(g, a, b) {
@@ -419,19 +344,6 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     ctx.stroke();
   }
   const cellOutline = (t) => (t ? iso.outline(t.col, t.row) : null);
-
-  function drawShortcut(ctx) {
-    const r = shortcutRect();
-    drawButton(ctx, r, '');
-    const face = r.h - THEME.button.lip;
-    const icon = face - 24;
-    assets.drawContained(ctx, STATIONS[0].art, { x: r.x + 20, y: r.y + 12, w: icon, h: icon });
-    ctx.fillStyle = C.textOnAction;
-    ctx.font = font(S.button, true);
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(STATIONS[0].name, r.x + 40 + icon, r.y + face / 2 + 1, r.w - icon - 60);
-  }
 
   function drawBuildBanner(ctx) {
     const b = bannerRect();
