@@ -47,9 +47,25 @@ export const THEME = {
   panel: { radius: 28, line: 4 },
 };
 
-// A canvas font string at a theme size (never below the small minimum).
+// The player's text-size setting (bible §33.2 / Milestone 21): every font the game draws goes through font(), so one
+// number scales all of it. 1 = Normal, 1.15 = Large. Layout sizes (THEME.size) stay logical; screens that stack lines
+// use lineH() so rows grow with the text.
+let scale = 1;
+export function setTextScale(s) {
+  scale = Math.max(1, Math.min(1.5, Number(s) || 1));
+}
+export function textScale() {
+  return scale;
+}
+
+// A canvas font string at a theme size (never below the small minimum), after the text-size setting.
 export function font(size = THEME.size.body, bold = false) {
-  return `${bold ? 'bold ' : ''}${Math.max(THEME.size.small, size)}px ${THEME.family}`;
+  return `${bold ? 'bold ' : ''}${Math.round(Math.max(THEME.size.small, size) * scale)}px ${THEME.family}`;
+}
+
+// A line height for text of this size (with the setting applied): size × lead.
+export function lineH(size = THEME.size.body, lead = 1.3) {
+  return Math.round(Math.max(THEME.size.small, size) * scale * lead);
 }
 
 // Mix a colour towards white (t 0–1): hover / pressed shades from one theme colour.

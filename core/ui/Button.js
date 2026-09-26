@@ -1,4 +1,4 @@
-import { THEME, shade as darken } from '../Theme.js';
+import { THEME, shade as darken, font, textScale } from '../Theme.js';
 // Canvas buttons (logical units) with the six states from bible §33.3:
 //   normal · pressed (finger down on it) · selected · disabled · locked · attention badge.
 // Pressed needs no per-button code: the game calls setPressPoint() on pointer down and clearPress()
@@ -30,10 +30,12 @@ export function isPressed(ctx, r) {
 
 const LIP = THEME.button.lip; // chunky bottom edge; a pressed button sinks onto it
 
-// A button label font: the theme family, never below the button minimum (bible §33.2).
+// A button label font: the theme family, never below the button minimum (bible §33.2), after the text-size setting.
+// A font given by a screen already went through font() (so it carries the setting); the minimum is scaled here.
 function labelFont(f) {
-  const m = /(d+(?:.d+)?)px/.exec(f ?? '');
-  const size = Math.max(THEME.size.button, m ? Number(m[1]) : THEME.size.button);
+  const m = /(\d+(?:\.\d+)?)px/.exec(f ?? '');
+  const min = Math.round(THEME.size.button * textScale());
+  const size = Math.max(min, m ? Number(m[1]) : min);
   return `${/bold/.test(f ?? 'bold') ? 'bold ' : ''}${size}px ${THEME.family}`;
 }
 
@@ -102,7 +104,7 @@ export function drawButton(ctx, r, label, opts = {}) {
 // Orange attention dot with a number or "!" (orange = interaction accent, bible §33.1).
 export function drawBadge(ctx, cx, cy, text) {
   ctx.save();
-  ctx.font = `bold ${THEME.size.small}px ${THEME.family}`;
+  ctx.font = font(THEME.size.small, true);
   const w = Math.max(46, ctx.measureText(text).width + 24);
   roundRect(ctx, cx - w / 2, cy - 23, w, 46, 23);
   ctx.fillStyle = THEME.color.bad;

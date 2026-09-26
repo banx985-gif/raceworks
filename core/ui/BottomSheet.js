@@ -4,12 +4,15 @@
 // A menu is plain data the game builds when it opens (and again every frame while open, so numbers stay live):
 //   { title, subtitle, art (image key), accent,
 //     sections: [ { title?, lines?: [text], buttons?: [{ id, label, sub?, icon?, disabled?, badge?, accent?, onTap }],
-//                   columns? (buttons per row, default 2) } ] }
+//                   columns? (buttons per row, default 2) } ],
+//     tabs?: [{ id, label, badge?, sections }] }   tabs inside the sheet (Milestone 21): a row of tabs under the header,
+//                                                  each with its own sections (then menu.sections is not used)
 // A MenuRegistry maps what was tapped (a station type, 'worker', 'floor'…) to the function that builds its menu.
 //   sheet.open(builder) — builder() → menu        sheet.close()        sheet.active
 //   sheet.handleInput(hook, p) → true when the sheet used it (tap a button, tap above it to close, drag to scroll)
 //   sheet.update(dt)  sheet.render(ctx)           sheet.buttonRect(id) → screen rect (tests, the guide)
-import { THEME, font } from '../Theme.js';
+//   sheet.onBack() → closes it (the back button, Milestone 21)   sheet.setTab(id), sheet.tab, sheet.tabRect(id)
+import { THEME, font, lineH } from '../Theme.js';
 import { drawButton, hitRect } from './Button.js';
 
 export class MenuRegistry {
@@ -38,6 +41,8 @@ const HEAD_H = 230;
 const BTN_H = 124;
 const BTN_SUB_H = 150;
 const GAP = 18;
+const TAB_H = 110;
+const TAB_GAP = 20; // under the tab row
 
 export class BottomSheet {
   constructor({ layout, assets, maxFrac = 0.66, onClose = null }) {
@@ -58,11 +63,46 @@ export class BottomSheet {
     return !!this.builder;
   }
 
-  open(builder) {
+  open(builder, { tab = null } = {}) {
     this.builder = builder;
+    this.tab = tab;
     this.menu = builder();
     this.t = 0;
     this.scrollY = 0;
+  }
+
+  onBack() {
+    if (!this.builder) return false;
+    this.close();
+    return true;
+  }
+
+  // Tabs inside the sheet.
+  get tabs() {
+    return this.menu?.tabs ?? null;
+  }
+
+  get currentTab() {
+    const t = this.tabs;
+    return t ? t.find((x) => x.id === this.tab) ?? t[0] : null;
+  }
+
+  setTab(id) {
+    this.tab = id;
+    this.scrollY = 0;
+  }
+
+  get sections() {
+    return this.currentTab?.sections ?? this.menu?.sections ?? [];
+  }
+
+  tabRect(id) {
+    const t = this.tabs;
+    if (!t) return null;
+    const i = t.findIndex((x) => x.id === id);
+    const r = this.rect();
+    const w = (r.w - PAD * 2 - GAP * (t.length - 1)) / t.length;
+    return i < 0 ? null : { x: r.x + PAD + i * (w + GAP), y: r.y + HEAD_H, w, h: TAB_H };
   }
 
   close() {
@@ -80,14 +120,19 @@ export class BottomSheet {
   // The sheet's rect on screen.
   rect() {
     const sr = this.layout.safeRect;
-    const h = Math.min(sr.h * this.maxFrac, HEAD_H + this.contentH + PAD * 2);
+    const h = Math.min(sr.h * this.maxFrac, HEAD_H + this._tabsH() + this.contentH + PAD * 2);
     const slide = 1 - Math.min(1, this.t / 0.22);
     return { x: sr.x, y: sr.y + sr.h - h + slide * slide * h * 0.6, w: sr.w, h: h + 40 };
   }
 
+  _tabsH() {
+    return this.tabs ? TAB_H + TAB_GAP : 0;
+  }
+
   bodyRect() {
     const r = this.rect();
-    return { x: r.x + PAD, y: r.y + HEAD_H, w: r.w - PAD * 2, h: r.h - HEAD_H - 40 - PAD };
+    const top = HEAD_H + this._tabsH();
+    return { x: r.x + PAD, y: r.y + top, w: r.w - PAD * 2, h: r.h - top - 40 - PAD };
   }
 
   get maxScroll() {
@@ -127,6 +172,12 @@ export class BottomSheet {
       if (p.y < r.y) {
         this.close(); // tap the world above: close
         return true;
+      }
+      for (const t of this.tabs ?? []) {
+        if (hitRect(p, this.tabRect(t.id))) {
+          this.setTab(t.id);
+          return true;
+        }
       }
       const b = this.bodyRect();
       for (const x of this.rects) {
@@ -171,16 +222,16 @@ export class BottomSheet {
     const items = [];
     this.rects = [];
     let y = 0;
-    for (const sec of this.menu?.sections ?? []) {
+    for (const sec of this.sections) {
       if (sec.title) {
         items.push({ kind: 'title', text: sec.title, y });
-        y += 58;
+        y += lineH(S.heading, 1.3);
       }
       for (const line of sec.lines ?? []) {
         const lines = wrap(ctx, typeof line === 'string' ? line : line.text, w, font(S.body));
         for (const l of lines) {
           items.push({ kind: 'line', text: l, y, color: line.color ?? C.text });
-          y += 46;
+          y += lineH(S.body, 1.35);
         }
       }
       if (sec.lines?.length) y += 10;
@@ -253,6 +304,7 @@ export class BottomSheet {
         .forEach((l, i) => ctx.fillText(l, tx, r.y + 124 + i * 44, tw));
     }
     drawButton(ctx, this.closeRect(), '✕', { accent: C.outline });
+    for (const t of this.tabs ?? []) drawButton(ctx, this.tabRect(t.id), t.label, { active: t.id === this.currentTab.id, accent: C.progress, badge: t.badge ?? null, font: font(S.button, true) });
     // Body (scrolls)
     const b = this.bodyRect();
     ctx.save();

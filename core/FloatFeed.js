@@ -71,7 +71,11 @@ export class FloatFeed {
     }
   }
 
+  // Everything waiting, and the numbers already floating (a full screen opened — Milestone 21 fix).
   clear() {
     this.waiting = [];
+    this.lanes.fill(0);
+    this.timer = 0;
+    this.vfx.clearTexts?.('screen');
   }
 }

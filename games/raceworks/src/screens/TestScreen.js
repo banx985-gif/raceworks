@@ -1,4 +1,4 @@
-// Milestone 0 test screen: the RACEWORKS title, a tap marker where you touch, a circle that must stay round,
+// Milestone 0 test screen (?screen=test): the RACEWORKS title, a tap marker where you touch, a circle that must stay round,
 // a spinner that stops while paused, the asset-loader pair (real image + missing file) and the button that
 // opens the placeholder bottom sheet. The red frame and corner labels show clipping; the green dashed box is the safe area.
 import { THEME, font } from '../../../../core/Theme.js';
@@ -7,7 +7,7 @@ import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 const C = THEME.color;
 const S = THEME.size;
 
-export function createHomeScreen({ renderer, layout, assets, openSheet, onTapLogged }) {
+export function createTestScreen({ renderer, layout, assets, openSheet, onTapLogged }) {
   const W = renderer.width;
   return {
     enter() {

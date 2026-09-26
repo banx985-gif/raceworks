@@ -1,5 +1,6 @@
-// RACEWORKS — boot (Milestone 0: project shell).
-// Starts the shared series engine from core/ and opens the M0 test screen. Add ?debug=1 for the FPS/state overlay.
+// RACEWORKS — boot.
+// Starts the shared series engine from core/ and opens the garage. Add ?debug=1 for the FPS/state overlay,
+// ?screen=test for the Milestone 0 scaling/tap test screen.
 import { THEME, font } from '../../../core/Theme.js';
 import { EventBus } from '../../../core/EventBus.js';
 import { Rng } from '../../../core/Rng.js';
@@ -14,13 +15,17 @@ import { BottomSheet } from '../../../core/ui/BottomSheet.js';
 import { drawButton, hitRect, setPressPoint, clearPress } from '../../../core/ui/Button.js';
 import { ASSETS } from '../data/assets.js';
 import { createBackNav } from './app/backNav.js';
-import { createHomeScreen } from './screens/HomeScreen.js';
+import { createGarageScreen } from './screens/GarageScreen.js';
+import { createTestScreen } from './screens/TestScreen.js';
 import { createRouteTestScreen } from './screens/RouteTestScreen.js';
+import { createGarageMenus } from './ui/garageMenus.js';
 const COL = THEME.color;
 
 const W = 1080;
 const BASE_H = 1920; // 9:16; taller phones grow the height (see Renderer)
 const MAX_H = 2640; // up to 9:22 fills edge to edge; taller still gets thin bars top and bottom
+const START_SCREEN = new URLSearchParams(window.location.search).get('screen') === 'test' ? 'test' : 'garage';
+const TEST_SCREENS = ['test', 'route']; // the Milestone 0 screens: pause button, full debug box
 
 const bus = new EventBus();
 const rng = new Rng('raceworks-m0');
@@ -30,13 +35,14 @@ bus.on('renderer:resize', () => layout.refresh());
 const input = new Input(renderer, bus);
 const assets = new AssetManager({ bus });
 const router = new ScreenRouter(bus);
-const sheet = new BottomSheet({ layout, assets });
+const sheet = new BottomSheet({ layout, assets, onClose: () => garage.selection.clear() });
 
 // Sprites are cached at the screen's real pixel size: remake them when that changes.
 assets.setPixelScale(renderer.pixelScale);
 bus.on('renderer:resize', () => {
   assets.setPixelScale(renderer.pixelScale);
   debug.top = debugTop();
+  if (router.currentName === 'garage') garage.resize();
 });
 
 // Pressed button look: any button under a finger that is down.
@@ -44,32 +50,35 @@ bus.on('input:down', (p) => setPressPoint(p, renderer.pixelScale));
 bus.on('input:up', () => clearPress());
 bus.on('input:dragstart', () => clearPress());
 
+const onTestScreen = () => TEST_SCREENS.includes(router.currentName);
 const loop = new FixedStepLoop({
   stepHz: 60,
   bus,
   update: (dt) => {
     router.update(dt);
-    if (router.currentName === 'home') sheet.update(dt);
+    sheet.update(dt);
     backNav.sync();
   },
   render: (alpha) => {
     const ctx = renderer.begin(COL.bg);
     router.render(ctx, alpha);
-    if (router.currentName === 'home') sheet.render(ctx);
-    if (router.currentName !== 'boot') drawButton(ctx, pauseButton(), loop.paused ? 'RESUME' : 'PAUSE', { selected: loop.paused });
+    sheet.render(ctx);
+    if (onTestScreen()) drawButton(ctx, pauseButton(), loop.paused ? 'RESUME' : 'PAUSE', { selected: loop.paused });
     if (loop.paused) drawPaused(ctx);
-    debug.compact = sheet.active; // one FPS line at the top while the sheet is up, so it hides nothing
+    // One FPS line at the top on the garage or under a sheet, so it hides nothing; the full box on the test screens.
+    debug.compact = sheet.active || !onTestScreen();
     debug.render(ctx);
   },
 });
-// The debug box sits between the asset test and the sheet button, whatever the height.
+// On the test screen the debug box sits between the asset test and the sheet button, whatever the height.
 const debugTop = () => layout.safeRect.h - 600;
 const debug = new DebugOverlay({ loop, renderer, layout, input, bus, top: debugTop(), maxLines: 3 });
 bus.on('loop:pause', () => input.reset());
 debug.log(`seeded rng check: ${rng.int(0, 9999)} (same every reload)`);
 
 // ---------------------------------------------------------------------------
-// Pause: the button pauses/resumes the fixed-step loop; while paused any tap resumes. Hiding the app pauses too (core).
+// Pause: the test screen's button pauses/resumes the fixed-step loop; P / Space anywhere; while paused any tap
+// resumes. Hiding the app pauses too (core). The real Pause / 1× / 2× / 4× buttons come with the top bar (Milestone 2).
 const pauseButton = () => layout.anchor('top-right', 240, THEME.button.minH, 80);
 router.modal = {
   get active() {
@@ -81,7 +90,7 @@ router.modal = {
 router.layers.push(
   {
     get active() {
-      return router.currentName !== 'boot';
+      return onTestScreen();
     },
     handleInput: (hook, p) => {
       if (hook !== 'onTap' || !hitRect(p, pauseButton())) return false;
@@ -89,7 +98,7 @@ router.layers.push(
       return true;
     },
   },
-  { get active() { return sheet.active && router.currentName === 'home'; }, handleInput: (hook, p) => sheet.handleInput(hook, p) },
+  { get active() { return sheet.active; }, handleInput: (hook, p) => sheet.handleInput(hook, p) },
 );
 window.addEventListener('keydown', (e) => {
   if (e.key === 'p' || e.key === 'P' || e.key === ' ') loop.togglePause();
@@ -113,7 +122,12 @@ function drawPaused(ctx) {
 }
 
 // ---------------------------------------------------------------------------
-// Placeholder bottom sheet (proves the sheet, routing and back).
+// Sheets. The garage's stations and Tessa (one registry for world taps and the shortcut), and the M0 test sheet.
+const menus = createGarageMenus({ garage: () => garage });
+const openMenu = (kind) => {
+  const build = menus.for(kind);
+  if (build) sheet.open(build);
+};
 const testSheet = () => ({
   title: 'Test sheet',
   subtitle: 'Placeholder bottom sheet for Milestone 0.',
@@ -128,19 +142,23 @@ const testSheet = () => ({
     },
   ],
 });
-bus.on('screen:change', ({ to }) => to !== 'home' && sheet.close());
+bus.on('screen:change', () => sheet.close());
 
-// Back one level: close the sheet first, then leave the second screen.
+// Back one level: close the sheet, leave Build Mode, or leave the second test screen.
 function back() {
   if (sheet.active) sheet.close();
-  else if (router.currentName === 'route') router.go('home');
+  else if (router.currentName === 'garage' && garage.buildMode) garage.setBuildMode(false);
+  else if (router.currentName === 'route') router.go('test');
   else return false;
   return true;
 }
-const backNav = createBackNav({ depth: () => (sheet.active || router.currentName === 'route' ? 1 : 0), back });
+const backNav = createBackNav({
+  depth: () => (sheet.active || router.currentName === 'route' || (router.currentName === 'garage' && garage.buildMode) ? 1 : 0),
+  back,
+});
 
 // ---------------------------------------------------------------------------
-// Boot screen: shows while the art loads, then hands over to the test screen.
+// Boot screen: shows while the art loads, then hands over to the garage (or the test screen).
 const bootScreen = {
   progress: 0,
   enter() {
@@ -149,7 +167,7 @@ const bootScreen = {
       .loadImages(ASSETS, (done, total) => (this.progress = done / total))
       .then((r) => {
         debug.log(`assets: ${r.loaded} loaded, ${r.missing.length} missing`);
-        router.go('home');
+        router.go(START_SCREEN);
       });
   },
   render(ctx) {
@@ -166,12 +184,15 @@ const bootScreen = {
   },
 };
 
+const garage = createGarageScreen({ renderer, layout, assets, bus, sheet, openMenu, debug });
+
 // Test hook for automated checks (debug builds only).
-if (debug.enabled) window.__m0 = { renderer, layout, input, loop, router, assets, sheet, taps: [] };
+if (debug.enabled) window.__rw = { renderer, layout, input, loop, router, assets, sheet, garage, taps: [] };
 
 router
   .register('boot', bootScreen)
-  .register('home', createHomeScreen({ renderer, layout, assets, openSheet: () => sheet.open(testSheet), onTapLogged: (p) => window.__m0?.taps.push({ x: p.x, y: p.y }) }))
+  .register('garage', garage)
+  .register('test', createTestScreen({ renderer, layout, assets, openSheet: () => sheet.open(testSheet), onTapLogged: (p) => window.__rw?.taps.push({ x: p.x, y: p.y }) }))
   .register('route', createRouteTestScreen({ renderer, layout, onBack: back }));
 router.go('boot');
 loop.start();

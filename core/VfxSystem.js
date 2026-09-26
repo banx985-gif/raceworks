@@ -66,6 +66,11 @@ export class VfxSystem {
     this.flashState.alive = false;
   }
 
+  // Floating texts only (a full screen opened: numbers still rising must not sit over it — Milestone 21).
+  clearTexts(layer = null) {
+    for (const o of this.texts) if (!layer || o.layer === layer) o.alive = false;
+  }
+
   // --- pools -----------------------------------------------------------------
   _particle() {
     let alive = 0;
