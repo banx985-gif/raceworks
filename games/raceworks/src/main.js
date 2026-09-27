@@ -50,6 +50,9 @@ import { createMenuHeader } from './ui/menuHeader.js';
 import { createRaceScreen } from './screens/RaceScreen.js';
 import { createRaceIntroScreen } from './screens/RaceIntroScreen.js';
 import { createRaceResultScreen } from './screens/RaceResultScreen.js';
+import { createWeekendScreen } from './screens/WeekendScreen.js';
+import { Settings } from '../../../core/Settings.js';
+import { TRACKS } from './race/tracks.js';
 const COL = THEME.color;
 
 const W = 1080;
@@ -58,11 +61,11 @@ const MAX_H = 2640; // up to 9:22 fills edge to edge; taller still gets thin bar
 const START_SCREEN = new URLSearchParams(window.location.search).get('screen') === 'test' ? 'test' : 'menu';
 const MENU_SCREENS = ['slots', 'setup']; // screens off the main menu: Back returns towards it
 const TEST_SCREENS = ['test', 'route']; // the Milestone 0 screens: pause button, full debug box
-const GAME_SCREENS = ['garage', 'roster', 'staff', 'carBuilder', 'car', 'cars', 'raceIntro', 'race', 'raceResult'];
-const RACE_SCREENS = ['raceIntro', 'race', 'raceResult']; // Milestone 6: the garage calendar waits while a race is on // the game's screens: P pauses the game clock here
+const GAME_SCREENS = ['garage', 'roster', 'staff', 'carBuilder', 'car', 'cars', 'weekend', 'raceIntro', 'race', 'raceResult'];
+const RACE_SCREENS = ['weekend', 'raceIntro', 'race', 'raceResult']; // Milestone 6: the garage calendar waits while a race is on // the game's screens: P pauses the game clock here
 // Screens opened from the garage (or from each other). A back stack remembers the way in (with each screen's
 // params: which person, which car), so the back button and the phone's Back retrace it one step at a time.
-const SUB_SCREENS = { roster: 'Roster', staff: 'Details', carBuilder: 'New car', car: 'Car', cars: 'Car Garage', raceIntro: 'Race', race: 'Race', raceResult: 'Result' };
+const SUB_SCREENS = { roster: 'Roster', staff: 'Details', carBuilder: 'New car', car: 'Car', cars: 'Car Garage', weekend: 'Weekend', raceIntro: 'Race', race: 'Race', raceResult: 'Result' };
 const BACK_LABEL = { garage: 'Garage', ...SUB_SCREENS };
 const trail = []; // [{ name, params }] — the screens under the current one, oldest first
 let hereParams = {}; // the current sub-screen's params (so it can be returned to exactly)
@@ -271,6 +274,22 @@ const carDebug = {
   },
 };
 // ---------------------------------------------------------------------------
+// Race weekends (Milestone 7): Compete → Race weekend → Practice → Setup → Qualifying → Race → Result. The M6 Test
+// Race (straight to the grid) stays for ?debug=1 only.
+// This device's settings (core/Settings): the race camera the player chose last (bible §24.4).
+const settings = new Settings({ key: 'raceworks:settings', defaults: { raceCamera: 'overview' } });
+function goWeekend() {
+  const r = team.races.createWeekend();
+  if (!r.ok) return toast(r.reason);
+  if (r.race.kind !== 'weekend') {
+    // an unfinished Test Race from before Milestone 7: carry it on first
+    sheet.close();
+    return goSub('raceIntro');
+  }
+  debug.log(r.existing ? 'weekend: carrying on' : `weekend created: seed ${r.race.seed}`);
+  sheet.close();
+  goSub('weekend');
+}
 // Races (Milestone 6): Compete → Test Race → the pre-race card → the race → the result. The seed and the field are
 // fixed when the race is created and saved with the team; leaving mid-race keeps it exactly where it was.
 function goTestRace() {
@@ -314,7 +333,7 @@ carDebug.nextMonth = () => {
   const m = clock.month;
   while (clock.month === m) clock.advanceDay();
 };
-const menus = createGarageMenus({ garage: () => garage, team, open: openMenu, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t) => toast(t), goTestRace: () => goTestRace(), goRaceResult: (index) => goSub('raceResult', { index }) });
+const menus = createGarageMenus({ garage: () => garage, team, open: openMenu, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t) => toast(t), goWeekend: () => goWeekend(), goTestRace: debug.enabled ? () => goTestRace() : null, goRaceResult: (index) => goSub('raceResult', { index }) });
 
 // ---------------------------------------------------------------------------
 // Toasts (core/ui/Toast): short money news under the top bar — salary day, a contract paid, Emergency Credit on / off,
@@ -485,8 +504,20 @@ const carBuilderScreen = createCarBuilderScreen({
 const carResultScreen = createCarResultScreen({ layout, assets, team, topBar: screenBar, goCarGarage, debugEnabled: debug.enabled, toast: (x) => toast(x) });
 const carGarageScreen = createCarGarageScreen({ layout, assets, team, topBar: screenBar, goCar });
 const raceIntroScreen = createRaceIntroScreen({ layout, assets, team, topBar: screenBar, onStart: startRace });
-const raceScreen = createRaceScreen({ renderer, layout, assets, team, bus, onFinished: raceFinished, onLeave: () => leaveRace() });
-const raceResultScreen = createRaceResultScreen({ layout, assets, team, topBar: screenBar, goGarage: () => router.go('garage'), goCar: (n) => goSub('car', { number: n }) });
+const raceScreen = createRaceScreen({ renderer, layout, assets, team, bus, settings, onFinished: raceFinished, onLeave: () => leaveRace(), toast: (a, b) => toast(a, b) });
+const weekendScreen = createWeekendScreen({ layout, assets, team, topBar: screenBar, onStartRace: startRace, toast: (a, b) => toast(a, b) });
+// The result: prize Credits and Reputation (through the Milestone 5 ledger and rank), setup and qualifying.
+const resultLines = (e) => {
+  const out = [];
+  if (e.kind === 'weekend') {
+    const me = e.result.rows.find((r) => r.isPlayer);
+    out.push({ text: me?.status === 'retired' ? 'No prize money for a retirement' : `Prize money +${e.prize.toLocaleString('en-US')} Credits · Reputation +${e.reputation}`, color: C_GOOD });
+    if (e.quali) out.push({ text: `Qualified P${e.quali.rows.find((r) => r.isPlayer)?.pos} · setup score ${e.setupScore} / 100 · tyres ${me?.stints?.join(' → ') ?? ''}${me?.stops ? ` (${me.stops} stop${me.stops === 1 ? '' : 's'})` : ''}` });
+  } else out.push({ text: `Test race at ${TRACKS[e.trackId].name}: no prize money`, color: COL.textMuted });
+  return out;
+};
+const C_GOOD = COL.good;
+const raceResultScreen = createRaceResultScreen({ layout, assets, team, topBar: screenBar, goGarage: () => router.go('garage'), goCar: (n) => goSub('car', { number: n }), extraLines: resultLines });
 // The garage tells the daily tick what each person is doing, and its workers' places travel in the save.
 team.activityOf = (s) => garage.activityOf(s.id);
 team.garageSnapshot = () => garage.snapshot();
@@ -607,7 +638,7 @@ function confirmReplace(n, s) {
 function showHelp() {
   dialog.show({
     title: 'How to play',
-    body: 'Run a racing team from your garage. Tap a station or a person to see what they do, start a car at the Pit Bay and watch it being built. Your team saves by itself, and there are four save slots, so you can run four teams at once.',
+    body: 'Run a racing team from your garage. Tap a station or a person to see what they do, start a car at the Pit Bay and watch it being built, then take it to a race weekend from Compete (your crew runs the race on Auto — take over any time). Money shows every Credit in and out. Your team saves by itself, and there are four save slots, so you can run four teams at once.',
     buttons: [{ id: 'ok', label: 'Got it', accent: COL.progress }],
   });
 }
@@ -653,7 +684,7 @@ const setupScreen = createTeamSetupScreen({
   onBack: () => router.go(setupFrom, setupFrom === 'slots' ? { mode: slotsScreen.mode } : {}),
 });
 
-if (debug.enabled) window.__rw = { slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, goTestRace, leaveRace, screenBar, badges, cycleDebugBadge, taps: [] };
+if (debug.enabled) window.__rw = { slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, taps: [] };
 
 router
   .register('boot', bootScreen)
@@ -666,6 +697,7 @@ router
   .register('carBuilder', carBuilderScreen)
   .register('car', carResultScreen)
   .register('cars', carGarageScreen)
+  .register('weekend', weekendScreen)
   .register('raceIntro', raceIntroScreen)
   .register('race', raceScreen)
   .register('raceResult', raceResultScreen)

@@ -26,7 +26,7 @@ export function staffLine(s) {
   return [ROLES[s.role].name, `Level ${s.level}`, TIERS[s.tier].name, ...status].join(' · ');
 }
 
-export function createGarageMenus({ garage, team, open, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null }) {
+export function createGarageMenus({ garage, team, open, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null }) {
   const menus = new MenuRegistry();
   for (const def of STATIONS) {
     if (def.id === 'F02') continue; // the Pit Bay's sheet is the car project's (below)
@@ -149,8 +149,8 @@ export function createGarageMenus({ garage, team, open, goRoster, goStaff, goBui
         ];
       }
       if (slot.id === 'money') return moneyMenu({ slot, team, goMainMenu, debug, toast });
-      if (slot.id === 'compete' && goTestRace) {
-        // Milestone 6: a temporary Test Race (race weekends arrive in Milestone 7, championships in Milestone 20).
+      if (slot.id === 'compete' && goWeekend) {
+        // Milestone 7: race weekends (Practice → Setup → Qualifying → Race); championships arrive in Milestone 20.
         const cur = team.races.current;
         const last = team.races.last();
         const lastMe = last?.result.rows.find((r) => r.isPlayer);
@@ -158,7 +158,8 @@ export function createGarageMenus({ garage, team, open, goRoster, goStaff, goBui
           {
             columns: 1,
             buttons: [
-              { id: 'testRace', label: cur ? 'Carry on racing' : 'Test Race', sub: cur ? `Pine Ridge · ${cur.status === 'ready' ? 'on the grid' : 'race under way'}` : team.races.canRace ? 'Pine Ridge Club Circuit · 8 laps · your newest car' : 'Build a car first (Build → Pit Bay)', icon: slot.icon, disabled: !cur && !team.races.canRace, onTap: goTestRace },
+              { id: 'weekend', label: cur ? 'Carry on: race weekend' : 'Race weekend', sub: cur ? `Pine Ridge · ${cur.kind !== 'weekend' ? 'test race' : cur.stage === 'race' ? (cur.state ? 'race under way' : 'on the grid') : cur.stage}` : team.races.canRace ? 'Pine Ridge Club Circuit · practice, qualifying, 12-lap race · prize money' : 'Build a car first (Build → Pit Bay)', icon: slot.icon, disabled: !cur && !team.races.canRace, onTap: goWeekend },
+              ...(goTestRace && !cur && team.races.canRace ? [{ id: 'testRace', label: 'Test Race (debug)', sub: 'Straight to an 8-lap race, no prize', accent: C.purple, onTap: goTestRace }] : []),
               ...(last ? [{ id: 'lastResult', label: 'Last result', sub: `${lastMe?.status === 'retired' ? 'DNF' : `P${lastMe?.pos}`} at Pine Ridge · ${team.races.history.length} race${team.races.history.length === 1 ? '' : 's'} so far`, accent: C.progress, onTap: () => goRaceResult(team.races.history.length - 1) }] : []),
             ],
           },

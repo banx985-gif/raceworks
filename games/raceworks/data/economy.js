@@ -111,6 +111,7 @@ export const CATEGORY_NAMES = {
   maintenance: 'Car upkeep',
   repair: 'Repairs',
   contract: 'Contracts',
+  prize: 'Prize money',
   interest: 'Emergency Credit interest',
   debug: 'Debug',
   carried: 'Earlier lines',

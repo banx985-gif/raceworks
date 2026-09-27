@@ -1,22 +1,31 @@
-// The race (Milestone 6): watch the field race round the code-drawn circuit (bible §22.4, §23, §24.1 Watch).
-//   Overview camera: the whole circuit (src/race/trackDraw.js, cached — it never changes during a race).
-//   Top: ‹ Garage (leave; the race waits, saved, exactly where it was), the lap, the race clock, your position.
-//   Bottom: the running order, Pause / 1× / 2× / 4× and Skip Result (bible §24.5).
-// The screen only READS the race model (src/race/raceSim.js): watching at any speed or skipping gives the same result.
+// The race (Milestones 6–7): watch — or manage — the field round the code-drawn circuit (bible §22.4, §23, §24).
+//   Cameras (§24.4): Overview frames the whole circuit (cached — it never changes); Follow follows your car at a
+//     readable zoom with a code-drawn minimap. The last choice is remembered on this device (settings.raceCamera).
+//   Top: ‹ Garage (leave; the race waits, saved, exactly where it was), lap, your tyre and wear, gaps, position.
+//   Bottom: the running order; Manage (§24.2): AUTO, Pace Conserve / Normal / Push, Order Defend / Neutral / Attack,
+//     next tyre + Pit Now; Pause / 1× / 2× / 4× / Skip Result (§24.5).
+//   Auto Strategy is ON by default: a hands-off player finishes normally. Tapping any manage control takes over
+//     (Auto goes off); AUTO hands back to the crew, who carry on from the current state (§24.3). Not mid-pit.
+//   Key Moments (§24.5): fast-forward (2× / 4×) stops for your pit window and a podium battle in the last laps.
+// The screen only READS the race model (src/race/raceSim.js) and sends commands; watching at any speed or skipping
+// gives the same result for the same commands.
 //   enter() takes the team's current race; onFinished(sim) when it ends; onLeave() for ‹ Garage.
 import { THEME, font } from '../../../../core/Theme.js';
 import { CachedLayer } from '../../../../core/CachedLayer.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
-import { text, panel as drawPanel } from '../../../../core/ui/Kit.js';
-import { fitView, drawCircuit, drawCar, toScreen } from '../race/trackDraw.js';
-import { RACE } from '../../data/race.js';
+import { text, para, panel as drawPanel } from '../../../../core/ui/Kit.js';
+import { fitView, drawCircuit, drawCar, drawMinimap, toScreen } from '../race/trackDraw.js';
+import { RACE, TYRES, PACE_MODES, ORDERS, KEY_MOMENTS, RACE_ICONS } from '../../data/race.js';
 
 const C = THEME.color;
 const S = THEME.size;
 const TOP_H = 150;
-const ROW_H = 54;
-const CTRL_H = 116;
-const CAR_LEN = 46; // logical px a car is drawn in the overview (the road is drawn wider to match)
+const ROW_H = 44;
+const CTRL_H = 104;
+const GAP = 12;
+const CAR_LEN = 46; // logical px a car is drawn in the Overview (the road is drawn wider to match)
+const FOLLOW = { sc: 3.2, carLen: 74 }; // Follow camera: pixels per metre, car length
+const PLAYER = 'PLAYER';
 
 export const raceClock = (secs) => {
   const s = Math.max(0, secs);
@@ -25,8 +34,9 @@ export const raceClock = (secs) => {
 };
 const surname = (name) => name.split(' ').slice(-1)[0];
 
-export function createRaceScreen({ renderer, layout, assets, team, bus, onFinished, onLeave }) {
+export function createRaceScreen({ renderer, layout, assets, team, bus, settings = null, onFinished, onLeave, toast = () => {} }) {
   let sim = null;
+  let race = null;
   let speed = 1;
   let paused = false;
   let keepT = 0;
@@ -35,13 +45,17 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, onFinish
   let view = null;
   let trackRect = null;
   let buttons = [];
+  let banner = null; // { title, body, kind: 'moment' | 'hint' }
+  let nextTyre = 'medium';
+  let camera = settings?.get('raceCamera') ?? 'overview';
   const layer = new CachedLayer({ width: 1, height: 1, draw: (g) => drawTrackLayer(g) });
+  const ws = () => sim.geo.def.display?.widthScale ?? 1;
 
   function rects() {
     const sr = layout.safeRect;
     const top = { x: sr.x + 16, y: sr.y + 12, w: sr.w - 32, h: TOP_H };
     const rows = Math.ceil((sim?.cars.length ?? 8) / 2);
-    const bh = CTRL_H + rows * ROW_H + 60;
+    const bh = 16 + rows * ROW_H + 12 + 3 * CTRL_H + 2 * GAP + 16;
     const bottom = { x: sr.x + 16, y: sr.y + sr.h - bh - 12, w: sr.w - 32, h: bh };
     const track = { x: sr.x, y: top.y + top.h + 8, w: sr.w, h: bottom.y - (top.y + top.h) - 16 };
     return { top, bottom, track };
@@ -49,7 +63,6 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, onFinish
 
   function drawTrackLayer(g) {
     if (!sim || !view) return;
-    // the layer covers the track area; the view is in screen coordinates, so shift it into the layer
     g.save();
     g.translate(-trackRect.x, -trackRect.y);
     drawCircuit(g, sim.geo, view);
@@ -65,22 +78,239 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, onFinish
     layer.invalidate();
   }
 
-  const player = () => sim?.cars.find((c) => sim.byId[c.id].isPlayer);
-  const lapOf = (c) => Math.max(1, Math.min(sim.laps, c.lapsDone + 1));
+  const me = () => sim?.car(PLAYER) ?? null;
+  const lapsLeft = (c) => sim.laps - Math.max(0, c.s) / sim.geo.length;
 
   // Gap to the leader in seconds (from distance and the leader's speed) — only for the running order display.
   function gapText(c, leader, i) {
     if (c.retired) return 'DNF';
+    if (c.pit) return 'PIT';
     if (c.finished) return i === 0 ? 'Finished' : c.lapsDone < leader.lapsDone ? `+${leader.lapsDone - c.lapsDone} lap` : `+${(c.finishT - leader.finishT).toFixed(1)}`;
-    if (i === 0) return `Lap ${lapOf(c)}`;
+    if (i === 0) return `Lap ${sim.lapOf(c)}`;
     const d = leader.s - c.s;
     if (d > sim.geo.length) return `+${Math.floor(d / sim.geo.length)} lap`;
     return `+${(d / Math.max(20, leader.v || 40)).toFixed(1)}`;
   }
 
+  // --- the player's commands (Auto goes off when they take over) -----------------------------------------------
+  function takeOver() {
+    const c = me();
+    if (!c || !c.auto) return true;
+    if (!sim.command(PLAYER, 'auto', false)) return false;
+    toast('Auto Strategy off', 'You are in charge: pace, order and pit stops. AUTO hands back to the crew.');
+    return true;
+  }
+  function cmd(type, value) {
+    if (!sim || sim.done) return false;
+    if (type !== 'auto' && !takeOver()) {
+      toast('Not during a pit stop');
+      return false;
+    }
+    const ok = sim.command(PLAYER, type, value);
+    if (!ok && type === 'auto') toast('Not during a pit stop');
+    if (ok) team.races.keep(sim);
+    return ok;
+  }
+
+  // --- Key Moments (§24.5): only while fast-forwarding ------------------------------------------------------------
+  function momentNow() {
+    const c = me();
+    if (!c || c.finished || c.retired || !race) return null;
+    const m = (race.moments ??= {});
+    if (!m.pit && !c.pit && c.wear >= KEY_MOMENTS.pitWindowWear && lapsLeft(c) >= 2) return { id: 'pit', title: 'Key moment: pit window', body: `Your ${TYRES[c.tyre].name} tyres are ${Math.round(c.wear * 100)}% worn. ${c.auto ? 'The crew will call the stop — or take over and choose.' : 'Pit Now, or push on?'}` };
+    if (!m.podium && lapsLeft(c) <= KEY_MOMENTS.podiumLastLaps) {
+      const pos = sim.order().indexOf(c) + 1;
+      const ahead = sim.gapAhead(c);
+      const behind = sim.gapBehind(c);
+      if ((pos <= 4 && pos > 1 && ahead !== null && ahead < KEY_MOMENTS.podiumGap) || (pos <= 3 && behind !== null && behind < KEY_MOMENTS.podiumGap)) {
+        const n = Math.ceil(lapsLeft(c));
+        return { id: 'podium', title: 'Key moment: podium battle', body: `P${pos} with ${n} lap${n === 1 ? '' : 's'} to go. Attack, Defend — or let the crew decide.` };
+      }
+    }
+    return null;
+  }
+  function fireMoment(mo) {
+    race.moments[mo.id] = true;
+    paused = true;
+    banner = { kind: 'moment', title: mo.title, body: mo.body, id: mo.id };
+    team.races.keep(sim);
+  }
+
   function skip() {
     if (!sim) return;
+    banner = null;
     sim.run();
+  }
+
+  function setCamera(c) {
+    camera = c;
+    settings?.set('raceCamera', c);
+  }
+
+  // --- drawing ------------------------------------------------------------------------------------------------------
+  function followView() {
+    const pose = sim.carPose(me(), sim.alpha(), ws());
+    return { sc: FOLLOW.sc, ox: trackRect.x + trackRect.w / 2 - pose.x * FOLLOW.sc, oy: trackRect.y + trackRect.h / 2 - pose.y * FOLLOW.sc };
+  }
+
+  function drawCars(ctx, v, len) {
+    const alpha = sim.alpha();
+    const c0 = me();
+    for (const c of sim.cars) {
+      if (c === c0) continue;
+      const e = sim.byId[c.id];
+      const pose = sim.carPose(c, alpha, ws());
+      const q = toScreen(v, pose.x, pose.y);
+      drawCar(ctx, assets, e.sprite, q.x, q.y, pose.heading, len, { alpha: c.retired ? 0.45 : c.finished ? 0.7 : 1 });
+    }
+    if (c0) {
+      const pose = sim.carPose(c0, alpha, ws());
+      const q = toScreen(v, pose.x, pose.y);
+      drawCar(ctx, assets, sim.byId[PLAYER].sprite, q.x, q.y, pose.heading, len + 6, { ring: sim.byId[PLAYER].colour });
+      ctx.fillStyle = C.chip;
+      ctx.beginPath();
+      ctx.roundRect(q.x - 44, q.y - len - 16, 88, 34, 12);
+      ctx.fill();
+      text(ctx, 'YOU', q.x, q.y - len - 14, { size: S.small, bold: true, color: C.textOnDark, align: 'center' });
+    }
+  }
+
+  function drawLights(ctx) {
+    if (sim.t >= RACE.startLights + 1) return;
+    const lit = Math.min(5, Math.floor((sim.t / RACE.startLights) * 5) + 1);
+    const go = sim.t >= RACE.startLights;
+    const lw = 5 * 70 + 40;
+    const lx = trackRect.x + trackRect.w / 2 - lw / 2;
+    const ly = trackRect.y + 124;
+    drawPanel(ctx, { x: lx, y: ly, w: lw, h: 100 }, { fill: '#2A241F', stroke: '#000', radius: 20 });
+    for (let i = 0; i < 5; i++) {
+      ctx.fillStyle = go ? '#3BD16F' : i < lit ? '#E8392B' : '#4A423B';
+      ctx.beginPath();
+      ctx.arc(lx + 55 + i * 70, ly + 50, 26, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawBanner(ctx) {
+    if (!banner) return;
+    const w = trackRect.w - 60;
+    const x = trackRect.x + 30;
+    const bodyH = para(null, banner.body, 0, 0, w - 60, { size: S.small });
+    const h = 90 + bodyH + (banner.kind === 'moment' ? 124 : 24);
+    const y = trackRect.y + trackRect.h - h - 20;
+    drawPanel(ctx, { x, y, w, h }, { fill: banner.kind === 'moment' ? C.panelGold : C.panelInfo, stroke: banner.kind === 'moment' ? C.gold : C.progress, lineWidth: 4, radius: 22 });
+    text(ctx, banner.title, x + 30, y + 22, { size: S.body, bold: true, maxWidth: w - 140 });
+    para(ctx, banner.body, x + 30, y + 72, w - 60, { size: S.small, color: C.text });
+    const close = { x: x + w - 96, y: y + 12, w: 80, h: 70 };
+    drawButton(ctx, close, '✕', { accent: C.outline, font: font(S.body, true) });
+    buttons.push({ id: 'bannerClose', rect: close, onTap: () => (banner = null) });
+    if (banner.kind === 'moment') {
+      const r = { x: x + 30, y: y + h - 116, w: w - 60, h: 100 };
+      drawButton(ctx, r, 'Carry on', { accent: C.progress, font: font(S.body, true) });
+      buttons.push({
+        id: 'momentGo',
+        rect: r,
+        onTap: () => {
+          banner = null;
+          paused = false;
+        },
+      });
+    }
+  }
+
+  function drawTop(ctx, top) {
+    drawPanel(ctx, top, { fill: C.panel, stroke: C.line, radius: THEME.panel.radius });
+    const back = { x: top.x + 16, y: top.y + 20, w: 210, h: 110 };
+    drawButton(ctx, back, '‹ Garage', { accent: C.progress });
+    buttons.push({ id: 'leave', rect: back, onTap: () => onLeave() });
+    const c = me();
+    const lead = sim.order()[0];
+    const cx = top.x + top.w / 2 + 2;
+    text(ctx, sim.t < RACE.startLights ? 'Grid' : sim.done ? 'Finished' : `Lap ${sim.lapOf(lead)} / ${sim.laps}`, cx, top.y + 16, { size: S.title, bold: true, align: 'center' });
+    if (c) {
+      const ahead = sim.gapAhead(c);
+      const behind = sim.gapBehind(c);
+      const line = `${Math.round(c.wear * 100)}% worn${ahead !== null ? ` · ▲ ${ahead.toFixed(1)}s` : ''}${behind !== null ? ` · ▼ ${behind.toFixed(1)}s` : ''}${c.pit ? ' · IN THE PITS' : c.pitReq ? ' · pitting' : ''}`;
+      ctx.font = font(S.small);
+      const tw = Math.min(top.w - 480, ctx.measureText(line).width);
+      const ix = cx - (tw + 50) / 2;
+      assets.drawContained(ctx, TYRES[c.tyre].icon, { x: ix, y: top.y + 84, w: 42, h: 42 });
+      text(ctx, line, ix + 50, top.y + 88, { size: S.small, color: c.wear > 0.62 ? C.bad : C.textMuted, maxWidth: top.w - 480 });
+    }
+    const pos = c ? sim.order().indexOf(c) + 1 : 0;
+    const chip = { x: top.x + top.w - 176, y: top.y + 20, w: 160, h: 110 };
+    drawPanel(ctx, chip, { fill: C.actionDark, stroke: C.outline, radius: 22 });
+    text(ctx, `P${pos}`, chip.x + chip.w / 2, chip.y + 12, { size: S.title, bold: true, color: C.textOnDark, align: 'center' });
+    text(ctx, `of ${sim.cars.length}`, chip.x + chip.w / 2, chip.y + 72, { size: S.small, color: C.textOnDark, align: 'center' });
+  }
+
+  function drawBottom(ctx, bot) {
+    drawPanel(ctx, bot, { fill: C.sheet, stroke: C.line, radius: THEME.panel.radius });
+    const ord = sim.order();
+    const colW = (bot.w - 48) / 2;
+    const rows = Math.ceil(ord.length / 2);
+    ord.forEach((c, i) => {
+      const e = sim.byId[c.id];
+      const x = bot.x + 16 + Math.floor(i / rows) * (colW + 16);
+      const y = bot.y + 14 + (i % rows) * ROW_H;
+      if (e.isPlayer) drawPanel(ctx, { x: x - 4, y: y - 2, w: colW + 8, h: ROW_H - 2 }, { fill: C.panelGold, stroke: C.gold, lineWidth: 2, radius: 12 });
+      ctx.fillStyle = e.colour;
+      ctx.fillRect(x + 4, y + 6, 10, ROW_H - 14);
+      text(ctx, `${i + 1}`, x + 24, y + 4, { size: S.small, bold: true });
+      text(ctx, surname(e.name), x + 64, y + 4, { size: S.small, bold: e.isPlayer, color: c.retired ? C.textFaint : C.text, maxWidth: colW - 230 });
+      text(ctx, TYRES[c.tyre].name[0], x + colW - 150, y + 4, { size: S.small, bold: true, color: c.tyre === 'soft' ? C.bad : C.warn });
+      text(ctx, gapText(c, ord[0], i), x + colW - 6, y + 4, { size: S.small, color: C.textMuted, align: 'right' });
+    });
+    const c = me();
+    const done = sim.done || !c || c.finished || c.retired;
+    const f = font(S.small, true);
+    const row = (y, items) => {
+      const total = bot.w - 32 - GAP * (items.length - 1);
+      const fixed = items.reduce((t, it) => t + (it.w ?? 0), 0);
+      const flex = items.filter((it) => !it.w).length;
+      let x = bot.x + 16;
+      for (const it of items) {
+        const w = it.w ?? (total - fixed) / flex;
+        const r = { x, y, w, h: CTRL_H };
+        x += w + GAP;
+        if (it.icon) {
+          drawButton(ctx, r, '', { selected: it.selected, disabled: it.disabled, accent: it.accent });
+          assets.drawContained(ctx, it.icon, { x: r.x + 10, y: r.y + 14, w: 64, h: 64 });
+          text(ctx, it.label, r.x + 84 + (r.w - 94) / 2, r.y + r.h / 2 - 22, { size: S.small, bold: true, color: C.textOnAction, align: 'center', maxWidth: r.w - 94 });
+        } else drawButton(ctx, r, it.label, { selected: it.selected, disabled: it.disabled, accent: it.accent, font: f });
+        buttons.push({ id: it.id, rect: r, onTap: it.disabled ? () => {} : it.onTap });
+      }
+    };
+    let y = bot.y + 14 + rows * ROW_H + 12;
+    const auto = !!c?.auto;
+    row(y, [
+      { id: 'auto', label: auto ? 'AUTO on' : 'AUTO off', icon: RACE_ICONS.auto, w: 250, selected: auto, disabled: done || !!c?.pit, accent: C.good, onTap: () => cmd('auto', !auto) },
+      ...Object.entries(PACE_MODES).map(([id, m]) => ({ id: `pace_${id}`, label: m.name, selected: c?.pace === id, disabled: done, accent: auto ? C.textFaint : C.action, onTap: () => cmd('pace', id) })),
+    ]);
+    y += CTRL_H + GAP;
+    const pitLabel = c?.pit ? 'In pits' : c?.pitReq ? `Pit ${TYRES[c.pitReq.tyre].name[0]} ✓` : 'Pit Now';
+    row(y, [
+      ...Object.entries(ORDERS).map(([id, m]) => ({ id: `order_${id}`, label: m.name, selected: c?.order === id, disabled: done, accent: auto ? C.textFaint : C.action, onTap: () => cmd('order', id) })),
+      { id: 'nextTyre', label: TYRES[nextTyre].name, icon: TYRES[nextTyre].icon, w: 230, disabled: done, accent: C.progress, onTap: () => (nextTyre = nextTyre === 'soft' ? 'medium' : 'soft') },
+      { id: 'pit', label: pitLabel, w: 190, disabled: done || !!c?.pit, selected: !!c?.pitReq, accent: C.bad, onTap: () => (c?.pitReq && !c.auto ? cmd('pitCancel') : cmd('pit', nextTyre)) },
+    ]);
+    y += CTRL_H + GAP;
+    row(y, [
+      { id: 'pause', label: paused ? 'Play' : 'Pause', w: 170, selected: paused, disabled: sim.done, onTap: () => (paused = !paused) },
+      ...[1, 2, 4].map((v) => ({
+        id: `s${v}`,
+        label: `${v}×`,
+        w: 120,
+        selected: speed === v && !paused,
+        disabled: sim.done,
+        onTap: () => {
+          speed = v;
+          paused = false;
+          if (banner?.kind === 'moment') banner = null;
+        },
+      })),
+      { id: 'skip', label: 'Skip Result', disabled: sim.done, accent: C.progress, onTap: skip },
+    ]);
   }
 
   return {
@@ -93,10 +323,20 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, onFinish
     get paused() {
       return paused;
     },
+    get camera() {
+      return camera;
+    },
+    get banner() {
+      return banner;
+    },
+    get nextTyre() {
+      return nextTyre;
+    },
     buttonRect(id) {
       return buttons.find((b) => b.id === id)?.rect ?? null;
     },
     enter() {
+      race = team.races.current;
       sim = team.races.sim();
       if (!sim) return onLeave();
       speed = 1;
@@ -104,6 +344,14 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, onFinish
       keepT = 0;
       endT = 0;
       ended = false;
+      banner = null;
+      nextTyre = me()?.tyre === 'soft' ? 'medium' : 'soft';
+      camera = settings?.get('raceCamera') ?? camera;
+      // the first weekend race: the crew runs it (bible §33 "First race weekend")
+      if (!team.races.history.some((h) => h.kind === 'weekend') && !race.hinted && race.kind === 'weekend') {
+        race.hinted = true;
+        banner = { kind: 'hint', title: 'Auto Strategy is on', body: 'Your crew handles pace, overtakes and pit stops — no input needed. Watch, speed up, or try a Pace command to take over.' };
+      }
       relayout();
     },
     exit() {
@@ -112,9 +360,15 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, onFinish
     resize() {
       if (sim) relayout();
     },
+    // Tests: send a command as if a manage button was tapped.
+    command: (type, value) => cmd(type, value),
     update(dt) {
       if (!sim) return;
-      if (!paused && !sim.done) sim.advance(dt * RACE.watchTimeScale * speed);
+      if (!paused && !sim.done) {
+        let fired = null;
+        sim.advance(dt * RACE.watchTimeScale * speed, speed > 1 ? { stopAt: () => (fired = momentNow()) !== null } : undefined);
+        if (fired) fireMoment(fired);
+      }
       keepT += dt;
       if (keepT > 3 && !sim.done) {
         keepT = 0;
@@ -130,7 +384,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, onFinish
       }
     },
     onTap(p) {
-      const b = buttons.find((x) => hitRect(p, x.rect));
+      const b = [...buttons].reverse().find((x) => hitRect(p, x.rect));
       if (b) b.onTap();
     },
     render(ctx) {
@@ -138,109 +392,34 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, onFinish
       const r = rects();
       if (r.track.w !== trackRect.w || r.track.h !== trackRect.h || r.track.y !== trackRect.y) relayout();
       layer.setPixelScale(renderer.pixelScale);
-      // grass behind everything, then the cached circuit
+      buttons = [];
       ctx.fillStyle = sim.geo.def.display?.grass ?? '#6FA85A';
       ctx.fillRect(0, 0, renderer.width, renderer.height);
-      layer.render(ctx, trackRect.x, trackRect.y);
-      // cars: others first, the player's on top with a team-colour ring
-      const alpha = sim.alpha();
-      const me = player();
-      for (const c of sim.cars) {
-        if (c === me) continue;
-        const e = sim.byId[c.id];
-        const pose = sim.carPose(c, alpha);
-        const q = toScreen(view, pose.x, pose.y);
-        drawCar(ctx, assets, e.sprite, q.x, q.y, pose.heading, CAR_LEN, { alpha: c.retired ? 0.45 : c.finished ? 0.7 : 1 });
-      }
-      if (me) {
-        const pose = sim.carPose(me, alpha);
-        const q = toScreen(view, pose.x, pose.y);
-        drawCar(ctx, assets, sim.byId[me.id].sprite, q.x, q.y, pose.heading, CAR_LEN + 6, { ring: sim.byId[me.id].colour });
-        ctx.fillStyle = C.chip;
+      if (camera === 'follow' && me()) {
+        const v = followView();
+        ctx.save();
         ctx.beginPath();
-        ctx.roundRect(q.x - 44, q.y - 62, 88, 34, 12);
-        ctx.fill();
-        text(ctx, 'YOU', q.x, q.y - 60, { size: S.small, bold: true, color: C.textOnDark, align: 'center' });
+        ctx.rect(trackRect.x, trackRect.y, trackRect.w, trackRect.h);
+        ctx.clip();
+        drawCircuit(ctx, sim.geo, v);
+        drawCars(ctx, v, FOLLOW.carLen);
+        ctx.restore();
+        // the minimap (§24.4): the circuit outline and every car's dot
+        const mm = { x: trackRect.x + trackRect.w - 300, y: trackRect.y + 14, w: 280, h: 380 };
+        drawPanel(ctx, mm, { fill: 'rgba(255,248,236,0.88)', stroke: C.line, radius: 18 });
+        drawMinimap(ctx, sim.geo, mm, sim.cars.filter((c) => !c.retired).map((c) => ({ ...sim.carPose(c, 1, 1), colour: sim.byId[c.id].colour, player: c.id === PLAYER })));
+      } else {
+        layer.render(ctx, trackRect.x, trackRect.y);
+        drawCars(ctx, view, CAR_LEN);
       }
-      // start lights
-      if (sim.t < RACE.startLights + 1) {
-        const lit = Math.min(5, Math.floor((sim.t / RACE.startLights) * 5) + 1);
-        const go = sim.t >= RACE.startLights;
-        const lw = 5 * 70 + 40;
-        const lx = trackRect.x + trackRect.w / 2 - lw / 2;
-        const ly = trackRect.y + 16;
-        drawPanel(ctx, { x: lx, y: ly, w: lw, h: 100 }, { fill: '#2A241F', stroke: '#000', radius: 20 });
-        for (let i = 0; i < 5; i++) {
-          ctx.fillStyle = go ? '#3BD16F' : i < lit ? '#E8392B' : '#4A423B';
-          ctx.beginPath();
-          ctx.arc(lx + 55 + i * 70, ly + 50, 26, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-
-      // --- top HUD ---
-      buttons = [];
-      const top = r.top;
-      drawPanel(ctx, top, { fill: C.panel, stroke: C.line, radius: THEME.panel.radius });
-      const back = { x: top.x + 16, y: top.y + 20, w: 230, h: 110 };
-      drawButton(ctx, back, '‹ Garage', { accent: C.progress });
-      buttons.push({ id: 'leave', rect: back, onTap: () => onLeave() });
-      const lead = sim.order()[0];
-      const lapNow = sim.t < RACE.startLights ? 0 : lapOf(lead);
-      text(ctx, sim.t < RACE.startLights ? 'Grid' : sim.done ? 'Finished' : `Lap ${lapNow} / ${sim.laps}`, top.x + top.w / 2 + 10, top.y + 26, { size: S.title, bold: true, align: 'center' });
-      text(ctx, `${sim.track.name} · ${raceClock(sim.t - RACE.startLights)}`, top.x + top.w / 2 + 10, top.y + 96, { size: S.small, color: C.textMuted, align: 'center' });
-      const pos = me ? sim.order().indexOf(me) + 1 : 0;
-      const chip = { x: top.x + top.w - 196, y: top.y + 20, w: 180, h: 110 };
-      drawPanel(ctx, chip, { fill: C.actionDark, stroke: C.outline, radius: 22 });
-      text(ctx, `P${pos}`, chip.x + chip.w / 2, chip.y + 12, { size: S.title, bold: true, color: C.textOnDark, align: 'center' });
-      text(ctx, `of ${sim.cars.length}`, chip.x + chip.w / 2, chip.y + 72, { size: S.small, color: C.textOnDark, align: 'center' });
-
-      // --- bottom: running order + speed controls ---
-      const bot = r.bottom;
-      drawPanel(ctx, bot, { fill: C.sheet, stroke: C.line, radius: THEME.panel.radius });
-      const ord = sim.order();
-      const colW = (bot.w - 48) / 2;
-      const rows = Math.ceil(ord.length / 2);
-      ord.forEach((c, i) => {
-        const e = sim.byId[c.id];
-        const x = bot.x + 16 + Math.floor(i / rows) * (colW + 16);
-        const y = bot.y + 16 + (i % rows) * ROW_H;
-        if (e.isPlayer) drawPanel(ctx, { x: x - 4, y: y - 2, w: colW + 8, h: ROW_H - 4 }, { fill: C.panelGold, stroke: C.gold, lineWidth: 2, radius: 12 });
-        ctx.fillStyle = e.colour;
-        ctx.fillRect(x + 4, y + 8, 10, ROW_H - 20);
-        text(ctx, `${i + 1}`, x + 24, y + 8, { size: S.small, bold: true });
-        text(ctx, surname(e.name), x + 64, y + 8, { size: S.small, bold: e.isPlayer, color: c.retired ? C.textFaint : C.text, maxWidth: colW - 200 });
-        text(ctx, gapText(c, ord[0], i), x + colW - 6, y + 8, { size: S.small, color: C.textMuted, align: 'right' });
-      });
-      const cy = bot.y + bot.h - CTRL_H - 12;
-      const ids = ['pause', 's1', 's2', 's4', 'skip'];
-      const widths = [170, 130, 130, 130, 0];
-      const gap = 14;
-      widths[4] = bot.w - 32 - widths.slice(0, 4).reduce((t, w) => t + w + gap, 0);
-      let x = bot.x + 16;
-      ids.forEach((id, i) => {
-        const rr = { x, y: cy, w: widths[i], h: CTRL_H - 8 };
-        x += widths[i] + gap;
-        if (id === 'pause') {
-          drawButton(ctx, rr, paused ? 'Play' : 'Pause', { selected: paused, disabled: sim.done });
-          buttons.push({ id, rect: rr, onTap: () => (paused = !paused) });
-        } else if (id === 'skip') {
-          drawButton(ctx, rr, 'Skip Result', { accent: C.progress, disabled: sim.done });
-          buttons.push({ id, rect: rr, onTap: skip });
-        } else {
-          const v = Number(id.slice(1));
-          drawButton(ctx, rr, `${v}×`, { selected: speed === v && !paused, accent: C.action, disabled: sim.done });
-          buttons.push({
-            id,
-            rect: rr,
-            onTap: () => {
-              speed = v;
-              paused = false;
-            },
-          });
-        }
-      });
-      ctx.font = font(S.small);
+      drawLights(ctx);
+      // camera switch (top-left of the track)
+      const cam = { x: trackRect.x + 20, y: trackRect.y + 14, w: 250, h: 96 };
+      drawButton(ctx, cam, camera === 'follow' ? 'Overview' : 'Follow', { accent: C.outline, font: font(S.small, true) });
+      buttons.push({ id: 'camera', rect: cam, onTap: () => setCamera(camera === 'follow' ? 'overview' : 'follow') });
+      drawTop(ctx, r.top);
+      drawBottom(ctx, r.bottom);
+      drawBanner(ctx);
     },
   };
 }

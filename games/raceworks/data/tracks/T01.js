@@ -28,7 +28,9 @@ export const T01 = {
   geometryVersion: 1,
   artGuideVersion: 1, // must match assets/_source/track_guides/T01_guide.json (a test checks it)
   artKey: 'track_t01', // scenery picture for the pre-race card only (never the racing surface)
-  laps: 8, // the M6 test race (short race)
+  laps: 8, // the M6 test race (short race); a race weekend uses data/race.js WEEKEND.laps
+  // The hidden ideal setup (bible §22.2), each axis −1 (Low / Short / Soft) … +1 (High / Long / Stiff). PLACEHOLDER.
+  setupIdeal: { aero: 0.35, gearing: -0.4, suspension: 0.15 },
   sampleStep: 2, // metres between centreline samples
   width: 13, // default road width (m)
   minWidth: 11, // the validator's minimum anywhere on the lap

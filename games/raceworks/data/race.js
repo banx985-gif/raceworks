@@ -32,3 +32,93 @@ export const RACE = {
   wear: { perLap: 1, failure: 10, contact: 5 },
   tieBreak: 'finishTime',
 };
+
+// ---------------------------------------------------------------------------------------------------------------
+// Milestone 7: race management (bible §21 tyres, §22 weekend, §24 watch / manage). PLACEHOLDER numbers.
+
+// Tyres (bible §21). pace: time change (−1.2% = faster). wearPerLap: share of the tyre used per lap at Normal pace.
+// Worn tyres slow the car: + wearPace × wear, and past the cliff + cliffPace × (wear − cliff) more.
+// Hard / Inter / Wet exist but are locked (Handling 2, Electronics & Race Ops 3).
+export const TYRES = {
+  soft: { name: 'Soft', icon: 'tyre_soft', pace: -0.012, wearPerLap: 0.1, unlocked: true },
+  medium: { name: 'Medium', icon: 'tyre_medium', pace: 0, wearPerLap: 0.062, unlocked: true },
+  hard: { name: 'Hard', icon: 'tyre_hard', pace: 0.008, wearPerLap: 0.04, unlocked: false, unlock: 'Handling research 2' },
+  inter: { name: 'Intermediate', icon: 'tyre_inter', pace: 0.03, wearPerLap: 0.06, unlocked: false, unlock: 'Electronics & Race Ops 3' },
+  wet: { name: 'Wet', icon: 'tyre_wet', pace: 0.05, wearPerLap: 0.06, unlocked: false, unlock: 'Electronics & Race Ops 3' },
+};
+export const TYRE_ORDER = ['soft', 'medium', 'hard', 'inter', 'wet'];
+export const TYRE_WEAR = {
+  wearPace: 0.02, // +2% lap time at fully worn, on top of the cliff
+  cliff: 0.62,
+  cliffPace: 0.35, // +3.5% for every 10% worn past the cliff
+  max: 1,
+  tyreCareRef: 100, // tyre care above this makes tyres last longer: −1% wear per 10 points
+  tyreCarePer10: 0.01,
+  tyreStatRef: 150, // the car's TYR stat does the same: −1% per 15 points
+  tyreStatPer15: 0.01,
+};
+
+// Pace (bible §24.2): no free speed — Push is faster but wears tyres and risks failures; Conserve the reverse.
+export const PACE_MODES = {
+  conserve: { name: 'Conserve', time: 0.012, wear: 0.75, failure: 0.6 },
+  normal: { name: 'Normal', time: 0, wear: 1, failure: 1 },
+  push: { name: 'Push', time: -0.012, wear: 1.5, failure: 2.5 },
+};
+// Race order: Attack tries more passes (and wears tyres, risks contact); Defend makes passing harder but costs pace.
+export const ORDERS = {
+  defend: { name: 'Defend', time: 0.004, wear: 1, attemptGapPlus: 0, chancePlus: 0, defendMinus: 0.15, contactX: 1 },
+  neutral: { name: 'Neutral', time: 0, wear: 1, attemptGapPlus: 0, chancePlus: 0, defendMinus: 0, contactX: 1 },
+  attack: { name: 'Attack', time: 0, wear: 1.1, attemptGapPlus: 4, chancePlus: 0.12, defendMinus: 0, contactX: 2 },
+};
+
+// Pit stops (bible §24.2 Pit Now). The car leaves on the pit spline at the pit entry, drives the pit lane at the speed
+// limit, stops at its box for the service, and rejoins at the pit exit.
+export const PIT = {
+  laneSpeed: 17, // m/s speed limit
+  service: { base: 8, mechRef: 77, perMech10: -0.4, min: 6, max: 10.5 }, // seconds: a better Mechanic is quicker
+  boxAt: 0.5, // where the box is along the pit lane (share)
+};
+
+// Auto Strategy (bible §24.1): what the crew does for every car that is on Auto (rivals always; the player by default).
+export const AUTO = {
+  pitWear: 0.7, // plan a stop when the tyres would pass this before the next pit entry
+  minLapsLeftToPit: 2, // never stop with fewer laps than this left
+  nextTyreLongRun: 'medium', // more than shortRunLaps left → mediums, else softs
+  shortRunLaps: 5,
+  pushLastLaps: 2, // Push in the last laps when close to the car ahead and the tyres allow
+  pushGap: 1.5, // seconds
+  pushMaxWear: 0.7,
+  conserveEndWear: 0.92, // Conserve if the tyres would pass this by the flag (and no stop is planned)
+  attackGap: 1.0, // Attack when this close to the car ahead in the last attackLastLaps
+  attackLastLaps: 3,
+  defendGap: 0.8,
+};
+
+// The race weekend (bible §22). PLACEHOLDER numbers.
+export const WEEKEND = {
+  laps: 12, // a weekend race (the Test Race was 8)
+  // Practice → Setup Knowledge 0–100 (§22.1): Engineer ENG, the driver's Technical Feedback, Mechanic / Aero help.
+  practice: { eng: 0.45, feedback: 0.35, crew: 0.2, full: 130, variance: 6, skipShare: 0.35 },
+  // Setup (§22.2): three axes, each −1 / 0 / +1. Score = 100 × fit × (base + knowledgeShare × knowledge).
+  setup: { axisWeight: { aero: 0.4, gearing: 0.3, suspension: 0.3 }, fitDiv: 2, base: 0.75, knowledgeShare: 0.25, autoNoise: 1.2, hintFrom: 25, exactFrom: 75 },
+  rivalSetup: { base: 0.45, feedbackRef: 100, feedbackPer100: 0.25, spread: 0.05, softShare: 0.55 },
+  // Qualifying (§22.3): one flying lap each on the starting tyre, Qualifying rating, bounded variance.
+  quali: { driverQualifying: 0.8, driverConsistency: 0.2 },
+};
+export const SETUP_AXES = [
+  { id: 'aero', name: 'Aero', icon: 'race_ui_06', options: ['Low', 'Balanced', 'High'] },
+  { id: 'gearing', name: 'Gearing', icon: 'race_ui_06', options: ['Short', 'Balanced', 'Long'] },
+  { id: 'suspension', name: 'Suspension', icon: 'race_ui_06', options: ['Soft', 'Balanced', 'Stiff'] },
+];
+
+// Prize money and Reputation for a weekend result, by finishing position (index 0 = 1st). DNF gets nothing.
+export const PRIZES = {
+  credits: [3000, 2000, 1500, 1100, 800, 600, 450, 350, 250, 150],
+  reputation: [40, 30, 24, 18, 14, 10, 8, 6, 4, 2],
+};
+
+// Key Moments (bible §24.5): fast-forward stops for these (once each per race).
+export const KEY_MOMENTS = { pitWindowWear: 0.55, podiumLastLaps: 2, podiumGap: 1.2 };
+
+// Race HUD icons (assets/images/ui).
+export const RACE_ICONS = { setup: 'race_ui_06', pit: 'race_ui_07', tyres: 'race_ui_09', qualifying: 'race_ui_11', practice: 'race_ui_12', overtake: 'race_ui_16', defend: 'race_ui_17', pace: 'race_ui_18', auto: 'race_ui_29' };
