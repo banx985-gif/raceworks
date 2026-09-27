@@ -15,6 +15,7 @@
 // Milestone 5: team.money (src/systems/economy.js) — Credits / RP / Racing Tokens on one ledger, Reputation and rank,
 //   Emergency Credit, salaries on day 1, the car build's costs, car upkeep and repairs, the development contract.
 //   team.startCar(opts) charges the parts and starts the build (or says why not: debt, not enough Credits).
+// Milestone 6: team.races (src/systems/races.js) — the race being run, with its fixed seed, and past results.
 import { Clock } from '../../../../core/Clock.js';
 import { Rng } from '../../../../core/Rng.js';
 import { StaffSystem } from '../../../../core/StaffSystem.js';
@@ -28,6 +29,7 @@ import { createCarProjects } from '../systems/carProject.js';
 import { BUDGETS } from '../../data/cars.js';
 import { ASSIGNMENT } from '../../data/garage.js';
 import { createTeamMoney } from '../systems/economy.js';
+import { createRaces } from '../systems/races.js';
 import { partsOf, partsCost } from '../systems/carProject.js';
 
 // A new game's setup when none is given (tests, and saves from before Milestone 4b).
@@ -81,6 +83,7 @@ export class Team {
       stationIds: () => Object.keys(ASSIGNMENT).filter((id) => this.staff.get(id)),
     });
     this.money = createTeamMoney({ bus, seed, clock: this.clock, staff: this.staff, cars: this.cars });
+    this.races = createRaces({ bus, team: this }); // Milestone 6: the race being run (fixed seed) and the results
     this.ratings = createRatingsCache();
     this.garageSnapshot = () => null; // the garage replaces this
     this.garageState = null; // positions from the last load, for the garage to put people back
@@ -127,6 +130,7 @@ export class Team {
     this.ratings = createRatingsCache();
     this.garageState = null;
     this.money.newGame(); // §30.2 starting state, month 1 salaries, the first contract offer
+    this.races.load(null);
   }
 
   // Start a car project, paying for its parts (Milestone 5). → { ok, job } or { ok: false, reason }.
@@ -233,6 +237,7 @@ export class Team {
       noCandidates: [...this.noCandidates],
       playSeconds: Math.round(this.playSeconds * 10) / 10,
       money: this.money.serialize(),
+      races: this.races.serialize(),
     };
   }
 
@@ -251,6 +256,7 @@ export class Team {
     this.ratings = createRatingsCache();
     if (data.money) this.money.load(data.money);
     else this.adoptMoney(); // a save from before Milestone 5
+    this.races.load(data.races); // none before Milestone 6
   }
 
   // A team saved before Milestone 5 had no money: it gets the §30.2 starting state today, and each car it already

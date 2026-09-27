@@ -130,6 +130,11 @@ export class ProjectSystem {
     if (job.phaseProgress >= job.phaseTarget) this._completePhase(job);
   }
 
+  // Finish the current phase now (e.g. a game waiting at a decision point that the player ships).
+  completePhase(job) {
+    if (this.jobs.includes(job)) this._completePhase(job);
+  }
+
   _completePhase(job) {
     const phase = this.phaseOf(job);
     const workers = {};

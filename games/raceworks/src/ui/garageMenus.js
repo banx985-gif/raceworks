@@ -26,7 +26,7 @@ export function staffLine(s) {
   return [ROLES[s.role].name, `Level ${s.level}`, TIERS[s.tier].name, ...status].join(' · ');
 }
 
-export function createGarageMenus({ garage, team, open, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {} }) {
+export function createGarageMenus({ garage, team, open, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null }) {
   const menus = new MenuRegistry();
   for (const def of STATIONS) {
     if (def.id === 'F02') continue; // the Pit Bay's sheet is the car project's (below)
@@ -149,6 +149,21 @@ export function createGarageMenus({ garage, team, open, goRoster, goStaff, goBui
         ];
       }
       if (slot.id === 'money') return moneyMenu({ slot, team, goMainMenu, debug, toast });
+      if (slot.id === 'compete' && goTestRace) {
+        // Milestone 6: a temporary Test Race (race weekends arrive in Milestone 7, championships in Milestone 20).
+        const cur = team.races.current;
+        const last = team.races.last();
+        const lastMe = last?.result.rows.find((r) => r.isPlayer);
+        menu.sections = [
+          {
+            columns: 1,
+            buttons: [
+              { id: 'testRace', label: cur ? 'Carry on racing' : 'Test Race', sub: cur ? `Pine Ridge · ${cur.status === 'ready' ? 'on the grid' : 'race under way'}` : team.races.canRace ? 'Pine Ridge Club Circuit · 8 laps · your newest car' : 'Build a car first (Build → Pit Bay)', icon: slot.icon, disabled: !cur && !team.races.canRace, onTap: goTestRace },
+              ...(last ? [{ id: 'lastResult', label: 'Last result', sub: `${lastMe?.status === 'retired' ? 'DNF' : `P${lastMe?.pos}`} at Pine Ridge · ${team.races.history.length} race${team.races.history.length === 1 ? '' : 's'} so far`, accent: C.progress, onTap: () => goRaceResult(team.races.history.length - 1) }] : []),
+            ],
+          },
+        ];
+      }
       return menu;
     });
   }

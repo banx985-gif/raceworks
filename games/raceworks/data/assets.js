@@ -3,6 +3,8 @@ import { STATIONS } from './garage.js';
 import { STAFF, ROLES } from './staff.js';
 import { CLASSES, PARTS, BUILD_ART } from './cars.js';
 import { BOTTOM_SLOTS, TOP_BAR } from './home.js';
+import { T01 } from './tracks/T01.js';
+import { RIVAL_TEAMS, PRIVATEERS } from './rivals.js';
 
 const art = (folder, key) => [key, `assets/images/${folder}/${key}.png`];
 
@@ -17,6 +19,10 @@ export const ASSETS = {
   ...Object.fromEntries(Object.values(CLASSES).map((c) => art('cars', c.art))),
   ...Object.fromEntries(Object.values(PARTS).map((p) => art('parts', p.art))),
   ...Object.fromEntries(Object.values(BUILD_ART).map((k) => art('vfx', k))),
+  // Races (Milestone 6): the top-down race sprites (player class + every rival / privateer) and T01's scenery picture
+  // (a pre-race backdrop only — the circuit itself is drawn in code from data/tracks/T01.js).
+  ...Object.fromEntries([...Object.values(CLASSES).map((c) => c.raceArt), ...Object.values(RIVAL_TEAMS).map((t) => t.sprite), ...PRIVATEERS.map((p) => p.sprite)].map((k) => art('cars', k))),
+  ...Object.fromEntries([T01.artKey].map((k) => art('tracks', k))),
   // Home bars (Milestone 2): the five bottom-bar icons, Credits and Racing Tokens.
   ...Object.fromEntries(BOTTOM_SLOTS.map((s) => art('ui', s.icon))),
   ...Object.fromEntries(Object.values(TOP_BAR.icons).map((k) => art('rewards', k))),

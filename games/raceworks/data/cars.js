@@ -35,6 +35,7 @@ export const CLASSES = {
     base: { SPD: 110, ACC: 100, COR: 100, BRK: 95, REL: 100, EFF: 100, TYR: 90 },
     starterParts: { PU: 'PU01', TR: 'TR01', CH: 'CH01', AE: 'AE01', HB: 'HB01', EL: 'EL01' },
     art: 'car_v01_showcase', // bible §18 V01
+    raceArt: 'car_v01_top', // the top-down race sprite (drawn nose DOWN; the race rotates it to the heading)
   },
 };
 
