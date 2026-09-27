@@ -48,7 +48,7 @@ export function createGarageMenus({ garage, team, assets = null, open, goRoster,
         subtitle: pitBay.purpose,
         art: pitBay.art,
         sections: [
-          { columns: 1, buttons: [{ id: 'newCar', label: 'New car', sub: can.ok ? 'Start a Club Hatch project' : can.reason, icon: assets ? liveryKey(assets, CLASSES.clubHatch.art, teamColourId(team)) : CLASSES.clubHatch.art, onTap: goBuilder }] },
+          { columns: 1, buttons: [{ id: 'newCar', label: 'New car', sub: can.ok ? 'Choose a class and parts' : can.reason, icon: assets ? liveryKey(assets, CLASSES.clubHatch.art, teamColourId(team)) : CLASSES.clubHatch.art, onTap: goBuilder }] },
           { columns: 1, buttons: [garageButton()] },
         ],
       };

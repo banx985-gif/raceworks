@@ -8,6 +8,8 @@
 //     tabs?: [{ id, label, badge?, sections }] }   locked (Milestone DEVWORKS-3): greyed like disabled, faded icon and a
 //                                                  padlock on the right; not tappable   tabs inside the sheet (Milestone 21): a row of tabs under the header,
 //                                                  each with its own sections (then menu.sections is not used)
+//   A section may also hold bars (CAREWORKS Milestone 2; optional, drawn after its lines):
+//     bars: [{ label, value, max = 100, color?, text? }]   one row each: label · a filled bar · text (default the value)
 // A MenuRegistry maps what was tapped (a station type, 'worker', 'floor'…) to the function that builds its menu.
 //   sheet.open(builder) — builder() → menu        sheet.close()        sheet.active
 //   sheet.handleInput(hook, p) → true when the sheet used it (tap a button, tap above it to close, drag to scroll)
@@ -44,6 +46,7 @@ const BTN_SUB_H = 150;
 const GAP = 18;
 const TAB_H = 110;
 const TAB_GAP = 20; // under the tab row
+const BAR_ROW = 58; // one bar row in a section's bars
 
 export class BottomSheet {
   constructor({ layout, assets, maxFrac = 0.66, onClose = null }) {
@@ -237,6 +240,11 @@ export class BottomSheet {
         }
       }
       if (sec.lines?.length) y += 10;
+      for (const bar of sec.bars ?? []) {
+        items.push({ kind: 'bar', bar, y });
+        y += BAR_ROW;
+      }
+      if (sec.bars?.length) y += 8;
       const cols = sec.columns ?? 2;
       const btns = sec.buttons ?? [];
       const bw = (w - GAP * (cols - 1)) / cols;
@@ -325,7 +333,8 @@ export class BottomSheet {
         ctx.font = font(S.body);
         ctx.textBaseline = 'top';
         ctx.fillText(it.text, 0, it.y, b.w);
-      } else this._button(ctx, it.button, it.rect);
+      } else if (it.kind === 'bar') this._bar(ctx, it.bar, it.y, b.w);
+      else this._button(ctx, it.button, it.rect);
     }
     ctx.restore();
     if (this.maxScroll > 0) {
@@ -335,6 +344,47 @@ export class BottomSheet {
       ctx.fillRect(r.x + r.w - 16, barY, 8, barH);
     }
     ctx.restore();
+  }
+
+  // One bar row: the label on the left, the bar in the middle, its value on the right.
+  _bar(ctx, bar, y, w) {
+    const C = THEME.color;
+    const S = THEME.size;
+    const labelW = Math.min(340, w * 0.38);
+    const textW = 96;
+    const x = labelW + 16;
+    const bw = Math.max(40, w - x - textW - 16);
+    const bh = 30;
+    const by = y + (BAR_ROW - 10 - bh) / 2;
+    const frac = Math.max(0, Math.min(1, (bar.value ?? 0) / (bar.max ?? 100)));
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = C.text;
+    ctx.font = font(S.small, true);
+    ctx.fillText(bar.label, 0, by + bh / 2, labelW);
+    ctx.fillStyle = C.track;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, by, bw, bh, bh / 2);
+    else ctx.rect(x, by, bw, bh);
+    ctx.fill();
+    if (frac > 0) {
+      ctx.fillStyle = bar.color ?? C.progress;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(x, by, Math.max(bh, bw * frac), bh, bh / 2);
+      else ctx.rect(x, by, bw * frac, bh);
+      ctx.fill();
+    }
+    ctx.strokeStyle = C.outline;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, by, bw, bh, bh / 2);
+    else ctx.rect(x, by, bw, bh);
+    ctx.stroke();
+    ctx.textAlign = 'right';
+    ctx.fillStyle = C.text;
+    ctx.font = font(S.small, true);
+    ctx.fillText(bar.text ?? String(Math.round(bar.value ?? 0)), w, by + bh / 2, textW);
+    ctx.textAlign = 'left';
   }
 
   _button(ctx, bt, rect) {

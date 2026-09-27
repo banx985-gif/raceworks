@@ -1,17 +1,24 @@
-// New car (Milestone 4): the simple builder the Pit Bay's "New car" opens.
-//   Class (Club Hatch only for now) · the six slots with their starter parts · budget focus · the 5-slot team ·
-//   the total part cost (paid at Start, Milestone 5) and the daily running cost · Start (greyed with the reason when the
-//   team cannot start a car: Emergency Credit, not enough Credits).
+// New car (Milestones 4 and 9): the builder the Pit Bay's "New car" opens.
+//   Class (tap to choose from the 10: open ones by rank, the rest shown locked with why) · the six slots (tap one to
+//   choose its part: open parts, locked ones with what they need; secret parts are never listed until unlocked) · what
+//   the parts give before development (the 7 stats, RATING) and the project tier (§15.7) · budget focus · the 5-slot
+//   team · the class and part cost (paid at Start) and the daily running cost · Start (greyed with the reason when the
+//   car or the team cannot start: a locked class / part, a Prestige tier without Rank S, Emergency Credit, Credits).
+// With ?debug=1: "Debug: unlock all" opens every class, part and tier (secret parts too) so any legal car can be built,
+// and "Random legal car" picks one. Research (Milestone 11) will unlock things properly.
 // Tap a person in a team slot to take them off; tap someone under "Available" to put them on.
 import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
+import { Rng } from '../../../../core/Rng.js';
 import { text, para, panel as drawPanel, tabRects, drawTabs, listRow, listRowHeight } from '../../../../core/ui/Kit.js';
 import { pressedLook } from '../ui/pressable.js';
 import { liveryKey, teamColourId } from '../ui/livery.js';
-import { CLASSES, PARTS, SLOTS, BUDGETS, BUDGET_ORDER, PHASES, PROJECT, CAR_STATS } from '../../data/cars.js';
+import { CLASSES, CLASS_ORDER, PARTS, SLOTS, BUDGETS, BUDGET_ORDER, PHASES, PROJECT, CAR_STATS } from '../../data/cars.js';
 import { ROLES } from '../../data/staff.js';
-import { partsOf, partsCost, tierFor, leadRole } from '../systems/carProject.js';
+import { partsOf, leadRole, finalCar } from '../systems/carProject.js';
+import { unlockContext, classState, partsForSlot, tierFor, tierState, carCost, partsCost, generateCar } from '../systems/carCatalog.js';
+import { visualFamily } from '../systems/carVisual.js';
 import { COSTS } from '../../data/economy.js';
 
 const C = THEME.color;
@@ -22,7 +29,7 @@ const modsText = (mods) =>
     .map(([k, v]) => `${k} ${v >= 0 ? '+' : '−'}${Math.abs(v)}`)
     .join(' · ');
 
-export function createCarBuilderScreen({ layout, assets, team, topBar, onStart }) {
+export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, debugEnabled = false }) {
   const panel = new ScrollPanel({
     getRect: () => {
       const t = topBar.rect();
@@ -32,14 +39,19 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart }
     },
   });
   let classId = 'clubHatch';
+  let parts = partsOf('clubHatch');
   let budget = 'balanced';
   let teamIds = [];
   let hits = [];
+  let openList = null; // 'class' | a slot id | null: which choice list is open
+  let debugAll = false;
+  const rng = new Rng(`builder:${Date.now()}`);
+  const ctxNow = () => unlockContext(team, { debugAll });
 
   // Game days this team would take at today's pace (the same formula the project uses).
   function estimateDays() {
     const p = team.cars.projects;
-    const tier = tierFor(partsOf(classId));
+    const tier = tierFor(parts);
     const job = { slots: teamIds };
     let days = 0;
     for (const ph of p.phases) {
@@ -51,37 +63,132 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart }
     return days;
   }
 
+  const choose = (row, rect, onTap, id) => {
+    hits.push({ rect, id, onTap });
+    return row;
+  };
+
   function layoutPage(ctx, w) {
     hits = [];
+    const uc = ctxNow();
     const cls = CLASSES[classId];
-    const parts = partsOf(classId);
     const tier = tierFor(parts);
+    const tierOk = tierState(tier, uc);
     let y = 0;
     const heading = (label) => {
-      if (ctx) text(ctx, label, 8, y, { size: S.heading, bold: true, color: C.actionDark });
+      if (ctx) text(ctx, label, 8, y, { size: S.heading, bold: true, color: C.actionDark, maxWidth: w - 16 });
       y += 62;
+    };
+    const row = (r, rect, pressable = true) => {
+      if (!ctx) return;
+      listRow(ctx, assets, rect, r);
+      if (pressable && !r.locked) pressedLook(ctx, rect);
     };
 
     if (ctx) text(ctx, 'New car', 8, y, { size: S.title, bold: true });
     y += 84;
 
+    // --- debug unlock-all ---
+    if (debugEnabled) {
+      const half = (w - 20) / 2;
+      const a = { x: 0, y, w: half, h: 110 };
+      const b = { x: half + 20, y, w: half, h: 110 };
+      if (ctx) {
+        drawButton(ctx, a, debugAll ? 'Debug: all open' : 'Debug: unlock all', { accent: C.purple, selected: debugAll });
+        drawButton(ctx, b, 'Random legal car', { accent: C.purple });
+      }
+      hits.push({ rect: a, id: 'debugAll', onTap: () => (debugAll = !debugAll) });
+      hits.push({ rect: b, id: 'debugRandom', onTap: () => randomCar() });
+      y += 130;
+    }
+
     // --- class ---
     heading('Class');
-    const classRow = { art: liveryKey(assets, cls.art, teamColourId(team)), title: cls.name, lines: [{ text: `Weights · ${CAR_STATS.map((k) => `${k} ${cls.weights[k]}`).join(' · ')}`, size: S.small, color: C.textMuted }, { text: 'The only class for now — more arrive with research.', size: S.small, color: C.textMuted }], right: 'Chosen', rightColor: C.good, state: 'selected', artSize: 150 };
-    const crh = listRowHeight(w, classRow);
-    if (ctx) listRow(ctx, assets, { x: 0, y, w, h: crh }, classRow);
-    y += crh + 30;
+    const vis = visualFamily({ classId, parts });
+    const chosen = {
+      art: liveryKey(assets, vis.showcase, teamColourId(team)),
+      title: cls.name,
+      lines: [
+        { text: `Weights · ${CAR_STATS.map((k) => `${k} ${cls.weights[k]}`).join(' · ')}`, size: S.small, color: C.textMuted },
+        { text: `${cls.baseCost ? `Class cost ${fmt(cls.baseCost)} Credits` : 'No class cost'} · looks like ${vis.id}`, size: S.small, color: C.textMuted },
+      ],
+      right: openList === 'class' ? 'Close' : 'Change',
+      rightColor: C.progress,
+      state: 'selected',
+      artSize: 150,
+    };
+    const crh = listRowHeight(w, chosen);
+    row(chosen, { x: 0, y, w, h: crh });
+    hits.push({ rect: { x: 0, y, w, h: crh }, id: 'class', onTap: () => (openList = openList === 'class' ? null : 'class') });
+    y += crh + 12;
+    if (openList === 'class') {
+      for (const id of CLASS_ORDER) {
+        if (id === classId) continue;
+        const k = CLASSES[id];
+        const st = classState(id, uc);
+        const r = { art: k.art, title: k.name, lines: [{ text: st.open ? `${k.baseCost ? `${fmt(k.baseCost)} Credits` : 'No class cost'} · ${k.tag}` : st.reason, size: S.small, color: st.open ? C.textMuted : C.bad }], locked: !st.open, right: st.open ? 'Pick' : '', artSize: 110 };
+        const h = listRowHeight(w, r);
+        const rect = { x: 24, y, w: w - 24, h };
+        row(r, rect);
+        if (st.open)
+          choose(r, rect, () => {
+            classId = id;
+            openList = null;
+          }, `class_${id}`);
+        y += h + 10;
+      }
+      y += 10;
+    }
+    y += 18;
 
     // --- parts ---
-    heading('Parts (starter set)');
+    heading(`Parts · complexity ${tier.cx}`);
     SLOTS.forEach((sl, i) => {
       const part = PARTS[parts[i]];
-      const row = { art: part.art, title: `${sl.name}: ${part.name}`, lines: [{ text: modsText(part.mods), size: S.small, color: C.progress, bold: true }], right: `${fmt(part.cost)} Cr · Cx ${part.cx}`, artSize: 110 };
-      const rh = listRowHeight(w, row);
-      if (ctx) listRow(ctx, assets, { x: 0, y, w, h: rh }, row);
+      const r = { art: part.art, title: `${sl.name}: ${part.name}`, lines: [{ text: modsText(part.mods), size: S.small, color: C.progress, bold: true }], right: `${fmt(part.cost)} Cr · Cx ${part.cx}`, artSize: 110, state: openList === sl.id ? 'selected' : undefined };
+      const rh = listRowHeight(w, r);
+      const rect = { x: 0, y, w, h: rh };
+      row(r, rect);
+      hits.push({ rect, id: `slot_${sl.id}`, onTap: () => (openList = openList === sl.id ? null : sl.id) });
       y += rh + 12;
+      if (openList === sl.id) {
+        for (const opt of partsForSlot(sl.id, uc)) {
+          if (opt.id === parts[i]) continue;
+          const p = PARTS[opt.id];
+          const or = { art: p.art, title: `${p.name}${p.secret ? ' · secret' : ''}`, lines: [{ text: opt.open ? modsText(p.mods) : opt.reason, size: S.small, color: opt.open ? C.progress : C.bad, bold: opt.open }], locked: !opt.open, right: `${fmt(p.cost)} · Cx ${p.cx}`, rightColor: opt.open ? C.progress : C.textFaint, artSize: 96 };
+          const oh = listRowHeight(w - 24, or);
+          const orect = { x: 24, y, w: w - 24, h: oh };
+          row(or, orect);
+          if (opt.open)
+            choose(or, orect, () => {
+              parts = parts.map((x, j) => (j === i ? opt.id : x));
+              openList = null;
+            }, `part_${opt.id}`);
+          y += oh + 10;
+        }
+        y += 10;
+      }
     });
-    y += 18;
+    y += 12;
+
+    // --- what the car starts from (before development) ---
+    heading('Before development');
+    const bare = finalCar({ classId, parts });
+    const cw = (w - 16) / 4;
+    CAR_STATS.forEach((k, i) => {
+      const x = 8 + (i % 4) * cw;
+      const yy = y + Math.floor(i / 4) * 64;
+      if (ctx) {
+        text(ctx, k, x, yy, { size: S.small, bold: true, color: C.textMuted });
+        text(ctx, String(bare.stats[k]), x + 86, yy - 4, { size: S.body, bold: true });
+      }
+    });
+    if (ctx) {
+      text(ctx, 'RATING', 8 + 3 * cw, y + 64, { size: S.small, bold: true, color: C.textMuted });
+      text(ctx, String(bare.rating), 8 + 3 * cw + 118, y + 60, { size: S.body, bold: true, color: C.progress });
+    }
+    y += 140;
+    y += para(ctx, 'The crew develops every stat on top of this in each phase; QUALITY (0–100) comes from how well the finished car fits its class, the team\'s work and any Innovation, minus open faults.', 8, y, w - 16, { size: S.small, color: C.textMuted }) + 24;
 
     // --- budget focus ---
     heading('Budget focus');
@@ -102,11 +209,8 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart }
       const id = teamIds[i];
       const s = id ? team.get(id) : null;
       if (s) {
-        const row = { art: s.art, title: s.name, lines: [{ text: `${ROLES[s.role].name} · Energy ${Math.round(s.energy)} · tap to take off`, size: S.small, color: C.textMuted }], right: `Slot ${i + 1}`, artSize: 110 };
-        if (ctx) {
-          listRow(ctx, assets, { ...r, h: slotH }, row);
-          pressedLook(ctx, r);
-        }
+        const sr = { art: s.art, title: s.name, lines: [{ text: `${ROLES[s.role].name} · Energy ${Math.round(s.energy)} · tap to take off`, size: S.small, color: C.textMuted }], right: `Slot ${i + 1}`, artSize: 110 };
+        row(sr, { ...r, h: slotH });
         hits.push({ rect: r, id: `slot_${s.id}`, onTap: () => (teamIds = teamIds.filter((x) => x !== s.id)) });
       } else if (ctx) {
         drawPanel(ctx, r, { fill: C.panelDim, stroke: C.line, radius: THEME.panel.radius });
@@ -133,24 +237,29 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart }
     heading('Total');
     const days = teamIds.length ? estimateDays() : Infinity;
     const lines = [
-      `Parts: ${fmt(partsCost(parts))} Credits, paid at Start (you have ${fmt(team.money.credits)})`,
-      `Running cost: ${fmt(Math.round(COSTS.carDaily * (1 + BUDGETS[budget].costPct / 100)))} Credits a day while it is built (${BUDGETS[budget].name})`,
-      `${tier.name} project · complexity ${tier.cx} · ${tier.target} work per phase`,
-      teamIds.length ? `About ${days} game days with this team (${(days / 28).toFixed(1)} months)` : 'Nobody on the team: the car would never be built',
+      { t: `${cls.baseCost ? `Class ${fmt(cls.baseCost)} + parts ${fmt(partsCost(parts))} = ${fmt(carCost({ classId, parts }))}` : `Parts: ${fmt(partsCost(parts))}`} Credits, paid at Start (you have ${fmt(team.money.credits)})` },
+      { t: `Running cost: ${fmt(Math.round(COSTS.carDaily * (1 + BUDGETS[budget].costPct / 100)))} Credits a day while it is built (${BUDGETS[budget].name})` },
+      { t: `${tier.name} project · complexity ${tier.cx} · ${tier.target} work per phase`, color: tierOk.open ? C.text : C.bad },
+      { t: teamIds.length ? `About ${days} game days with this team (${(days / 28).toFixed(1)} months)` : 'Nobody on the team: the car would never be built' },
     ];
-    for (const l of lines) {
-      if (ctx) text(ctx, l, 8, y, { size: S.body, color: C.text, maxWidth: w - 16 });
-      y += 52;
-    }
+    for (const l of lines) y += para(ctx, l.t, 8, y, w - 16, { size: S.body, color: l.color ?? C.text }) + 12;
     y += 16;
     const start = { x: 0, y, w, h: 130 };
-    const can = team.canStartCar(classId);
+    const can = team.canStartCar({ classId, parts }, { debugAll });
     if (ctx) drawButton(ctx, start, 'Start', { disabled: !teamIds.length || !can.ok });
-    hits.push({ rect: start, id: 'start', onTap: () => teamIds.length && can.ok && onStart({ classId, budget, staffIds: [...teamIds] }) });
+    hits.push({ rect: start, id: 'start', onTap: () => teamIds.length && can.ok && onStart({ classId, parts: [...parts], budget, staffIds: [...teamIds], debugAll }) });
     y += 130 + 16;
     if (!can.ok) y += para(ctx, can.reason, 8, y, w - 16, { size: S.small, color: C.bad }) + 14;
     y += 14;
     return y;
+  }
+
+  function randomCar() {
+    const car = generateCar(rng, ctxNow());
+    classId = car.classId;
+    parts = car.parts;
+    openList = null;
+    return car;
   }
 
   return {
@@ -161,6 +270,21 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart }
     get teamIds() {
       return teamIds;
     },
+    get car() {
+      return { classId, parts: [...parts] };
+    },
+    get debugAll() {
+      return debugAll;
+    },
+    // Tests: set the car directly (still only startable when legal).
+    setCar(car) {
+      classId = car.classId;
+      parts = [...(car.parts ?? partsOf(car.classId))];
+    },
+    setDebugAll(on) {
+      debugAll = !!on && debugEnabled;
+    },
+    randomCar,
     estimateDays,
     // Screen rect of a button by id (after scrolling it into view) — tests.
     buttonRect(bid) {
@@ -176,7 +300,9 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart }
     },
     enter() {
       classId = 'clubHatch';
+      parts = partsOf('clubHatch');
       budget = 'balanced';
+      openList = null;
       teamIds = team.roster.map((s) => s.id).slice(0, PROJECT.teamSlots); // the three starters, ready to go
       panel.scrollY = 0;
     },
@@ -196,6 +322,7 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart }
     render(ctx) {
       const w = panel.getRect().w;
       panel.contentHeight = layoutPage(null, w);
+      panel.clamp();
       panel.begin(ctx);
       layoutPage(ctx, w);
       panel.end(ctx);

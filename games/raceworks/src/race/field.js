@@ -8,7 +8,7 @@
 import { Rng } from '../../../../core/Rng.js';
 import { RIVAL_TEAMS, PRIVATEERS, FIELD_CAP } from '../../data/rivals.js';
 import { RACE } from '../../data/race.js';
-import { CLASSES } from '../../data/cars.js';
+import { CLASSES, familyOfArt } from '../../data/cars.js';
 import { TEAM_COLOURS } from '../../data/setup.js';
 
 const SIX = ['qualifying', 'racecraft', 'wet', 'tyreCare', 'consistency', 'feedback'];
@@ -38,7 +38,8 @@ export function playerEntry(team, rec) {
     driverId: d.id,
     team: team.setup.teamName,
     isPlayer: true,
-    sprite: CLASSES[rec.result.classId]?.raceArt ?? 'car_v01_top',
+    // the car's own visual family (Milestone 9: saved with the car; older cars: from their showcase picture)
+    sprite: rec.result.raceArt ?? familyOfArt(rec.result.art)?.top ?? CLASSES[rec.result.classId]?.raceArt ?? 'car_v01_top',
     colour: colour.main,
     ratings: Object.fromEntries(SIX.map((k) => [k, clampRating(r[k])])),
     car: { ...rec.result.stats },

@@ -5,7 +5,10 @@
 //   onDay           fault rolls in phases 2–4 (§14.8); Testing tries to fix open faults
 //   onCheckpoint    one breakthrough roll at 60% of each phase (§14.9)
 //   onPhaseComplete the phase's development points go into its car stats
-//   onComplete      the finished car: 7 stats, QUALITY (§14.10), RATING, FAULTS, INNOVATION, history
+//   onComplete      the finished car: 7 stats, QUALITY (§14.10), RATING, FAULTS, INNOVATION, history, and its visual
+//                   family (src/systems/carVisual.js: the showcase and race pictures)
+// Milestone 9: any legal class + six parts (src/systems/carCatalog.js decides what is open); the tier (and so the work
+// per phase) comes from the parts' total complexity (§15.7).
 //   statModifier    the founder's perk (Milestone 4b): +6% on their perk stat's share of their work
 //   (onDay also takes a live founder perk extra for its phase off the fault chance: Tessa's −5% assembly faults)
 // createCarProjects({ bus, rng, staff, isResting, today, stationIds, perkOf }) → { projects, assignments, cars, … helpers }
@@ -14,19 +17,18 @@
 import { ProjectSystem } from '../../../../core/ProjectSystem.js';
 import { AssignmentSystem } from '../../../../core/AssignmentSystem.js';
 import { JobHistory } from '../../../../core/JobHistory.js';
-import { CAR_STATS, CAR_STAT_MAX, PARTS, SLOTS, CLASSES, TIERS, PHASES, BUDGETS, PROJECT } from '../../data/cars.js';
+import { CAR_STATS, CAR_STAT_MAX, PARTS, SLOTS, CLASSES, PHASES, BUDGETS, PROJECT } from '../../data/cars.js';
+import { partsCost, tierFor, checkCar, carCost } from './carCatalog.js';
+import { visualFamily } from './carVisual.js';
 import { ROLES, TRAITS } from '../../data/staff.js';
 
 // The stat that leads a phase (its biggest weight) → the role that gets the match bonus.
 export const leadStat = (phase) => Object.entries(phase.weights).sort((a, b) => b[1] - a[1])[0][0];
 export const leadRole = (phase) => Object.keys(ROLES).find((r) => ROLES[r].primaryStat === leadStat(phase));
 
+// A class's default parts (the Start part in each slot). partsCost / tierFor live in carCatalog.js (re-exported here).
 export const partsOf = (classId) => SLOTS.map((sl) => CLASSES[classId].starterParts[sl.id]);
-export const partsCost = (partIds) => partIds.reduce((t, id) => t + PARTS[id].cost, 0);
-export const tierFor = (partIds) => {
-  const cx = partIds.reduce((t, id) => t + PARTS[id].cx, 0);
-  return { ...TIERS.find((t) => cx <= t.maxCx), cx };
-};
+export { partsCost, tierFor };
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -115,10 +117,13 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
       const sums = job.phaseSummaries;
       const avgScore = sums.length ? sums.reduce((t, p) => t + p.avgScore, 0) / sums.length : 0;
       const car = finalCar({ classId: job.data.classId, parts: job.data.parts, dev: job.data.dev, faults: job.data.faults, innovation: job.data.innovation, avgScore });
+      const vis = visualFamily({ classId: job.data.classId, parts: job.data.parts });
       return {
         classId: job.data.classId,
         className: CLASSES[job.data.classId].name,
-        art: CLASSES[job.data.classId].art,
+        family: vis.id,
+        art: vis.showcase,
+        raceArt: vis.top,
         parts: job.data.parts,
         ...car,
         innovation: job.data.innovation,
@@ -127,6 +132,7 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
         breakthroughs: job.data.breakthroughs,
         budgets: job.data.budgets,
         partsCost: partsCost(job.data.parts),
+        baseCost: CLASSES[job.data.classId].baseCost,
         startedDay: job.data.startedDay,
         finishedDay: today(),
       };
@@ -183,17 +189,20 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
     get active() {
       return projects.jobs[0] ?? null;
     },
-    // Start a car: class, budget focus, the team (staff ids, up to 5).
-    start({ classId = 'clubHatch', budget = 'balanced', staffIds = [] }) {
+    // Start a car: class, its six parts (default: the Start parts), budget focus, the team (staff ids, up to 5).
+    // Only the car's shape is checked here; whether the team may build it is Team.canStartCar (carCatalog).
+    start({ classId = 'clubHatch', parts = null, budget = 'balanced', staffIds = [] }) {
       if (api.active) return { ok: false, reason: 'A car is already being built' };
-      const parts = partsOf(classId);
+      parts = parts ? [...parts] : partsOf(classId);
+      const shape = checkCar({ classId, parts });
+      if (!shape.ok) return { ok: false, reason: shape.reasons[0] };
       const tier = tierFor(parts);
       const job = projects.createJob({
         type: 'car',
         name: `${CLASSES[classId].name} #${cars.count + 1}`,
         phaseTarget: tier.target,
         slots: PROJECT.teamSlots,
-        data: { classId, parts, tier: tier.id, budget, nextBudget: null, budgets: [], faults: [], dev: {}, innovation: 0, breakthroughs: [], startedDay: today() },
+        data: { classId, parts, tier: tier.id, cost: carCost({ classId, parts }), budget, nextBudget: null, budgets: [], faults: [], dev: {}, innovation: 0, breakthroughs: [], startedDay: today() },
       });
       for (const id of staffIds.slice(0, PROJECT.teamSlots)) assignments.assign(job, id);
       projects.start(job);

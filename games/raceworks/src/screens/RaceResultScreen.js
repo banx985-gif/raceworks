@@ -31,7 +31,7 @@ export function createRaceResultScreen({ layout, assets, team, topBar, goGarage,
   // A row's car picture: the player's class, a rival team's family (by driver), or a privateer's.
   const familyOfRow = (r) => Object.values(RIVAL_TEAMS).find((t) => t.drivers.some((d) => d.id === r.id))?.family ?? PRIVATEERS.find((p) => p.id === r.id)?.family ?? null;
   const carPicture = (r, e) => {
-    if (r.isPlayer) return liveryKey(assets, CLASSES[team.cars.cars.get(e.carNumber)?.result.classId]?.art ?? CLASSES.clubHatch.art, teamColourId(team));
+    if (r.isPlayer) return liveryKey(assets, team.cars.cars.get(e.carNumber)?.result.art ?? CLASSES.clubHatch.art, teamColourId(team));
     const fam = familyOfRow(r);
     return fam ? CAR_FAMILIES[fam].showcase : null;
   };

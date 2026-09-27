@@ -27,7 +27,7 @@ import { CampaignSlots } from '../../../core/CampaignSlots.js';
 import { Dialog } from '../../../core/ui/Modal.js';
 import { TextPrompt } from '../../../core/ui/TextPrompt.js';
 import { drawButton, hitRect, setPressPoint, clearPress } from '../../../core/ui/Button.js';
-import { ASSETS } from '../data/assets.js';
+import { ASSETS, LATER_ASSETS } from '../data/assets.js';
 import { BOTTOM_SLOTS, TOP_BAR } from '../data/home.js';
 import { createBackNav } from './app/backNav.js';
 import { createGarageScreen } from './screens/GarageScreen.js';
@@ -461,6 +461,9 @@ const bootScreen = {
       .loadImages(ASSETS, (done, total) => (this.progress = done / total))
       .then((r) => {
         debug.log(`assets: ${r.loaded} loaded, ${r.missing.length} missing`);
+        // Milestone 9: the rest of the car and part art, behind the game.
+        assets.register(LATER_ASSETS);
+        assets.loadInBackground(Object.keys(LATER_ASSETS));
         return loadStatusIcons(assets);
       })
       .then(startSlots)
@@ -493,9 +496,10 @@ const carBuilderScreen = createCarBuilderScreen({
   assets,
   team,
   topBar: screenBar,
+  debugEnabled: debug.enabled, // ?debug=1: unlock-all and a random legal car (Milestone 9)
   onStart: (opts) => {
     const r = team.startCar(opts); // pays for the parts (Milestone 5)
-    debug.log(r.ok ? `car started: ${r.job.name} (${opts.budget}, team ${opts.staffIds.join(', ')})` : `car not started: ${r.reason}`);
+    debug.log(r.ok ? `car started: ${r.job.name} (${opts.budget}, ${r.job.data.tier}, parts ${r.job.data.parts.join(' ')}, team ${opts.staffIds.join(', ')})` : `car not started: ${r.reason}`);
     if (!r.ok) return toast(r.reason);
     router.go('garage');
     garage.focusPitBay?.();

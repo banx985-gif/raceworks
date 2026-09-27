@@ -49,6 +49,7 @@ export class Agent {
     const start = this.tile(grid);
     const tiles = start ? findPath(grid, start, this.goal) : null;
     this.setState('walking');
+    this.stateTime = 0; // a new walk gets its own time limit, even if it replaces one still under way (CAREWORKS M2)
 
     if (!tiles) {
       this.path = [];

@@ -31,6 +31,8 @@ import { ASSIGNMENT } from '../../data/garage.js';
 import { createTeamMoney } from '../systems/economy.js';
 import { createRaces } from '../systems/races.js';
 import { partsOf, partsCost } from '../systems/carProject.js';
+import { unlockContext, checkCar } from '../systems/carCatalog.js';
+import { CLASSES } from '../../data/cars.js';
 
 // A new game's setup when none is given (tests, and saves from before Milestone 4b).
 export const DEFAULT_SETUP = { teamName: 'RACEWORKS', principal: 'Principal', colour: 'red', founderId: 'MEC01' };
@@ -133,19 +135,38 @@ export class Team {
     this.races.load(null);
   }
 
-  // Start a car project, paying for its parts (Milestone 5). → { ok, job } or { ok: false, reason }.
-  canStartCar(classId = 'clubHatch') {
+  // Start a car project, paying for its class and parts (Milestones 5 and 9). car = { classId, parts } (parts default:
+  // the class's Start parts; a bare class id still works). The car must be legal for this team (src/systems/carCatalog:
+  // an open class, open parts, an allowed tier) — debugAll (?debug=1 unlock-all) opens every class and part.
+  // → { ok, job } or { ok: false, reason }.
+  canStartCar(car = {}, { debugAll = false } = {}) {
+    if (typeof car === 'string') car = { classId: car };
+    const classId = car.classId ?? 'clubHatch';
+    const parts = car.parts ?? partsOf(classId);
     if (this.cars.active) return { ok: false, reason: 'A car is already being built' };
-    return this.money.canStartCar(partsCost(partsOf(classId)));
+    const legal = checkCar({ classId, parts }, unlockContext(this, { debugAll }));
+    if (!legal.ok) return { ok: false, reason: legal.reasons[0] };
+    return this.money.canStartCar(CLASSES[classId].baseCost + partsCost(parts));
   }
 
   startCar(opts) {
     const classId = opts.classId ?? 'clubHatch';
-    const can = this.canStartCar(classId);
+    const parts = opts.parts ?? partsOf(classId);
+    const can = this.canStartCar({ classId, parts }, { debugAll: !!opts.debugAll });
     if (!can.ok) return can;
-    const r = this.cars.start({ ...opts, classId });
-    if (r.ok) this.money.chargeParts(r.job.name, partsCost(r.job.data.parts));
+    const r = this.cars.start({ ...opts, classId, parts });
+    if (r.ok) {
+      const base = CLASSES[classId].baseCost;
+      if (base) this.money.chargeParts(`${r.job.name} (${CLASSES[classId].name} shell)`, base);
+      this.money.chargeParts(r.job.name, partsCost(r.job.data.parts));
+    }
     return r;
+  }
+
+  // What this team has unlocked beyond its rank (Milestone 9: nothing yet — research M11, facilities M10, events and
+  // secrets later fill these lists; carCatalog reads them).
+  get unlocks() {
+    return this._unlocks ?? (this._unlocks = { research: [], events: [], facilities: [], secrets: [] });
   }
 
   get(id) {

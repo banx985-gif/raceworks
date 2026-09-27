@@ -30,6 +30,7 @@ import { createBuildShow } from '../ui/carBuildShow.js';
 import { CLASSES, PARTS, PROJECT_SPOTS, PHASES } from '../../data/cars.js';
 import { TEAM_COLOURS } from '../../data/setup.js';
 import { liveryKey, teamColourId } from '../ui/livery.js';
+import { visualFamily } from '../systems/carVisual.js';
 
 const C = THEME.color;
 const S = THEME.size;
@@ -169,12 +170,12 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
   const bayFloor = () => iso.corner(8, 4.4); // the middle of the bay's platform
   const showView = () => {
     const job = team.cars.active;
-    const classId = job?.data.classId ?? 'clubHatch';
+    const vis = visualFamily({ classId: job?.data.classId ?? 'clubHatch', parts: job?.data.parts }); // the car this build becomes
     const last = team.cars.cars.latest();
     return {
       job,
       fraction: job ? team.cars.fraction(job) : 0,
-      carKey: liveryKey(assets, CLASSES[classId].art, teamColourId(team)),
+      carKey: liveryKey(assets, vis.showcase, teamColourId(team)),
       partKeys: (job?.data.parts ?? []).map((id) => PARTS[id].art),
       at: bayFloor(),
       width: 300,
