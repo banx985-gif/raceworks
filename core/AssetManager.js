@@ -13,6 +13,8 @@
 //   startTracking() / tracking  every key drawn (how often, biggest logical size, on which screens) and every
 //                             placeholder / stand-in drawn — what the asset validator reads for "used" and "0 fallbacks".
 //   screenTag                 the screen name the game is on (for the tracking record)
+//   loadOptional(key, src)    a picture that may not exist yet (Milestone 25b: art still to be painted): loaded quietly
+//                             if it is there (has(key) turns true) — never a warning, a placeholder or a "missing" entry
 import { SpriteCache } from './SpriteCache.js';
 
 export class AssetManager {
@@ -114,6 +116,26 @@ export class AssetManager {
     });
     this.loading.set(key, p);
     return p;
+  }
+
+  loadOptional(key, src) {
+    if (this.images.has(key)) return Promise.resolve(this.images.get(key));
+    const urls = (this.resolve?.(src) ?? [src]).map((u) => this.basePath + u);
+    return new Promise((resolve) => {
+      const tryAt = (i) => {
+        if (i >= urls.length || typeof Image === 'undefined') return resolve(null);
+        const img = new Image();
+        img.onload = () => {
+          this.images.set(key, img);
+          this.sources.set(key, urls[i]);
+          this.bus?.emit('asset:loaded', { key });
+          resolve(img);
+        };
+        img.onerror = () => tryAt(i + 1);
+        img.src = urls[i];
+      };
+      tryAt(0);
+    });
   }
 
   has(key) {

@@ -24,6 +24,7 @@ import { REST } from '../../data/balance.js';
 import { statusIconsOf } from '../ui/statusIcons.js';
 import { createBuildShow } from '../ui/carBuildShow.js';
 import { CLASSES, PARTS, PROJECT_SPOTS, PHASES } from '../../data/cars.js';
+import { TEAM_COLOURS } from '../../data/setup.js';
 
 const C = THEME.color;
 const S = THEME.size;
@@ -77,9 +78,9 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
   };
 
   // --- the workers -------------------------------------------------------------------
-  // One Agent per staff member with a routine. Phases: idle → toWork → working → back → idle, or (a rest stop, or
+  // One Agent per staff member on the team with a routine (Milestone 4b: the trio depends on the founder). Phases: idle → toWork → working → back → idle, or (a rest stop, or
   // Energy below REST.goBelowEnergy) idle → toRest → resting → back. Arrivals move them on; timers run on stateTime.
-  const workers = Object.entries(ROUTINES).map(([staffId, routine]) => {
+  const makeWorker = (staffId, routine) => {
     const a = new Agent({ id: staffId, speed: WALK.speed });
     a.kind = 'worker';
     a.staffId = staffId;
@@ -90,9 +91,12 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     a.loops = 0; // completed trips (back at the idle spot)
     a.placeAtTile(grid, routine.idle.col, routine.idle.row);
     return a;
-  });
+  };
+  const buildWorkers = () => team.roster.filter((s) => ROUTINES[s.id]).map((s) => makeWorker(s.id, ROUTINES[s.id]));
+  let workers = buildWorkers();
   const workerById = (id) => workers.find((a) => a.staffId === id);
-  const worker = workerById('MEC01'); // Tessa: the Milestone 1 loop (the M1 checks follow her)
+  const LEAD = 'MEC01'; // Tessa: the Milestone 1 loop (the M1 checks follow her; she is on every starting team)
+  const leadWorker = () => workerById(LEAD) ?? workers[0];
   const staffOf = (a) => team.get(a.staffId);
   const workerRect = (a) => {
     const f = iso.toWorld(a.x, a.y);
@@ -105,7 +109,7 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
   let simTime = 0; // game seconds since the garage started (scaled by the speed)
   const setPhase = (a, phase) => {
     a.phase = phase;
-    if (a === worker) {
+    if (a.staffId === LEAD) {
       phaseLog.push({ phase, t: +simTime.toFixed(2), teleports: a.teleports });
       if (phaseLog.length > 40) phaseLog.shift();
     }
@@ -277,9 +281,30 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     grid,
     iso,
     stations,
-    worker,
-    workers,
+    get worker() {
+      return leadWorker();
+    },
+    get workers() {
+      return workers;
+    },
     workerById,
+    // A different team was loaded or started (Milestone 4b): new workers from its roster, their saved places, the
+    // team colour on the walls, and the starting view.
+    loadTeam() {
+      for (const a of workers) selection.remove(a);
+      selection.clear();
+      workers = buildWorkers();
+      workers.forEach((a) => selection.add(a));
+      phaseLog.length = 0;
+      simTime = 0;
+      buildMode = false;
+      room.invalidate();
+      if (stations[0].rect) {
+        restore(team.garageState);
+        screen.resize();
+        resetView();
+      }
+    },
     selection,
     gestures, // (tests)
     show,
@@ -312,7 +337,7 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
 
     // Screen point at the middle of a station's art or a worker ('worker' = Tessa, or a staff id) (tests).
     screenPointOf(id) {
-      const a = id === 'worker' ? worker : workerById(id);
+      const a = id === 'worker' ? leadWorker() : workerById(id);
       const r = a ? workerRect(a) : stationById(id).rect;
       return camera.worldToScreen(r.x + r.w / 2, r.y + r.h * 0.6);
     },
@@ -467,14 +492,15 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
   // --- drawing -------------------------------------------------------------------
   // Floor and the two back walls (with the team stripes), drawn once into the cached layer (world units).
   function drawRoom(g) {
+    const colour = TEAM_COLOURS.find((c) => c.id === team.setup?.colour);
     drawIsoRoom(g, iso, {
       cols,
       rows,
       wallH,
       look: { floorA: L.floorA, floorB: L.floorB, grout: L.grout, wallFace: L.wallFace, wallSide: L.wallSide, wallLine: C.line, wallCap: L.wallCap },
       bands: [
-        { from: 0.42, to: 0.52, color: L.stripe },
-        { from: 0.37, to: 0.4, color: L.stripe2 },
+        { from: 0.42, to: 0.52, color: colour?.main ?? L.stripe }, // the team colour (Milestone 4b)
+        { from: 0.37, to: 0.4, color: colour?.light ?? L.stripe2 },
       ],
     });
   }

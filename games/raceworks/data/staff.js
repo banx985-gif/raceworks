@@ -42,6 +42,16 @@ export const TRAITS = {
     text: 'Keeps careful notes: better setup feedback and fewer surprises.',
     ratings: { feedback: 30, consistency: 10 },
   },
+  cleanShapes: {
+    name: 'Clean Shapes',
+    text: 'Draws tidy, low-drag bodywork (aero research from later milestones).',
+    ratings: {},
+  },
+  safeCall: {
+    name: 'Safe Call',
+    text: 'Picks the safe strategy: steadier races, fewer gambles (from racing on).',
+    ratings: { consistency: 10 },
+  },
 };
 
 // The three starters (bible §11 rows, exact stats). startLevel / salary per month in Credits.
@@ -49,7 +59,11 @@ export const STAFF = [
   { id: 'DRV01', name: 'Sam Calder', role: 'driver', tier: 'standard', startLevel: 1, stats: { MEC: 35, ENG: 47, AER: 49, STR: 37, DRV: 89 }, salary: 500, traits: ['lateBraker'], art: 'staff_drv01' },
   { id: 'MEC01', name: 'Tessa Bolt', role: 'mechanic', tier: 'standard', startLevel: 1, stats: { MEC: 77, ENG: 52, AER: 49, STR: 25, DRV: 32 }, salary: 500, traits: ['fastHands'], art: 'staff_mec01' },
   { id: 'ENG01', name: 'Mara Quill', role: 'engineer', tier: 'standard', startLevel: 1, stats: { MEC: 50, ENG: 80, AER: 49, STR: 35, DRV: 32 }, salary: 500, traits: ['dataNotes'], art: 'staff_eng01' },
+  // Milestone 4b: the other two founder choices (bible §11.4 / §11.5 rows).
+  { id: 'AER01', name: 'Nia Bell', role: 'aero', tier: 'standard', startLevel: 1, stats: { MEC: 35, ENG: 60, AER: 83, STR: 25, DRV: 32 }, salary: 500, traits: ['cleanShapes'], art: 'staff_aer01' },
+  { id: 'STR01', name: 'Ben Hale', role: 'strategist', tier: 'standard', startLevel: 1, stats: { MEC: 35, ENG: 50, AER: 49, STR: 86, DRV: 32 }, salary: 500, traits: ['safeCall'], art: 'staff_str01' },
 ];
+// The default starting team (Sam, Tessa and Mara) — a new game now builds its team from the founder (data/setup.js).
 export const STARTERS = ['DRV01', 'MEC01', 'ENG01'];
 
 // The six derived driver ratings (bible §10.3, exact formulas):

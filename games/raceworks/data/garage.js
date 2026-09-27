@@ -88,6 +88,10 @@ export const ROUTINES = {
     ],
   }, // Sam: the Strategy Desk or the rest spot
   ENG01: { idle: { col: 2, row: 10 }, idleSec: 2, restSpot: 'c', stops: [{ at: 'F11', sec: 7, activity: 'working' }] }, // Mara: the Strategy Desk
+  // Milestone 4b: Nia and Ben as founders take Mara's place in the trio (the desk and her rest place), from their own
+  // idle spots. When more staff arrive (Milestone 12) they get their own desk places.
+  AER01: { idle: { col: 4, row: 11 }, idleSec: 2, restSpot: 'c', stops: [{ at: 'F11', sec: 7, activity: 'working' }] }, // Nia: the Strategy Desk (drawing shapes)
+  STR01: { idle: { col: 3, row: 13 }, idleSec: 2, restSpot: 'c', stops: [{ at: 'F11', sec: 7, activity: 'working' }] }, // Ben: the Strategy Desk
 };
 
 // What a worker's card says they are doing, per routine phase ({place} = the station's name).
@@ -100,4 +104,4 @@ export const WORKER_STATE_TEXT = {
   resting: 'Resting at the rest spot',
 };
 // Short assignment line for cards ("Pit Bay", "Strategy Desk").
-export const ASSIGNMENT = { MEC01: 'F02', DRV01: 'F11', ENG01: 'F11' };
+export const ASSIGNMENT = { MEC01: 'F02', DRV01: 'F11', ENG01: 'F11', AER01: 'F11', STR01: 'F11' };

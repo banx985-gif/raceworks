@@ -6,7 +6,10 @@
 //   onCheckpoint    one breakthrough roll at 60% of each phase (§14.9)
 //   onPhaseComplete the phase's development points go into its car stats
 //   onComplete      the finished car: 7 stats, QUALITY (§14.10), RATING, FAULTS, INNOVATION, history
-// createCarProjects({ bus, rng, staff, isResting, today, stationIds }) → { projects, assignments, cars, … helpers }
+//   statModifier    the founder's perk (Milestone 4b): +6% on their perk stat's share of their work
+//   (onDay also takes a live founder perk extra for its phase off the fault chance: Tessa's −5% assembly faults)
+// createCarProjects({ bus, rng, staff, isResting, today, stationIds, perkOf }) → { projects, assignments, cars, … helpers }
+//   perkOf(staff) → the founder perk ({ stat, pct, extras }) when that person is the founder, else null.
 //   stationIds() → staff with a garage station duty: they count as assigned (working) even when not on a car.
 import { ProjectSystem } from '../../../../core/ProjectSystem.js';
 import { AssignmentSystem } from '../../../../core/AssignmentSystem.js';
@@ -46,19 +49,28 @@ export function finalCar({ classId, parts, dev = {}, faults = [], innovation = 0
   return { stats, classFit, rating: Math.round(clamp(classFit, 0, 999)), developmentScore, quality, faults: open.length };
 }
 
-export function createCarProjects({ bus, rng, staff, isResting = () => false, today = () => 0, stationIds = () => [] }) {
+export function createCarProjects({ bus, rng, staff, isResting = () => false, today = () => 0, stationIds = () => [], perkOf = () => null }) {
   let projects = null;
   const assignments = new AssignmentSystem({ staff, getJobs: () => projects.jobs, bus, otherBusyIds: stationIds });
   const cars = new JobHistory({ bus });
 
   const budgetOf = (job) => BUDGETS[job.data.budget];
   const phaseDef = (phase) => PHASES.find((p) => p.id === phase.id);
+  // A live founder perk extra that changes this phase's fault chance (Tessa: −5% in Assembly), when the founder is on
+  // the car's team.
+  const founderFaultPct = (job, def) =>
+    projects.teamOf(job).reduce((t, s) => t + (perkOf(s)?.extras ?? []).filter((e) => e.live && e.phase === def.id && /FaultPct$/.test(e.key)).reduce((u, e) => u + e.value, 0), 0);
   const traitPct = (job, key) => projects.teamOf(job).reduce((t, s) => t + s.traits.reduce((u, id) => u + (TRAITS[id]?.effects?.[key] ?? 0), 0), 0);
 
   const hooks = {
     workerModifier(job, phase, s) {
       if (isResting(s.id)) return 0; // away recovering at the rest spot
       return ROLES[s.role]?.primaryStat === leadStat(phase) ? 1 + PROJECT.roleMatchPct / 100 : 1;
+    },
+    // Founder perk: "+6% <stat> contribution" — their perk stat counts 6% more in their share of the work.
+    statModifier(job, phase, s, statKey) {
+      const perk = perkOf(s);
+      return perk && perk.stat === statKey ? 1 + perk.pct / 100 : 1;
     },
     onPhaseStart(job, phase) {
       if (job.data.nextBudget) {
@@ -77,6 +89,7 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
         if (score < f.lowScoreBelow) pct *= 1 + f.lowScorePct / 100;
         pct *= 1 + budgetOf(job).faultPct / 100;
         pct *= 1 + traitPct(job, 'faultPct') / 100;
+        pct *= 1 + founderFaultPct(job, def) / 100;
         if (rng.chance(pct / 100)) addFault(job, def);
       }
       if (def.fixes) {
