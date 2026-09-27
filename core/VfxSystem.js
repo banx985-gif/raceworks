@@ -6,6 +6,10 @@
 // Every effect comes from a fixed pool made up front, so nothing is created while the game runs
 // and the caps can never be passed: particles 140 (70 on Low), floating texts 18, effects 64.
 // Reduced Flashes: no bright full-screen flash (a soft fade instead), gentle pops, half the particles.
+// Milestone 25 (Robot Workshop): the rest of the §36 procedural set — button ripple, progress sparkle, electric arc,
+// path / target line, screen-edge warning pulse, soft vignette on a major reveal — and screen shake, scaled by
+// shakeLevel (0 = Off, 0.5 = Low, 1 = Normal). With shakeLevel 0 nothing ever moves; no effect needs shake or a flash to
+// be understood (each big moment also has its card, sound and haptic).
 const LAYERS = { world: 0, screen: 1 };
 const SPARK_COLORS = ['#FFF6C2', '#FFD166', '#FFB74D', '#FFFFFF'];
 const CONFETTI_COLORS = ['#FF8A3D', '#4FC3F7', '#7CFFB2', '#FFD166', '#F06292', '#FFFFFF'];
@@ -41,6 +45,11 @@ export class VfxSystem {
     this.flashState = { alive: false, age: 0, life: 0, peak: 0, color: '#FFFFFF' };
     this.peak = { particles: 0, texts: 0, effects: 0 }; // highest counts seen (for checks)
     this.dropped = 0; // particles refused because the cap was full
+    this.shakeLevel = 1;
+    this.shakeState = { age: 0, life: 0, power: 0 };
+    this.shakes = 0; // shakes asked for (checks)
+    this.edgeState = { alive: false, age: 0, life: 0, color: '#C8402F' };
+    this.vignetteState = { alive: false, age: 0, life: 0, strength: 0.45 };
     this.time = 0;
     this._measure = document.createElement('canvas').getContext('2d');
   }
@@ -248,6 +257,78 @@ export class VfxSystem {
     f.life = this.reducedFlashes ? life * 1.6 : life;
   }
 
+  // --- Milestone 25 procedural effects ---------------------------------------------------------
+  // A ring spreading from a tapped button.
+  ripple(layer, x, y, { radius = 70, color = '#FFFFFF', life = 0.35 } = {}) {
+    return this.pulse(layer, x, y, { rx: radius * 0.5, ry: radius * 0.5, color, life, grow: 2, width: 5 });
+  }
+
+  // Little twinkles along a progress bar.
+  sparkle(layer, x, y, { count = 5, spreadX = 30, color = '#FFF6C2' } = {}) {
+    const r = this.random;
+    for (let i = 0, n = this._count(count); i < n; i++) {
+      const p = this._particle();
+      if (!p) return;
+      p.layer = LAYERS[layer];
+      p.kind = 'twinkle';
+      p.x = x + (r() - 0.5) * spreadX;
+      p.y = y + (r() - 0.5) * 10;
+      p.vx = (r() - 0.5) * 30;
+      p.vy = -20 - r() * 30;
+      p.gravity = 0;
+      p.drag = 1.5;
+      p.life = 0.5 + r() * 0.4;
+      p.size = 5 + r() * 4;
+      p.color = color;
+    }
+  }
+
+  // A crackling electric arc between two points (a fresh zig-zag every frame).
+  arc(layer, x1, y1, x2, y2, { color = '#7FE7FF', life = 0.5, width = 4 } = {}) {
+    const e = this._recycle(this.effects, 'effects');
+    Object.assign(e, { layer: LAYERS[layer], kind: 'arc', x: x1, y: y1, x2, y2, color, life, lineWidth: width });
+    return e;
+  }
+
+  // A dashed line along points (where someone is walking, what a target is): fades out.
+  pathLine(layer, points, { color = '#FFB74D', life = 0.9, width = 5 } = {}) {
+    const e = this._recycle(this.effects, 'effects');
+    Object.assign(e, { layer: LAYERS[layer], kind: 'path', points: points.map((q) => ({ x: q.x, y: q.y })), color, life, lineWidth: width });
+    return e;
+  }
+
+  // A soft coloured glow round the screen edge (a warning: debt, a fault).
+  edgePulse({ color = '#C8402F', life = 1.2 } = {}) {
+    Object.assign(this.edgeState, { alive: true, age: 0, life, color });
+  }
+
+  // Darkened corners for a big reveal (never a flash).
+  vignette({ life = 1.6, strength = 0.45 } = {}) {
+    Object.assign(this.vignetteState, { alive: true, age: 0, life, strength });
+  }
+
+  // Screen shake: power in logical px at Normal. Off → nothing at all.
+  shake(power = 12, life = 0.35) {
+    this.shakes++;
+    if (!(this.shakeLevel > 0)) return;
+    const st = this.shakeState;
+    const left = st.age < st.life ? st.power : 0;
+    st.power = Math.max(left, power * this.shakeLevel);
+    st.life = life;
+    st.age = 0;
+  }
+
+  // The offset to draw the whole screen at this frame ({ x: 0, y: 0 } when still).
+  shakeOffset() {
+    const st = this.shakeState;
+    if (!(this.shakeLevel > 0) || !st.life || st.age >= st.life) return ZERO;
+    const k = 1 - st.age / st.life;
+    const p = st.power * k * k;
+    SHAKE.x = Math.sin(st.age * 71) * p;
+    SHAKE.y = Math.cos(st.age * 53) * p * 0.7;
+    return SHAKE;
+  }
+
   // --- update / draw -------------------------------------------------------------
   update(dt) {
     this.time += dt;
@@ -283,6 +364,12 @@ export class VfxSystem {
       f.age += dt;
       if (f.age >= f.life) f.alive = false;
     }
+    for (const st of [this.edgeState, this.vignetteState]) {
+      if (!st.alive) continue;
+      st.age += dt;
+      if (st.age >= st.life) st.alive = false;
+    }
+    if (this.shakeState.life) this.shakeState.age += dt;
   }
 
   render(ctx, layer) {
@@ -298,11 +385,77 @@ export class VfxSystem {
       ctx.fillStyle = f.color;
       ctx.fillRect(0, 0, this.width, this.height);
     }
+    if (L === LAYERS.screen) this._drawOverlays(ctx);
     ctx.restore();
+  }
+
+  _drawOverlays(ctx) {
+    const W = this.width;
+    const H = this.height;
+    const v = this.vignetteState;
+    if (v.alive) {
+      const k = v.age / v.life;
+      ctx.globalAlpha = v.strength * (k < 0.2 ? k / 0.2 : 1 - (k - 0.2) / 0.8);
+      const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+      g.addColorStop(0, 'rgba(40,24,10,0)');
+      g.addColorStop(1, 'rgba(40,24,10,1)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+    }
+    const e = this.edgeState;
+    if (e.alive) {
+      const k = e.age / e.life;
+      ctx.globalAlpha = 0.55 * Math.sin(Math.PI * k) * (this.reducedFlashes ? 0.6 : 1);
+      const band = 90;
+      const sides = [
+        [0, 0, W, band, 0, 0, 0, band],
+        [0, H - band, W, band, 0, H, 0, H - band],
+        [0, 0, band, H, 0, 0, band, 0],
+        [W - band, 0, band, H, W, 0, W - band, 0],
+      ];
+      for (const [x, y, w, h, x0, y0, x1, y1] of sides) {
+        const g = ctx.createLinearGradient(x0, y0, x1, y1);
+        g.addColorStop(0, e.color);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(x, y, w, h);
+      }
+    }
   }
 
   _drawEffect(ctx, e) {
     const k = e.age / e.life;
+    if (e.kind === 'arc') {
+      ctx.globalAlpha = (1 - k) * (0.6 + 0.4 * this.random());
+      ctx.strokeStyle = e.color;
+      ctx.lineWidth = e.lineWidth;
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      const segs = 7;
+      const dx = e.x2 - e.x;
+      const dy = e.y2 - e.y;
+      const len = Math.hypot(dx, dy) || 1;
+      ctx.moveTo(e.x, e.y);
+      for (let i = 1; i < segs; i++) {
+        const j = (this.random() - 0.5) * len * 0.18;
+        ctx.lineTo(e.x + (dx * i) / segs - (dy / len) * j, e.y + (dy * i) / segs + (dx / len) * j);
+      }
+      ctx.lineTo(e.x2, e.y2);
+      ctx.stroke();
+      return;
+    }
+    if (e.kind === 'path') {
+      ctx.globalAlpha = k < 0.7 ? 0.9 : 0.9 * (1 - (k - 0.7) / 0.3);
+      ctx.strokeStyle = e.color;
+      ctx.lineWidth = e.lineWidth;
+      ctx.setLineDash([14, 12]);
+      ctx.lineDashOffset = -e.age * 60;
+      ctx.beginPath();
+      e.points.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      return;
+    }
     if (e.kind === 'ring') {
       const s = 1 + (e.grow - 1) * easeOut(k);
       ctx.globalAlpha = 1 - k;
@@ -357,7 +510,22 @@ export class VfxSystem {
         ctx.globalCompositeOperation = 'source-over';
         sparkMode = false;
       }
-      if (p.kind === 'dust') {
+      if (p.kind === 'twinkle') {
+        ctx.globalAlpha = Math.sin(Math.PI * k);
+        ctx.fillStyle = p.color;
+        const r = p.size * (1 - k * 0.5);
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y - r);
+        ctx.lineTo(p.x + r * 0.3, p.y - r * 0.3);
+        ctx.lineTo(p.x + r, p.y);
+        ctx.lineTo(p.x + r * 0.3, p.y + r * 0.3);
+        ctx.lineTo(p.x, p.y + r);
+        ctx.lineTo(p.x - r * 0.3, p.y + r * 0.3);
+        ctx.lineTo(p.x - r, p.y);
+        ctx.lineTo(p.x - r * 0.3, p.y - r * 0.3);
+        ctx.closePath();
+        ctx.fill();
+      } else if (p.kind === 'dust') {
         ctx.globalAlpha = 0.55 * (1 - k);
         ctx.fillStyle = p.color;
         ctx.beginPath();
@@ -417,6 +585,9 @@ export class VfxSystem {
     ctx.restore();
   }
 }
+
+const ZERO = Object.freeze({ x: 0, y: 0 });
+const SHAKE = { x: 0, y: 0 };
 
 function easeOut(k) {
   return 1 - (1 - k) * (1 - k);

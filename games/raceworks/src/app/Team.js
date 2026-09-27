@@ -1,11 +1,13 @@
-// The racing team (Milestone 3): the calendar, the staff and the save. Built from the shared engine —
-// core/Clock, core/StaffSystem (daily Energy/Morale, statuses, XP/levels), core/SaveStore (rolling checked saves) —
-// with RACEWORKS content from data/.
+// The racing team (Milestones 3–4): the calendar, the staff, the car projects and the save. Built from the shared
+// engine — core/Clock, core/StaffSystem (daily Energy/Morale, statuses, XP/levels), core/ProjectSystem (through
+// src/systems/carProject.js), core/SaveStore (rolling checked saves) — with RACEWORKS content from data/.
 //   new Team({ bus, seed })          then  await team.attachSave(adapter)  and  await team.loadOrNew()
 //   team.clock · team.staff (StaffSystem) · team.get(id) · team.ratingsOf(staff) · team.isDriver(staff)
 //   team.activityOf(staff) — set by the garage: 'working' | 'resting' | 'idle' (the daily tick reads it)
 //   team.garageSnapshot() / team.garageState — the garage's workers (positions, routine phase) travel in the save
 //   team.nudge(id, what, amount) — debug: change a stat / Energy / Morale now
+//   team.cars — car projects: .active, .start({ classId, budget, staffIds }), .cars (the Car Garage history) …
+//   team.restingOf(staffId) — set by the garage: true while someone recovers at the rest spot (they don't build then)
 import { Clock } from '../../../../core/Clock.js';
 import { Rng } from '../../../../core/Rng.js';
 import { StaffSystem } from '../../../../core/StaffSystem.js';
@@ -14,6 +16,9 @@ import { STAFF, STARTERS, STAT_KEYS, ROLES, TIERS, TRAITS } from '../../data/sta
 import { STAFF_RULES, CLOCK, SAVE_VERSION } from '../../data/balance.js';
 import { TOP_BAR } from '../../data/home.js';
 import { createRatingsCache } from '../systems/driverRatings.js';
+import { createCarProjects } from '../systems/carProject.js';
+import { BUDGETS } from '../../data/cars.js';
+import { ASSIGNMENT } from '../../data/garage.js';
 
 // Save format changes go here: { 1: (record) => record at version 2, … } (core/SaveStore migrateSave).
 export const SAVE_MIGRATIONS = {};
@@ -24,6 +29,7 @@ export class Team {
     this.rng = new Rng(seed);
     this.clock = new Clock({ bus, speeds: TOP_BAR.speeds, ...CLOCK });
     this.activityOf = () => 'idle';
+    this.restingOf = () => false;
     this.staff = new StaffSystem({
       rng: this.rng,
       bus,
@@ -33,12 +39,28 @@ export class Team {
       traits: TRAITS,
       rules: STAFF_RULES,
       planActivity: (s) => this.activityOf(s),
+      // Push Quality (bible §14.7): +10% Energy drain for the car's team.
+      energyLossMultiplier: (s) => {
+        const job = this.cars?.active;
+        return job && job.slots.includes(s.id) ? 1 + BUDGETS[job.data.budget].energyPct / 100 : 1;
+      },
+    });
+    this.cars = createCarProjects({
+      bus,
+      rng: this.rng,
+      staff: this.staff,
+      isResting: (id) => this.restingOf(id),
+      today: () => this.clock.totalDays,
+      stationIds: () => Object.keys(ASSIGNMENT).filter((id) => this.staff.get(id)),
     });
     this.ratings = createRatingsCache();
     this.garageSnapshot = () => null; // the garage replaces this
     this.garageState = null; // positions from the last load, for the garage to put people back
     this.slot = null;
-    bus.on('clock:day', () => this.staff.dailyTick());
+    bus.on('clock:day', () => {
+      this.staff.dailyTick();
+      this.cars.projects.dailyTick(); // after the staff day, so today's Energy counts
+    });
     bus.on('clock:month', () => this.staff.monthlyTick());
   }
 
@@ -49,6 +71,8 @@ export class Team {
       const s = this.staff.addFromDefinition(STAFF.find((d) => d.id === id));
       s.assigned = true;
     }
+    this.cars.load(null);
+    this.cars.assignments.refresh();
     this.garageState = null;
   }
 
@@ -86,13 +110,15 @@ export class Team {
 
   // --- save / load ---------------------------------------------------------------------------------------------
   serialize() {
-    return { clock: this.clock.serialize(), rng: this.rng.getState(), staff: this.staff.serialize(), garage: this.garageSnapshot() };
+    return { clock: this.clock.serialize(), rng: this.rng.getState(), staff: this.staff.serialize(), cars: this.cars.serialize(), garage: this.garageSnapshot() };
   }
 
   load(data) {
     this.clock.load(data.clock);
     this.rng.setState(data.rng);
     this.staff.load(data.staff);
+    this.cars.load(data.cars); // a Milestone 3 save has none yet: no project, an empty Car Garage
+    this.cars.assignments.refresh();
     this.garageState = data.garage ?? null;
   }
 

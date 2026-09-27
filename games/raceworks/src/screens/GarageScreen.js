@@ -1,10 +1,12 @@
-// The garage (Milestones 1–3): the home screen. A small room on a hidden grid, seen in the 3/4 "dollhouse" view,
+// The garage (Milestones 1–4): the home screen. A small room on a hidden grid, seen in the 3/4 "dollhouse" view,
 // with the Pit Bay, the Strategy Desk and a placeholder rest spot, between the shared top bar and five-button bottom
 // bar (core/ui). The three starters walk their routines (data/garage.js ROUTINES) with the core Agent pathing, each
 // with a name tag and status icons; when their Energy runs low they go and rest until it is back up.
 // Drag pans, pinch/wheel zooms (clamped to the room, in the space between the bars), tapping a station or a worker
 // opens their sheet, and a long press on empty floor enters the placeholder Build Mode.
 // Everyone's time runs at the top bar's speed (Pause / 1× / 2× / 4×); tick() runs every step, whichever screen shows.
+// Milestone 4: while a car is being built, its team works at the Pit Bay and the build plays on the bay
+// (src/ui/carBuildShow.js): one visible stage per phase, smoke for faults, a gold sparkle for breakthroughs.
 //
 // Plan space (grid, pathing, positions) is flat; only drawing and tapping go through the IsoProjection.
 import { THEME, font } from '../../../../core/Theme.js';
@@ -20,6 +22,8 @@ import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { GARAGE, GARAGE_LOOK, STATIONS, REST_STATION, WALK, ROUTINES, WORKER_STATE_TEXT } from '../../data/garage.js';
 import { REST } from '../../data/balance.js';
 import { statusIconsOf } from '../ui/statusIcons.js';
+import { createBuildShow } from '../ui/carBuildShow.js';
+import { CLASSES, PARTS, PROJECT_SPOTS, PHASES } from '../../data/cars.js';
 
 const C = THEME.color;
 const S = THEME.size;
@@ -108,7 +112,7 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     debug?.log(`${staffOf(a)?.name.split(' ')[0] ?? a.staffId}: ${phase}`);
   };
   const goTo = (a, stop, walkPhase, atPhase) => {
-    const spot = spotOf(stop.at, stop.spot);
+    const spot = stop.cell ?? spotOf(stop.at, stop.spot);
     a.stop = stop;
     setPhase(a, walkPhase);
     a.walkTo(grid, spot.col, spot.row, () => {
@@ -124,11 +128,18 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
       setPhase(a, 'idle');
     });
   };
+  // On the car's team: long stints at their own spot by the Pit Bay (resting still comes first when tired).
+  function routineOf(a) {
+    const job = team.cars.active;
+    const i = job ? job.slots.indexOf(a.staffId) : -1;
+    if (i < 0) return a.routine;
+    return { ...a.routine, idleSec: 0.6, stops: [{ at: 'F02', cell: PROJECT_SPOTS[i], sec: 25, activity: 'working', project: true }] };
+  }
   function updateWorker(a, dt) {
     a.update(dt, grid);
     const s = staffOf(a);
     if (!s) return;
-    const r = a.routine;
+    const r = routineOf(a);
     if (a.phase === 'idle' && a.stateTime >= r.idleSec) {
       if (s.energy < REST.goBelowEnergy) {
         goTo(a, { at: REST_STATION, spot: r.restSpot, activity: 'resting', untilRested: true }, 'toRest', 'resting');
@@ -143,6 +154,32 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
       if (done) goBack(a);
     }
   }
+
+  team.restingOf = (staffId) => {
+    const a = workerById(staffId);
+    return !!a && (a.phase === 'resting' || a.phase === 'toRest');
+  };
+
+  // --- the visible build in the Pit Bay ---------------------------------------------------
+  const show = createBuildShow({ assets, pixelScale: () => renderer.pixelScale });
+  bus.on('car:fault', () => show.event('smoke'));
+  bus.on('car:breakthrough', () => show.event('sparkle'));
+  bus.on('car:fix', () => show.event('fix'));
+  const bayFloor = () => iso.corner(8, 4.4); // the middle of the bay's platform
+  const showView = () => {
+    const job = team.cars.active;
+    const classId = job?.data.classId ?? 'clubHatch';
+    const last = team.cars.cars.latest();
+    return {
+      job,
+      fraction: job ? team.cars.fraction(job) : 0,
+      carKey: CLASSES[classId].art,
+      partKeys: (job?.data.parts ?? []).map((id) => PARTS[id].art),
+      at: bayFloor(),
+      width: 300,
+      lastCar: last?.result?.art ?? null,
+    };
+  };
 
   // What the daily tick counts them as doing (core/StaffSystem planActivity).
   const activityOf = (staffId) => {
@@ -244,6 +281,18 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     workers,
     workerById,
     selection,
+    gestures, // (tests)
+    show,
+    showView,
+    // Bring the Pit Bay into the middle of the view (a car has just been started).
+    focusPitBay() {
+      const r = stationById('F02').rect;
+      if (r) camera.centerOn(r.x + r.w / 2, r.y + r.h * 0.6);
+    },
+    // The finished car's moment on the bay: a flash and a gold sparkle.
+    reveal() {
+      show.event('reveal');
+    },
     taps,
     phaseLog,
     get buildMode() {
@@ -313,6 +362,11 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
       const cy = camera.y + camera.visibleH / 2;
       fitView();
       camera.centerOn(cx, cy);
+    },
+
+    // Real time (runs while paused too): the build show's effects.
+    update(dt) {
+      show.update(dt);
     },
 
     // Fixed step, every step whichever screen shows: everyone walks, works and rests at the game speed
@@ -390,8 +444,10 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
         if (it.kind === 'worker') {
           const r = workerRect(it);
           assets.draw(ctx, staffOf(it)?.art, r.x, r.y, r.w, r.h);
-        } else if (it.def.art) assets.draw(ctx, it.def.art, it.rect.x, it.rect.y, it.rect.w, it.rect.h);
-        else drawRestSpot(ctx, it.def);
+        } else if (it.def.art) {
+          assets.draw(ctx, it.def.art, it.rect.x, it.rect.y, it.rect.w, it.rect.h);
+          if (it.id === 'F02') show.draw(ctx, showView());
+        } else drawRestSpot(ctx, it.def);
       }
       assets.detail = 1;
       camera.restore(ctx);
@@ -495,6 +551,27 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
       const foot = camera.worldToScreen(st.rect.x + st.rect.w / 2, st.rect.y + st.rect.h);
       const tw = ctx.measureText(st.def.name).width + 28;
       chip(st.def.name, foot.x - tw / 2, foot.y + 8, tw);
+    }
+    const job = team.cars.active;
+    if (job) {
+      const bay = stationById('F02').rect;
+      const top = camera.worldToScreen(bay.x + bay.w / 2, bay.y);
+      const label = PHASES[job.phaseIndex].stage;
+      const faults = team.cars.openFaults(job);
+      const faultLabel = faults ? `${faults} fault${faults > 1 ? 's' : ''}` : '';
+      ctx.font = font(S.small, true);
+      const tw = ctx.measureText(label).width + 28;
+      const fw = faultLabel ? ctx.measureText(faultLabel).width + 28 : 0;
+      const x0 = top.x - (tw + (fw ? fw + 8 : 0)) / 2;
+      chip(label, x0, top.y + 6, tw);
+      if (fw) {
+        ctx.fillStyle = C.bad;
+        ctx.beginPath();
+        ctx.roundRect(x0 + tw + 8, top.y + 6, fw, tagH, tagH / 2);
+        ctx.fill();
+        ctx.fillStyle = C.textOnDark;
+        ctx.fillText(faultLabel, x0 + tw + 8 + fw / 2, top.y + 6 + tagH / 2 + 1);
+      }
     }
     const placed = [];
     // Nearest the viewer first, so they keep their tag right above their head.

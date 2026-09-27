@@ -1,5 +1,5 @@
 // Cheap life for full-body character art (bible §34.2): no animation frames, just
-//   - a 2–4 px bob while walking,
+//   - a 2–4 px bob while walking (plus an optional small sway: walkTiltRad in the game's motion numbers),
 //   - a small tilt while working,
 //   - a left/right flip for the way they face.
 // characterPose() works out the numbers; drawCharacter() draws a cached sprite with them.
@@ -21,6 +21,8 @@ export function characterPose(agent, time, seed = 0, out = { bob: 0, tilt: 0, fl
   out.tilt = 0;
   if (agent.state === 'walking') {
     out.bob = -Math.abs(Math.sin(t * Math.PI * m.walkStepsPerSec)) * m.walkBobPx;
+    // Optional sway from foot to foot, one side per hop (DEVWORKS Milestone 5); off unless the game's motion sets it.
+    out.tilt = Math.sin(t * Math.PI * m.walkStepsPerSec) * (m.walkTiltRad ?? 0);
   } else if (agent.state === 'working') {
     out.tilt = Math.sin(t * Math.PI * 2 * m.workTiltPerSec) * m.workTiltRad;
     out.bob = -Math.abs(Math.sin(t * Math.PI * 2 * m.workTiltPerSec)) * m.workBobPx;

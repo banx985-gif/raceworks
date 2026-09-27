@@ -2,7 +2,8 @@
 // Starts the shared series engine from core/ and opens the garage. Add ?debug=1 for the FPS/state overlay,
 // ?screen=test for the Milestone 0 scaling/tap test screen. Debug badge check: ?debug=1 then B cycles a red badge
 // through the bottom-bar buttons (or ?debug=1&badge=staff on a phone). ?debug=1&reset=1 starts a new team (clears the save);
-// with ?debug=1 the staff detail screen has stat / Energy / Morale nudge buttons.
+// with ?debug=1 the staff detail screen has stat / Energy / Morale nudge buttons, and the Pit Bay sheet has
+// +5 days / Finish phase / Fault now / Breakthrough buttons while a car is being built.
 import { THEME, font } from '../../../core/Theme.js';
 import { EventBus } from '../../../core/EventBus.js';
 import { Rng } from '../../../core/Rng.js';
@@ -28,6 +29,9 @@ import { createRouteTestScreen } from './screens/RouteTestScreen.js';
 import { createGarageMenus } from './ui/garageMenus.js';
 import { createRosterScreen } from './screens/RosterScreen.js';
 import { createStaffDetailScreen } from './screens/StaffDetailScreen.js';
+import { createCarBuilderScreen } from './screens/CarBuilderScreen.js';
+import { createCarResultScreen } from './screens/CarResultScreen.js';
+import { createCarGarageScreen } from './screens/CarGarageScreen.js';
 import { loadStatusIcons } from './ui/statusIcons.js';
 import { Team } from './app/Team.js';
 const COL = THEME.color;
@@ -37,7 +41,13 @@ const BASE_H = 1920; // 9:16; taller phones grow the height (see Renderer)
 const MAX_H = 2640; // up to 9:22 fills edge to edge; taller still gets thin bars top and bottom
 const START_SCREEN = new URLSearchParams(window.location.search).get('screen') === 'test' ? 'test' : 'garage';
 const TEST_SCREENS = ['test', 'route']; // the Milestone 0 screens: pause button, full debug box
-const GAME_SCREENS = ['garage', 'roster', 'staff']; // the game's own screens: P pauses the game clock here
+const GAME_SCREENS = ['garage', 'roster', 'staff', 'carBuilder', 'car', 'cars']; // the game's screens: P pauses the game clock here
+// Screens opened from the garage (or from each other). A back stack remembers the way in (with each screen's
+// params: which person, which car), so the back button and the phone's Back retrace it one step at a time.
+const SUB_SCREENS = { roster: 'Roster', staff: 'Details', carBuilder: 'New car', car: 'Car', cars: 'Car Garage' };
+const BACK_LABEL = { garage: 'Garage', ...SUB_SCREENS };
+const trail = []; // [{ name, params }] — the screens under the current one, oldest first
+let hereParams = {}; // the current sub-screen's params (so it can be returned to exactly)
 const PARAMS = new URLSearchParams(window.location.search);
 
 const bus = new EventBus();
@@ -69,9 +79,14 @@ const loop = new FixedStepLoop({
   bus,
   update: (dt) => {
     if (teamReady) {
-      clock.update(dt); // days tick at the game speed (core/Clock) → the staff's daily Energy / Morale
+      clock.update(dt); // days tick at the game speed (core/Clock) → the staff's daily Energy / Morale and the car project
       garage.tick(dt); // everyone walks, works and rests
       autosave.tick(dt);
+    }
+    if (pendingCar && (pendingCar.wait -= dt) <= 0) {
+      const { number } = pendingCar;
+      pendingCar = null;
+      goSub('car', { number, fresh: true });
     }
     router.update(dt);
     sheet.update(dt);
@@ -104,7 +119,7 @@ bus.on('clock:speed', ({ speed }) => debug.log(speed ? `speed ${speed}×` : 'gam
 // Autosave (core/Autosave): every game day and after any change, plus when the app goes to the background.
 const autosave = new Autosave({
   bus,
-  triggers: ['clock:day', 'team:changed'],
+  triggers: ['clock:day', 'team:changed', 'project:start', 'project:phase', 'project:complete', 'car:fault', 'car:fix', 'car:breakthrough'],
   save: () => team.save(),
   stamp: () => JSON.stringify(team.serialize()),
   running: () => !clock.paused,
@@ -176,9 +191,50 @@ const openMenu = (kind, target = null) => {
   if (build) sheet.open(build);
 };
 // The staff screens (Milestone 3): the roster, and one person's details (from = where Back returns to).
-const goRoster = () => router.go('roster');
-const goStaff = (id, from = router.currentName === 'roster' ? 'roster' : 'garage') => router.go('staff', { id, from });
-const menus = createGarageMenus({ garage: () => garage, team, open: openMenu, goRoster, goStaff });
+// Open a sub-screen: one step deeper (Back returns here).
+function goSub(name, params = {}) {
+  const here = router.currentName;
+  if (here !== name) trail.push({ name: SUB_SCREENS[here] || here === 'garage' ? here : 'garage', params: hereParams });
+  if (trail.length > 12) trail.shift();
+  hereParams = params;
+  router.go(name, params);
+}
+bus.on('screen:change', ({ to }) => {
+  if (to === 'garage') {
+    trail.length = 0; // home again: the way back starts over
+    hereParams = {};
+  }
+});
+const goRoster = () => goSub('roster');
+const goStaff = (id) => goSub('staff', { id });
+const goBuilder = () => goSub('carBuilder');
+// From a car that was opened from the Car Garage, its Car Garage button is simply Back (no pile of screens).
+const goCarGarage = () => (trail[trail.length - 1]?.name === 'cars' && router.currentName === 'car' ? back() : goSub('cars'));
+const goCar = (number) => goSub('car', { number });
+// A finished car: set when the project completes, opened after the reveal has played on the bay.
+let pendingCar = null;
+bus.on('project:complete', ({ record }) => {
+  debug.log(`car finished: ${record.name}, Quality ${record.result.quality}, ${record.days} days`);
+  const onGarage = router.currentName === 'garage';
+  if (onGarage) garage.reveal();
+  pendingCar = { number: record.number, wait: onGarage ? 2.6 : 0 };
+});
+bus.on('car:fault', ({ fault }) => debug.log(`fault in ${fault.phase} (${fault.stat})`));
+bus.on('car:breakthrough', ({ breakthrough }) => debug.log(`breakthrough in ${breakthrough.phase}: ${breakthrough.kind}`));
+bus.on('project:phase', ({ phase, summary }) => debug.log(`${phase.name} done in ${summary.days} days`));
+// ?debug=1: skip days / finish the phase from the Pit Bay sheet.
+const carDebug = {
+  days(n) {
+    for (let i = 0; i < n && team.cars.active; i++) clock.advanceDay();
+  },
+  finishPhase() {
+    const job = team.cars.active;
+    if (!job) return;
+    const i = job.phaseIndex;
+    while (team.cars.active === job && job.phaseIndex === i) clock.advanceDay();
+  },
+};
+const menus = createGarageMenus({ garage: () => garage, team, open: openMenu, goRoster, goStaff, goBuilder, goCarGarage, debug: debug.enabled ? carDebug : null });
 
 // ---------------------------------------------------------------------------
 // The shared bars (core/ui), filled with RACEWORKS content.
@@ -206,7 +262,7 @@ const screenBar = createTopBar({
   home: false,
   back: {
     get label() {
-      return router.currentName === 'staff' && staffScreen.from === 'roster' ? '‹ Roster' : '‹ Garage';
+      return `‹ ${BACK_LABEL[trail[trail.length - 1]?.name] ?? 'Garage'}`;
     },
     onTap: () => back(),
   },
@@ -251,19 +307,22 @@ const testSheet = () => ({
 });
 bus.on('screen:change', () => sheet.close());
 
-// Back one level: close the sheet, leave Build Mode, a person's details (to where they came from), the roster, or the
+// Back one level: close the sheet, leave Build Mode, leave a sub-screen (to where it was opened from), or leave the
 // second test screen.
 function back() {
   if (sheet.active) sheet.close();
   else if (router.currentName === 'garage' && garage.buildMode) garage.setBuildMode(false);
-  else if (router.currentName === 'staff') router.go(staffScreen.from === 'roster' ? 'roster' : 'garage');
-  else if (router.currentName === 'roster') router.go('garage');
+  else if (SUB_SCREENS[router.currentName]) {
+    const prev = trail.pop() ?? { name: 'garage', params: {} };
+    hereParams = prev.params;
+    router.go(prev.name, prev.params);
+  }
   else if (router.currentName === 'route') router.go('test');
   else return false;
   return true;
 }
 const backNav = createBackNav({
-  depth: () => (sheet.active || ['route', 'roster', 'staff'].includes(router.currentName) || (router.currentName === 'garage' && garage.buildMode) ? 1 : 0),
+  depth: () => (sheet.active || router.currentName === 'route' || SUB_SCREENS[router.currentName] || (router.currentName === 'garage' && garage.buildMode) ? 1 : 0),
   back,
 });
 
@@ -303,14 +362,21 @@ const bootScreen = {
 const garage = createGarageScreen({ renderer, layout, assets, bus, sheet, openMenu, clock, team, topBar, bottomBar, debug });
 const rosterScreen = createRosterScreen({ layout, assets, team, garage, topBar: screenBar, goStaff });
 const staffScreen = createStaffDetailScreen({ layout, assets, team, garage, topBar: screenBar, debugEnabled: debug.enabled });
-{
-  // Remember where the details screen was opened from (for its back button).
-  const enter = staffScreen.enter;
-  staffScreen.enter = (params = {}) => {
-    staffScreen.from = params.from ?? 'garage';
-    enter(params);
-  };
-}
+// The car screens (Milestone 4): the builder, one finished car, the Car Garage.
+const carBuilderScreen = createCarBuilderScreen({
+  layout,
+  assets,
+  team,
+  topBar: screenBar,
+  onStart: (opts) => {
+    const r = team.cars.start(opts);
+    debug.log(r.ok ? `car started: ${r.job.name} (${opts.budget}, team ${opts.staffIds.join(', ')})` : `car not started: ${r.reason}`);
+    router.go('garage');
+    if (r.ok) garage.focusPitBay?.();
+  },
+});
+const carResultScreen = createCarResultScreen({ layout, assets, team, topBar: screenBar, goCarGarage });
+const carGarageScreen = createCarGarageScreen({ layout, assets, team, topBar: screenBar, goCar });
 // The garage tells the daily tick what each person is doing, and its workers' places travel in the save.
 team.activityOf = (s) => garage.activityOf(s.id);
 team.garageSnapshot = () => garage.snapshot();
@@ -327,13 +393,16 @@ async function startTeam() {
 }
 
 // Test hook for automated checks (debug builds only).
-if (debug.enabled) window.__rw = { renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, screenBar, badges, cycleDebugBadge, taps: [] };
+if (debug.enabled) window.__rw = { renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, screenBar, badges, cycleDebugBadge, taps: [] };
 
 router
   .register('boot', bootScreen)
   .register('garage', garage)
   .register('roster', rosterScreen)
   .register('staff', staffScreen)
+  .register('carBuilder', carBuilderScreen)
+  .register('car', carResultScreen)
+  .register('cars', carGarageScreen)
   .register('test', createTestScreen({ renderer, layout, assets, openSheet: () => sheet.open(testSheet), onTapLogged: (p) => window.__rw?.taps.push({ x: p.x, y: p.y }) }))
   .register('route', createRouteTestScreen({ renderer, layout, onBack: back }));
 router.go('boot');

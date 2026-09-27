@@ -1,6 +1,7 @@
 // RACEWORKS image list: key → path (relative to index.html).
 import { STATIONS } from './garage.js';
 import { STAFF, ROLES } from './staff.js';
+import { CLASSES, PARTS, BUILD_ART } from './cars.js';
 import { BOTTOM_SLOTS, TOP_BAR } from './home.js';
 
 const art = (folder, key) => [key, `assets/images/${folder}/${key}.png`];
@@ -12,6 +13,10 @@ export const ASSETS = {
   // (The Tired / Stressed / Inspired icons are drawn by code at start: src/ui/statusIcons.js.)
   ...Object.fromEntries(STAFF.map((s) => art('staff', s.art))),
   ...Object.fromEntries(Object.values(ROLES).map((r) => art('badges', r.badge))),
+  // Car projects (Milestone 4): the class's car, the six starter part icons, the build show's effects.
+  ...Object.fromEntries(Object.values(CLASSES).map((c) => art('cars', c.art))),
+  ...Object.fromEntries(Object.values(PARTS).map((p) => art('parts', p.art))),
+  ...Object.fromEntries(Object.values(BUILD_ART).map((k) => art('vfx', k))),
   // Home bars (Milestone 2): the five bottom-bar icons, Credits and Racing Tokens.
   ...Object.fromEntries(BOTTOM_SLOTS.map((s) => art('ui', s.icon))),
   ...Object.fromEntries(Object.values(TOP_BAR.icons).map((k) => art('rewards', k))),

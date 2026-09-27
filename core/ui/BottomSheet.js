@@ -186,6 +186,7 @@ export class BottomSheet {
         if (sr.y < b.y - 1 || sr.y > b.y + b.h) continue;
         if (hitRect(p, sr)) {
           if (!x.button.disabled && !x.button.locked) x.button.onTap?.();
+          else this.onLocked?.(x.button); // optional: a game can answer a tap on a greyed button (a sound)
           return true;
         }
       }
