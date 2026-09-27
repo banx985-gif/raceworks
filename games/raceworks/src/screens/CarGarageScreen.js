@@ -3,6 +3,8 @@
 import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { text, listRow, listRowHeight } from '../../../../core/ui/Kit.js';
+import { liveryKey, teamColourId } from '../ui/livery.js';
+import { pressedLook } from '../ui/pressable.js';
 
 const C = THEME.color;
 const S = THEME.size;
@@ -42,10 +44,13 @@ export function createCarGarageScreen({ layout, assets, team, topBar, goCar }) {
     const list = cars();
     if (!list.length && ctx) text(ctx, 'No cars yet — start one at the Pit Bay (Build → Pit Bay → New car).', 8, y, { size: S.body, color: C.textMuted, maxWidth: w - 16 });
     for (const rec of list) {
-      const row = carRow(rec);
+      const row = { ...carRow(rec), art: liveryKey(assets, rec.result.art, teamColourId(team)) }; // in the team colour
       const h = listRowHeight(w, row);
       const r = { x: 0, y, w, h };
-      if (ctx) listRow(ctx, assets, r, row);
+      if (ctx) {
+        listRow(ctx, assets, r, row);
+        pressedLook(ctx, r);
+      }
       rows.push({ number: rec.number, rect: r });
       y += h + 16;
     }

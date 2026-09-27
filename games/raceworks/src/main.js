@@ -333,7 +333,7 @@ carDebug.nextMonth = () => {
   const m = clock.month;
   while (clock.month === m) clock.advanceDay();
 };
-const menus = createGarageMenus({ garage: () => garage, team, open: openMenu, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t) => toast(t), goWeekend: () => goWeekend(), goTestRace: debug.enabled ? () => goTestRace() : null, goRaceResult: (index) => goSub('raceResult', { index }) });
+const menus = createGarageMenus({ garage: () => garage, team, assets, open: openMenu, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t) => toast(t), goWeekend: () => goWeekend(), goTestRace: debug.enabled ? () => goTestRace() : null, goRaceResult: (index) => goSub('raceResult', { index }) });
 
 // ---------------------------------------------------------------------------
 // Toasts (core/ui/Toast): short money news under the top bar — salary day, a contract paid, Emergency Credit on / off,

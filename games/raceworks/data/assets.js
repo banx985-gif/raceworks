@@ -1,7 +1,7 @@
 // RACEWORKS image list: key → path (relative to index.html).
 import { STATIONS } from './garage.js';
 import { STAFF, ROLES } from './staff.js';
-import { CLASSES, PARTS, BUILD_ART } from './cars.js';
+import { CLASSES, PARTS, BUILD_ART, CAR_FAMILIES } from './cars.js';
 import { BOTTOM_SLOTS, TOP_BAR } from './home.js';
 import { T01 } from './tracks/T01.js';
 import { RIVAL_TEAMS, PRIVATEERS } from './rivals.js';
@@ -24,6 +24,11 @@ export const ASSETS = {
   // (a pre-race backdrop only — the circuit itself is drawn in code from data/tracks/T01.js).
   ...Object.fromEntries([...Object.values(CLASSES).map((c) => c.raceArt), ...Object.values(RIVAL_TEAMS).map((t) => t.sprite), ...PRIVATEERS.map((p) => p.sprite)].map((k) => art('cars', k))),
   ...Object.fromEntries([T01.artKey].map((k) => art('tracks', k))),
+  // Milestone 8: the showcase picture of every car family in the field (race result rows), the race effects (spray and
+  // sparks are code; the Underbody Sparks, Breakdown Smoke and Pit-Service Burst art) and the main menu's key art.
+  ...Object.fromEntries([...Object.values(RIVAL_TEAMS), ...PRIVATEERS].map((t) => art('cars', CAR_FAMILIES[t.family].showcase))),
+  ...Object.fromEntries(['race_vfx_03', 'race_vfx_05', 'race_vfx_10'].map((k) => art('vfx', k))),
+  race_brand_02: 'assets/images/brand/race_brand_02.png',
   // Race weekends (Milestone 7): the tyre icons and the race HUD icons.
   ...Object.fromEntries(Object.values(TYRES).map((t) => art('tyres', t.icon))),
   ...Object.fromEntries(Object.values(RACE_ICONS).map((k) => art('ui', k))),

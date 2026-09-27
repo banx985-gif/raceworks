@@ -22,10 +22,20 @@
 //
 // New Game+ rule (for the game's NG+ milestone): starting NG+ must ask for a slot and never write over the parent run
 // — pass the parent's slot number in `except` to firstEmpty(), and let the slot screen lock it.
+//
+// Summary records (CAREWORKS Milestone 0; optional — a game that never writes one works exactly as before):
+//   await slots.create(n, { data, summary })  write a new campaign into slot n: its save, its summary record, last used
+//   await slots.writeSummary(n, summary)       refresh slot n's summary (e.g. on each autosave)
+//   await slots.summaries()                    [{ n, empty, summary, savedAt, error }] from the small summary records
+//                                               only (the slot screen never loads a whole campaign); a slot with a save
+//                                               but no record falls back to describe(load)
+//   await slots.lastUsed() → n or null         await slots.setLastUsed(n)   (its own small key, not in any slot)
+//   remove(n) also drops slot n's summary record and forgets it as last used.
+// accountKey (default 'account') names the account store; prefix 'campaign_' gives the keys campaign_1 … campaign_4.
 import { SaveSlot } from './SaveStore.js';
 
 export class CampaignSlots {
-  constructor({ adapter, count = 4, prefix = 'slot', version = 1, migrations = {}, describe = () => ({}), bus = null }) {
+  constructor({ adapter, count = 4, prefix = 'slot', version = 1, migrations = {}, describe = () => ({}), bus = null, accountKey = 'account' }) {
     this.adapter = adapter;
     this.count = count;
     this.prefix = prefix;
@@ -34,7 +44,61 @@ export class CampaignSlots {
     this.describe = describe;
     this.bus = bus;
     this.slots = new Map();
-    this.account = new SaveSlot({ adapter, key: 'account', version: 1, bus });
+    this.account = new SaveSlot({ adapter, key: accountKey, version: 1, bus });
+    this.lastKey = `${prefix}last`;
+  }
+
+  summaryKey(n) {
+    this._check(n);
+    return `${this.prefix}${n}:summary`;
+  }
+
+  async create(n, { data, summary }) {
+    await this.save(n, data);
+    await this.writeSummary(n, summary);
+    await this.setLastUsed(n);
+    this.bus?.emit('slots:created', { n });
+  }
+
+  writeSummary(n, summary) {
+    return this.adapter.set(this.summaryKey(n), { summary, savedAt: Date.now() });
+  }
+
+  async summaries() {
+    const out = [];
+    for (const n of this.numbers()) {
+      try {
+        const rec = await this.adapter.get(this.summaryKey(n));
+        if (rec?.summary) {
+          out.push({ n, empty: false, summary: rec.summary, savedAt: rec.savedAt ?? null, error: null });
+          continue;
+        }
+        const s = this.slot(n);
+        if (!(await s.has())) {
+          out.push({ n, empty: true, summary: null, savedAt: null, error: null });
+          continue;
+        }
+        const data = await s.load(); // a save written without a record (older build): describe it the long way
+        out.push(data ? { n, empty: false, summary: this.describe(data), savedAt: s.lastSavedAt, error: null } : { n, empty: true, summary: null, savedAt: null, error: null });
+      } catch (err) {
+        out.push({ n, empty: false, summary: null, savedAt: null, error: err.message ?? String(err) });
+      }
+    }
+    return out;
+  }
+
+  async lastUsed() {
+    try {
+      const m = await this.adapter.get(this.lastKey);
+      return Number.isInteger(m?.n) && m.n >= 1 && m.n <= this.count ? m.n : null;
+    } catch {
+      return null;
+    }
+  }
+
+  setLastUsed(n) {
+    this._check(n);
+    return this.adapter.set(this.lastKey, { n, at: Date.now() });
   }
 
   numbers() {
@@ -75,6 +139,8 @@ export class CampaignSlots {
 
   async remove(n) {
     await this.slot(n).clear();
+    await this.adapter.remove(this.summaryKey(n));
+    if ((await this.lastUsed()) === n) await this.adapter.remove(this.lastKey);
     this.bus?.emit('slots:removed', { n });
   }
 

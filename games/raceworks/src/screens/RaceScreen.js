@@ -9,6 +9,8 @@
 //   Key Moments (§24.5): fast-forward (2× / 4×) stops for your pit window and a podium battle in the last laps.
 // The screen only READS the race model (src/race/raceSim.js) and sends commands; watching at any speed or skipping
 // gives the same result for the same commands.
+// Milestone 8: your car is Aaron's race sprite in the team colour (src/ui/livery.js); spray, braking sparks, breakdown
+// smoke and the pit burst come from src/race/raceFx.js (looks only, capped).
 //   enter() takes the team's current race; onFinished(sim) when it ends; onLeave() for ‹ Garage.
 import { THEME, font } from '../../../../core/Theme.js';
 import { CachedLayer } from '../../../../core/CachedLayer.js';
@@ -16,11 +18,14 @@ import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { text, para, panel as drawPanel } from '../../../../core/ui/Kit.js';
 import { fitView, drawCircuit, drawCar, drawMinimap, toScreen } from '../race/trackDraw.js';
 import { RACE, TYRES, PACE_MODES, ORDERS, KEY_MOMENTS, RACE_ICONS } from '../../data/race.js';
+import { createRaceFx } from '../race/raceFx.js';
+import { liveryKey, teamColourId } from '../ui/livery.js';
 
 const C = THEME.color;
 const S = THEME.size;
 const TOP_H = 150;
-const ROW_H = 44;
+const ROW_H = 50;
+const HUD = S.body; // Milestone 8: the race numbers (order, gaps, wear) at body size so they read on a 360-wide phone
 const CTRL_H = 104;
 const GAP = 12;
 const CAR_LEN = 46; // logical px a car is drawn in the Overview (the road is drawn wider to match)
@@ -50,6 +55,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
   let camera = settings?.get('raceCamera') ?? 'overview';
   const layer = new CachedLayer({ width: 1, height: 1, draw: (g) => drawTrackLayer(g) });
   const ws = () => sim.geo.def.display?.widthScale ?? 1;
+  const fx = createRaceFx({ assets });
 
   function rects() {
     const sr = layout.safeRect;
@@ -156,6 +162,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
   function drawCars(ctx, v, len) {
     const alpha = sim.alpha();
     const c0 = me();
+    fx.draw(ctx, sim, v, len, ws());
     for (const c of sim.cars) {
       if (c === c0) continue;
       const e = sim.byId[c.id];
@@ -166,13 +173,14 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     if (c0) {
       const pose = sim.carPose(c0, alpha, ws());
       const q = toScreen(v, pose.x, pose.y);
-      drawCar(ctx, assets, sim.byId[PLAYER].sprite, q.x, q.y, pose.heading, len + 6, { ring: sim.byId[PLAYER].colour });
+      drawCar(ctx, assets, liveryKey(assets, sim.byId[PLAYER].sprite, teamColourId(team)), q.x, q.y, pose.heading, len + 6, { ring: sim.byId[PLAYER].colour });
       ctx.fillStyle = C.chip;
       ctx.beginPath();
       ctx.roundRect(q.x - 44, q.y - len - 16, 88, 34, 12);
       ctx.fill();
       text(ctx, 'YOU', q.x, q.y - len - 14, { size: S.small, bold: true, color: C.textOnDark, align: 'center' });
     }
+    fx.drawOver(ctx, sim, v, len, ws());
   }
 
   function drawLights(ctx) {
@@ -196,11 +204,11 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     const w = trackRect.w - 60;
     const x = trackRect.x + 30;
     const bodyH = para(null, banner.body, 0, 0, w - 60, { size: S.small });
-    const h = 90 + bodyH + (banner.kind === 'moment' ? 124 : 24);
+    const h = 104 + bodyH + (banner.kind === 'moment' ? 124 : 24);
     const y = trackRect.y + trackRect.h - h - 20;
     drawPanel(ctx, { x, y, w, h }, { fill: banner.kind === 'moment' ? C.panelGold : C.panelInfo, stroke: banner.kind === 'moment' ? C.gold : C.progress, lineWidth: 4, radius: 22 });
     text(ctx, banner.title, x + 30, y + 22, { size: S.body, bold: true, maxWidth: w - 140 });
-    para(ctx, banner.body, x + 30, y + 72, w - 60, { size: S.small, color: C.text });
+    para(ctx, banner.body, x + 30, y + 92, w - 60, { size: S.small, color: C.text }); // starts below the ✕
     const close = { x: x + w - 96, y: y + 12, w: 80, h: 70 };
     drawButton(ctx, close, '✕', { accent: C.outline, font: font(S.body, true) });
     buttons.push({ id: 'bannerClose', rect: close, onTap: () => (banner = null) });
@@ -231,11 +239,11 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
       const ahead = sim.gapAhead(c);
       const behind = sim.gapBehind(c);
       const line = `${Math.round(c.wear * 100)}% worn${ahead !== null ? ` · ▲ ${ahead.toFixed(1)}s` : ''}${behind !== null ? ` · ▼ ${behind.toFixed(1)}s` : ''}${c.pit ? ' · IN THE PITS' : c.pitReq ? ' · pitting' : ''}`;
-      ctx.font = font(S.small);
+      ctx.font = font(HUD);
       const tw = Math.min(top.w - 480, ctx.measureText(line).width);
       const ix = cx - (tw + 50) / 2;
       assets.drawContained(ctx, TYRES[c.tyre].icon, { x: ix, y: top.y + 84, w: 42, h: 42 });
-      text(ctx, line, ix + 50, top.y + 88, { size: S.small, color: c.wear > 0.62 ? C.bad : C.textMuted, maxWidth: top.w - 480 });
+      text(ctx, line, ix + 50, top.y + 86, { size: HUD, color: c.wear > 0.62 ? C.bad : C.textMuted, maxWidth: top.w - 480 });
     }
     const pos = c ? sim.order().indexOf(c) + 1 : 0;
     const chip = { x: top.x + top.w - 176, y: top.y + 20, w: 160, h: 110 };
@@ -256,10 +264,10 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
       if (e.isPlayer) drawPanel(ctx, { x: x - 4, y: y - 2, w: colW + 8, h: ROW_H - 2 }, { fill: C.panelGold, stroke: C.gold, lineWidth: 2, radius: 12 });
       ctx.fillStyle = e.colour;
       ctx.fillRect(x + 4, y + 6, 10, ROW_H - 14);
-      text(ctx, `${i + 1}`, x + 24, y + 4, { size: S.small, bold: true });
-      text(ctx, surname(e.name), x + 64, y + 4, { size: S.small, bold: e.isPlayer, color: c.retired ? C.textFaint : C.text, maxWidth: colW - 230 });
-      text(ctx, TYRES[c.tyre].name[0], x + colW - 150, y + 4, { size: S.small, bold: true, color: c.tyre === 'soft' ? C.bad : C.warn });
-      text(ctx, gapText(c, ord[0], i), x + colW - 6, y + 4, { size: S.small, color: C.textMuted, align: 'right' });
+      text(ctx, `${i + 1}`, x + 24, y + 4, { size: HUD, bold: true });
+      text(ctx, surname(e.name), x + 66, y + 4, { size: HUD, bold: e.isPlayer, color: c.retired ? C.textFaint : C.text, maxWidth: colW - 240 });
+      text(ctx, TYRES[c.tyre].name[0], x + colW - 158, y + 4, { size: HUD, bold: true, color: c.tyre === 'soft' ? C.bad : C.warn });
+      text(ctx, gapText(c, ord[0], i), x + colW - 6, y + 4, { size: HUD, color: C.text, align: 'right' });
     });
     const c = me();
     const done = sim.done || !c || c.finished || c.retired;
@@ -276,7 +284,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
         if (it.icon) {
           drawButton(ctx, r, '', { selected: it.selected, disabled: it.disabled, accent: it.accent });
           assets.drawContained(ctx, it.icon, { x: r.x + 10, y: r.y + 14, w: 64, h: 64 });
-          text(ctx, it.label, r.x + 84 + (r.w - 94) / 2, r.y + r.h / 2 - 22, { size: S.small, bold: true, color: C.textOnAction, align: 'center', maxWidth: r.w - 94 });
+          text(ctx, it.label, r.x + 84 + (r.w - 94) / 2, r.y + r.h / 2 - 24, { size: HUD, bold: true, color: it.disabled ? C.textFaint : it.selected ? C.textOnDark : C.textOnAction, align: 'center', maxWidth: r.w - 94 });
         } else drawButton(ctx, r, it.label, { selected: it.selected, disabled: it.disabled, accent: it.accent, font: f });
         buttons.push({ id: it.id, rect: r, onTap: it.disabled ? () => {} : it.onTap });
       }
@@ -332,6 +340,8 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     get nextTyre() {
       return nextTyre;
     },
+    hudTextSize: HUD, // (tests)
+    fx, // (tests)
     buttonRect(id) {
       return buttons.find((b) => b.id === id)?.rect ?? null;
     },
@@ -345,6 +355,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
       endT = 0;
       ended = false;
       banner = null;
+      fx.reset();
       nextTyre = me()?.tyre === 'soft' ? 'medium' : 'soft';
       camera = settings?.get('raceCamera') ?? camera;
       // the first weekend race: the crew runs it (bible §33 "First race weekend")
@@ -364,11 +375,13 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     command: (type, value) => cmd(type, value),
     update(dt) {
       if (!sim) return;
-      if (!paused && !sim.done) {
+      const running = !paused && !sim.done;
+      if (running) {
         let fired = null;
         sim.advance(dt * RACE.watchTimeScale * speed, speed > 1 ? { stopAt: () => (fired = momentNow()) !== null } : undefined);
         if (fired) fireMoment(fired);
       }
+      fx.step(sim, running ? dt * RACE.watchTimeScale * speed : 0, dt);
       keepT += dt;
       if (keepT > 3 && !sim.done) {
         keepT = 0;

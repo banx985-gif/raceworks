@@ -7,6 +7,8 @@ import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { text, para, panel as drawPanel, tabRects, drawTabs, listRow, listRowHeight } from '../../../../core/ui/Kit.js';
+import { pressedLook } from '../ui/pressable.js';
+import { liveryKey, teamColourId } from '../ui/livery.js';
 import { CLASSES, PARTS, SLOTS, BUDGETS, BUDGET_ORDER, PHASES, PROJECT, CAR_STATS } from '../../data/cars.js';
 import { ROLES } from '../../data/staff.js';
 import { partsOf, partsCost, tierFor, leadRole } from '../systems/carProject.js';
@@ -65,7 +67,7 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart }
 
     // --- class ---
     heading('Class');
-    const classRow = { art: cls.art, title: cls.name, lines: [{ text: `Weights · ${CAR_STATS.map((k) => `${k} ${cls.weights[k]}`).join(' · ')}`, size: S.small, color: C.textMuted }, { text: 'The only class for now — more arrive with research.', size: S.small, color: C.textMuted }], right: 'Chosen', rightColor: C.good, state: 'selected', artSize: 150 };
+    const classRow = { art: liveryKey(assets, cls.art, teamColourId(team)), title: cls.name, lines: [{ text: `Weights · ${CAR_STATS.map((k) => `${k} ${cls.weights[k]}`).join(' · ')}`, size: S.small, color: C.textMuted }, { text: 'The only class for now — more arrive with research.', size: S.small, color: C.textMuted }], right: 'Chosen', rightColor: C.good, state: 'selected', artSize: 150 };
     const crh = listRowHeight(w, classRow);
     if (ctx) listRow(ctx, assets, { x: 0, y, w, h: crh }, classRow);
     y += crh + 30;
@@ -101,7 +103,10 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart }
       const s = id ? team.get(id) : null;
       if (s) {
         const row = { art: s.art, title: s.name, lines: [{ text: `${ROLES[s.role].name} · Energy ${Math.round(s.energy)} · tap to take off`, size: S.small, color: C.textMuted }], right: `Slot ${i + 1}`, artSize: 110 };
-        if (ctx) listRow(ctx, assets, { ...r, h: slotH }, row);
+        if (ctx) {
+          listRow(ctx, assets, { ...r, h: slotH }, row);
+          pressedLook(ctx, r);
+        }
         hits.push({ rect: r, id: `slot_${s.id}`, onTap: () => (teamIds = teamIds.filter((x) => x !== s.id)) });
       } else if (ctx) {
         drawPanel(ctx, r, { fill: C.panelDim, stroke: C.line, radius: THEME.panel.radius });

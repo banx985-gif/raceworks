@@ -1,8 +1,8 @@
 // New Game setup and save-slot pictures drawn in code (Milestone 4b). The spec's optional frames
 // (setup_team_badge_frame, setup_founder_select_frame, ui_random_dice, ui_save_slot_frame) don't exist as art yet, so
-// these stand in for them — no image files. All words are drawn by the game.
+// these stand in for them — no image files. All words are drawn by the game. Cars are never drawn here: they are always
+// Aaron's art (Milestone 8; team colour through src/ui/livery.js).
 //   drawTeamBadge(ctx, r, colour, initials)   a shield in the team colour with livery stripes and the initials
-//   drawLiveryCar(ctx, r, colour)             a small side-on race car in the team livery
 //   drawDice(ctx, cx, cy, size)               the Random icon
 //   drawFounderFrame(ctx, r, selected)        the founder card frame (gold edge + tick when chosen)
 //   drawSlotFrame(ctx, r, colour)             a save-slot card with a team-colour band down its left edge
@@ -73,63 +73,6 @@ export function drawTeamBadge(ctx, r, colour, initials = '') {
     ctx.strokeText(initials, r.x + r.w / 2, r.y + r.h * 0.56, r.w * 0.8);
     ctx.fillStyle = '#FFFFFF';
     ctx.fillText(initials, r.x + r.w / 2, r.y + r.h * 0.56, r.w * 0.8);
-  }
-  ctx.restore();
-}
-
-export function drawLiveryCar(ctx, r, colour) {
-  const { x, y, w, h } = r;
-  const base = y + h * 0.78;
-  ctx.save();
-  ctx.lineJoin = 'round';
-  ctx.lineWidth = Math.max(3, w / 90);
-  ctx.strokeStyle = C.outline;
-  // Shadow
-  ctx.fillStyle = C.shade;
-  ctx.beginPath();
-  ctx.ellipse(x + w / 2, base + h * 0.12, w * 0.46, h * 0.07, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Body
-  ctx.beginPath();
-  ctx.moveTo(x + w * 0.04, base);
-  ctx.lineTo(x + w * 0.04, base - h * 0.22);
-  ctx.quadraticCurveTo(x + w * 0.08, base - h * 0.34, x + w * 0.26, base - h * 0.36);
-  ctx.lineTo(x + w * 0.38, base - h * 0.62);
-  ctx.quadraticCurveTo(x + w * 0.5, base - h * 0.7, x + w * 0.66, base - h * 0.6);
-  ctx.lineTo(x + w * 0.8, base - h * 0.38);
-  ctx.quadraticCurveTo(x + w * 0.96, base - h * 0.34, x + w * 0.97, base - h * 0.16);
-  ctx.lineTo(x + w * 0.97, base);
-  ctx.closePath();
-  ctx.fillStyle = colour.main;
-  ctx.fill();
-  ctx.save();
-  ctx.clip();
-  ctx.fillStyle = colour.light;
-  ctx.fillRect(x, base - h * 0.27, w, h * 0.08);
-  ctx.fillStyle = colour.dark;
-  ctx.fillRect(x, base - h * 0.08, w, h * 0.08);
-  ctx.restore();
-  ctx.stroke();
-  // Windows
-  ctx.fillStyle = '#BFE6F2';
-  ctx.beginPath();
-  ctx.moveTo(x + w * 0.41, base - h * 0.38);
-  ctx.lineTo(x + w * 0.46, base - h * 0.56);
-  ctx.quadraticCurveTo(x + w * 0.52, base - h * 0.6, x + w * 0.62, base - h * 0.55);
-  ctx.lineTo(x + w * 0.72, base - h * 0.38);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-  // Wheels
-  for (const cx of [x + w * 0.24, x + w * 0.78]) {
-    ctx.fillStyle = C.outline;
-    ctx.beginPath();
-    ctx.arc(cx, base, h * 0.17, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#C9CED4';
-    ctx.beginPath();
-    ctx.arc(cx, base, h * 0.08, 0, Math.PI * 2);
-    ctx.fill();
   }
   ctx.restore();
 }

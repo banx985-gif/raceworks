@@ -1,5 +1,5 @@
 // The garage (Milestones 1–4): the home screen. A small room on a hidden grid, seen in the 3/4 "dollhouse" view,
-// with the Pit Bay, the Strategy Desk and a placeholder rest spot, between the shared top bar and five-button bottom
+// with the Pit Bay, the Strategy Desk and the rest spot, between the shared top bar and five-button bottom
 // bar (core/ui). The three starters walk their routines (data/garage.js ROUTINES) with the core Agent pathing, each
 // with a name tag and status icons; when their Energy runs low they go and rest until it is back up.
 // Drag pans, pinch/wheel zooms (clamped to the room, in the space between the bars), tapping a station or a worker
@@ -7,6 +7,9 @@
 // Everyone's time runs at the top bar's speed (Pause / 1× / 2× / 4×); tick() runs every step, whichever screen shows.
 // Milestone 4: while a car is being built, its team works at the Pit Bay and the build plays on the bay
 // (src/ui/carBuildShow.js): one visible stage per phase, smoke for faults, a gold sparkle for breakthroughs.
+// Milestone 8: everything is Aaron's art (the rest spot too); people bob as they walk and tilt as they work
+// (core/CharacterMotion), work sparks and smoke rise off the bay while the crew builds, and the car on the bay wears
+// the team colour (src/ui/livery.js).
 //
 // Plan space (grid, pathing, positions) is flat; only drawing and tapping go through the IsoProjection.
 import { THEME, font } from '../../../../core/Theme.js';
@@ -16,6 +19,7 @@ import { Camera } from '../../../../core/Camera.js';
 import { WorldGestures } from '../../../../core/WorldGestures.js';
 import { drawIsoRoom, isoPath as diamond } from '../../../../core/IsoRoom.js';
 import { CachedLayer } from '../../../../core/CachedLayer.js';
+import { characterPose, drawCharacter } from '../../../../core/CharacterMotion.js';
 import { Agent } from '../../../../core/Agent.js';
 import { Selection } from '../../../../core/Selection.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
@@ -25,6 +29,7 @@ import { statusIconsOf } from '../ui/statusIcons.js';
 import { createBuildShow } from '../ui/carBuildShow.js';
 import { CLASSES, PARTS, PROJECT_SPOTS, PHASES } from '../../data/cars.js';
 import { TEAM_COLOURS } from '../../data/setup.js';
+import { liveryKey, teamColourId } from '../ui/livery.js';
 
 const C = THEME.color;
 const S = THEME.size;
@@ -52,18 +57,9 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     return { kind: 'station', id: def.id, def, rect: null, depth: (def.fp.col + def.fp.w / 2 + def.fp.row + def.fp.h / 2) * CELL };
   });
   // Where the art is drawn (projected world): centred on the footprint, base just below its front corner.
-  // A station drawn by code (the rest spot) is a box on its footprint, draw.height tall.
   const placeStations = () => {
     for (const st of stations) {
       const { fp, draw } = st.def;
-      if (!st.def.art) {
-        const left = iso.corner(fp.col, fp.row + fp.h).x;
-        const right = iso.corner(fp.col + fp.w, fp.row).x;
-        const top = iso.corner(fp.col, fp.row).y;
-        const bottom = iso.corner(fp.col + fp.w, fp.row + fp.h).y;
-        st.rect = { x: left, y: top - draw.height, w: right - left, h: bottom - top + draw.height };
-        continue;
-      }
       const w = (fp.w + fp.h) * HW * draw.width;
       const h = w / assets.aspect(st.def.art);
       const cx = iso.corner(fp.col + fp.w / 2, fp.row + fp.h / 2).x;
@@ -165,7 +161,8 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
   };
 
   // --- the visible build in the Pit Bay ---------------------------------------------------
-  const show = createBuildShow({ assets, pixelScale: () => renderer.pixelScale });
+  // busy: the clock is running and someone on the car's team is working at the bay (the work sparks and smoke).
+  const show = createBuildShow({ assets, pixelScale: () => renderer.pixelScale, busy: () => !clock.paused && !!team.cars.active && workers.some((a) => a.phase === 'working' && a.stop?.project) });
   bus.on('car:fault', () => show.event('smoke'));
   bus.on('car:breakthrough', () => show.event('sparkle'));
   bus.on('car:fix', () => show.event('fix'));
@@ -177,11 +174,11 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     return {
       job,
       fraction: job ? team.cars.fraction(job) : 0,
-      carKey: CLASSES[classId].art,
+      carKey: liveryKey(assets, CLASSES[classId].art, teamColourId(team)),
       partKeys: (job?.data.parts ?? []).map((id) => PARTS[id].art),
       at: bayFloor(),
       width: 300,
-      lastCar: last?.result?.art ?? null,
+      lastCar: last?.result?.art ? liveryKey(assets, last.result.art, teamColourId(team)) : null,
     };
   };
 
@@ -467,12 +464,16 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
       assets.detail = GARAGE.zoom.max;
       for (const it of items) {
         if (it.kind === 'worker') {
+          // style guide §5: a bob while walking, a small tilt while working, a breath while waiting (the art keeps
+          // the way it was drawn: no flip). Everyone moves out of step (seeded by their place in the list).
           const r = workerRect(it);
-          assets.draw(ctx, staffOf(it)?.art, r.x, r.y, r.w, r.h);
-        } else if (it.def.art) {
+          const pose = characterPose(it, simTime, workers.indexOf(it) * 1.7, POSE);
+          pose.flip = 1;
+          drawCharacter(ctx, assets, staffOf(it)?.art, r.x + r.w / 2, r.y + r.h, r.w, r.h, pose);
+        } else {
           assets.draw(ctx, it.def.art, it.rect.x, it.rect.y, it.rect.w, it.rect.h);
           if (it.id === 'F02') show.draw(ctx, showView());
-        } else drawRestSpot(ctx, it.def);
+        }
       }
       assets.detail = 1;
       camera.restore(ctx);
@@ -488,6 +489,7 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
   };
 
   const depthOf = (it) => (it.kind === 'worker' ? it.x + it.y : it.depth);
+  const POSE = { bob: 0, tilt: 0, flip: 1 }; // reused every frame
 
   // --- drawing -------------------------------------------------------------------
   // Floor and the two back walls (with the team stripes), drawn once into the cached layer (world units).
@@ -534,28 +536,9 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
   }
   const cellOutline = (t) => (t ? iso.outline(t.col, t.row) : null);
 
-  // The placeholder rest spot: a padded bench on its footprint, drawn as a 3/4 box (top, left and right faces).
-  function drawRestSpot(ctx, def) {
-    const { col, row, w, h } = def.fp;
-    const up = (p) => ({ x: p.x, y: p.y - def.draw.height });
-    const [t, r, b, l] = iso.outline(col, row, w, h);
-    ctx.lineWidth = 3 / camera.zoom;
-    ctx.strokeStyle = C.outline;
-    for (const [pts, fill] of [
-      [[l, b, up(b), up(l)], L.benchSide],
-      [[b, r, up(r), up(b)], L.benchFront],
-      [[up(t), up(r), up(b), up(l)], L.benchTop],
-    ]) {
-      diamond(ctx, pts);
-      ctx.fillStyle = fill;
-      ctx.fill();
-      ctx.stroke();
-    }
-  }
-
   // Name tags and status icons over each worker, in screen space (so they stay readable at any zoom), kept inside
   // the garage's view between the bars. Tags that would overlap (people standing together) stack upwards.
-  // A placeholder station drawn by code gets its name under it, so it's clear what it is.
+  // A station marked tag (the rest spot) gets its name under it, so it's clear what it is.
   function drawTags(ctx) {
     ctx.save();
     ctx.beginPath();
@@ -573,7 +556,7 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
       ctx.fillText(label, x + w / 2, y + tagH / 2 + 1);
     };
     ctx.font = font(S.small, true);
-    for (const st of stations.filter((x) => !x.def.art)) {
+    for (const st of stations.filter((x) => x.def.tag)) {
       const foot = camera.worldToScreen(st.rect.x + st.rect.w / 2, st.rect.y + st.rect.h);
       const tw = ctx.measureText(st.def.name).width + 28;
       chip(st.def.name, foot.x - tw / 2, foot.y + 8, tw);

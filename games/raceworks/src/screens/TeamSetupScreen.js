@@ -1,5 +1,6 @@
 // New Game setup (Milestone 4b, spec §1–2, §5–6): team name and Team Principal (typed, or Random from built-in
-// fictional lists), one of six team colours (or Random) with a badge / livery preview drawn in code, and 1 of 5
+// fictional lists), one of six team colours (or Random) with a badge and the Club Hatch in that colour (Aaron's car_v01_showcase with
+// the colour laid on through its livery anchors, src/ui/livery.js — Milestone 8: never a car drawn in code), and 1 of 5
 // founders (portrait, role, trait, founder perk). RANDOMISE ALL fills everything; any field can still be changed.
 // Next shows the confirmation (spec §6); START TEAM hands the setup to main.js, which creates the save.
 //   createTeamSetupScreen({ layout, assets, header, textPrompt, onStart(setup, slot), onBack })
@@ -10,7 +11,10 @@ import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { text, para, panel as drawPanel } from '../../../../core/ui/Kit.js';
 import { STAFF, ROLES, TRAITS } from '../../data/staff.js';
 import { TEAM_NAMES, PLAYER_NAMES, TEAM_COLOURS, FOUNDERS, PLAYER_TITLE, NAME_MAX } from '../../data/setup.js';
-import { drawTeamBadge, drawLiveryCar, drawDice, drawFounderFrame, initialsOf } from '../ui/setupArt.js';
+import { drawTeamBadge, drawDice, drawFounderFrame, initialsOf } from '../ui/setupArt.js';
+import { liveryKey } from '../ui/livery.js';
+import { pressedLook } from '../ui/pressable.js';
+import { CLASSES } from '../../data/cars.js';
 
 const C = THEME.color;
 const S = THEME.size;
@@ -73,6 +77,7 @@ export function createTeamSetupScreen({ layout, assets, header, textPrompt, onSt
   function field(ctx, r, value, placeholder) {
     if (!ctx) return;
     drawPanel(ctx, r, { fill: '#FFFFFF', stroke: C.outline, lineWidth: 4, radius: 24 });
+    pressedLook(ctx, r, { radius: 24 });
     text(ctx, value || placeholder, r.x + 28, r.y + r.h / 2, { size: S.button, bold: !!value, color: value ? C.text : C.textFaint, baseline: 'middle', maxWidth: r.w - 56 });
   }
 
@@ -115,7 +120,7 @@ export function createTeamSetupScreen({ layout, assets, header, textPrompt, onSt
     if (ctx) {
       drawPanel(ctx, { x: 0, y, w, h: prevH + 20 }, { fill: C.panelAlt, stroke: C.line, lineWidth: 3, radius: 24 });
       drawTeamBadge(ctx, { x: 30, y: y + 18, w: 160, h: 185 }, colour, initialsOf(state.teamName || 'RW'));
-      drawLiveryCar(ctx, { x: 230, y: y + 10, w: Math.min(w - 260, 480), h: prevH * 0.95 }, colour);
+      assets.drawContained(ctx, liveryKey(assets, CLASSES.clubHatch.art, colour.id), { x: 220, y: y + 8, w: Math.min(w - 240, 420), h: prevH + 4 });
     }
     y += prevH + 44;
     const cw = (w - 2 * 18) / 3;
@@ -129,6 +134,7 @@ export function createTeamSetupScreen({ layout, assets, header, textPrompt, onSt
         ctx.roundRect(r.x + 14, r.y + r.h - 58, r.w - 28, 46, 23);
         ctx.fill();
         text(ctx, c.name, r.x + r.w / 2, r.y + r.h - 35, { size: S.small, bold: true, color: C.textOnDark, align: 'center', baseline: 'middle', maxWidth: r.w - 40 });
+        pressedLook(ctx, r, { radius: 24 });
       }
       hits.push({ rect: r, id: `colour_${c.id}`, onTap: () => (state.colour = c.id) });
     });
@@ -151,6 +157,7 @@ export function createTeamSetupScreen({ layout, assets, header, textPrompt, onSt
       const r = { x: 0, y, w, h };
       if (ctx) {
         drawFounderFrame(ctx, r, on);
+        pressedLook(ctx, r);
         assets.drawContained(ctx, d.art, { x: 24, y: y + 20, w: 190, h: h - 40 });
         let ty = y + 28;
         text(ctx, d.name, tx, ty, { size: S.heading, bold: true, maxWidth: tw });
@@ -187,7 +194,7 @@ export function createTeamSetupScreen({ layout, assets, header, textPrompt, onSt
     if (ctx) {
       drawPanel(ctx, { x: 0, y, w, h: 260 }, { fill: C.panelAlt, stroke: C.line, lineWidth: 3, radius: 24 });
       drawTeamBadge(ctx, { x: 30, y: y + 22, w: 190, h: 220 }, colour, initialsOf(state.teamName));
-      drawLiveryCar(ctx, { x: 260, y: y + 30, w: Math.min(w - 290, 520), h: 220 }, colour);
+      assets.drawContained(ctx, liveryKey(assets, CLASSES.clubHatch.art, colour.id), { x: 250, y: y + 14, w: Math.min(w - 270, 460), h: 232 });
     }
     y += 290;
     const row = (label, value, extra = null) => {

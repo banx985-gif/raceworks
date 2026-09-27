@@ -1,12 +1,17 @@
 // A race result (Milestone 6): the finishing order with gaps, best laps, grid → finish, retirements, the fastest
 // lap, and what the race did to your car (Condition, repaired in the Car Garage). enter({ index }) shows
 // team.races.history[index] (default: the latest).
+// Milestone 8: every row shows the car's showcase picture — the same family as its race sprite (data/cars.js
+// CAR_FAMILIES), yours in the team colour.
 import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { text, para, panel as drawPanel } from '../../../../core/ui/Kit.js';
 import { TRACKS } from '../race/tracks.js';
 import { raceClock } from './RaceScreen.js';
+import { CLASSES, CAR_FAMILIES } from '../../data/cars.js';
+import { RIVAL_TEAMS, PRIVATEERS } from '../../data/rivals.js';
+import { liveryKey, teamColourId } from '../ui/livery.js';
 
 const C = THEME.color;
 const S = THEME.size;
@@ -23,6 +28,13 @@ export function createRaceResultScreen({ layout, assets, team, topBar, goGarage,
   });
   let index = null;
   let hits = [];
+  // A row's car picture: the player's class, a rival team's family (by driver), or a privateer's.
+  const familyOfRow = (r) => Object.values(RIVAL_TEAMS).find((t) => t.drivers.some((d) => d.id === r.id))?.family ?? PRIVATEERS.find((p) => p.id === r.id)?.family ?? null;
+  const carPicture = (r, e) => {
+    if (r.isPlayer) return liveryKey(assets, CLASSES[team.cars.cars.get(e.carNumber)?.result.classId]?.art ?? CLASSES.clubHatch.art, teamColourId(team));
+    const fam = familyOfRow(r);
+    return fam ? CAR_FAMILIES[fam].showcase : null;
+  };
   const entry = () => (index === null ? team.races.last() : team.races.history[index]) ?? null;
 
   function layoutPage(ctx, w) {
@@ -55,9 +67,11 @@ export function createRaceResultScreen({ layout, assets, team, topBar, goGarage,
       if (ctx) {
         drawPanel(ctx, box, { fill: r.isPlayer ? C.panelGold : r.pos % 2 ? C.panel : C.panelAlt, stroke: r.isPlayer ? C.gold : C.line, lineWidth: 2, radius: 14 });
         text(ctx, r.status === 'retired' ? 'DNF' : `${r.pos}`, 24, y + 26, { size: S.heading, bold: true, color: r.pos <= 3 && r.status === 'finished' ? C.gold : C.text });
-        text(ctx, r.name, 130, y + 12, { size: S.body, bold: r.isPlayer, maxWidth: w * 0.45 });
-        text(ctx, `${r.team} · grid P${r.grid}${r.best ? ` · best ${raceClock(r.best)}` : ''}${r.fails.length ? ' · trouble' : ''}`, 130, y + 56, { size: S.small, color: C.textMuted, maxWidth: w * 0.6 });
-        text(ctx, r.pos === 1 && r.time ? raceClock(r.time) : r.gap, w - 20, y + 30, { size: S.body, bold: true, align: 'right' });
+        const pic = carPicture(r, e);
+        if (pic) assets.drawContained(ctx, pic, { x: 92, y: y + 6, w: 130, h: 84 });
+        text(ctx, r.name, 236, y + 12, { size: S.body, bold: r.isPlayer, maxWidth: w - 236 - 190 });
+        text(ctx, `${r.team} · grid P${r.grid}${r.best ? ` · best ${raceClock(r.best)}` : ''}${r.fails.length ? ' · trouble' : ''}`, 236, y + 56, { size: S.small, color: C.textMuted, maxWidth: w - 236 - 20 });
+        text(ctx, r.pos === 1 && r.time ? raceClock(r.time) : r.gap, w - 20, y + 12, { size: S.body, bold: true, align: 'right' }); // on the name line, clear of the team line
       }
       y += 104;
     }

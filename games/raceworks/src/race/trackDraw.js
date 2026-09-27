@@ -177,11 +177,8 @@ export function drawCar(g, assets, key, x, y, heading, lengthPx, { ring: ringCol
   g.beginPath();
   g.ellipse(2, 3, w * 0.5, lengthPx * 0.5, 0, 0, Math.PI * 2);
   g.fill();
-  if (img) assets.drawContained(g, key, { x: -w / 2, y: -lengthPx / 2, w, h: lengthPx });
-  else {
-    g.fillStyle = '#C33';
-    g.fillRect(-w / 2, -lengthPx / 2, w, lengthPx);
-  }
+  // Always Aaron's art (a missing picture shows the loader's placeholder box, never a car drawn in code).
+  assets.drawContained(g, key, { x: -w / 2, y: -lengthPx / 2, w, h: lengthPx });
   g.restore();
 }
 

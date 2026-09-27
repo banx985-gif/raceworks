@@ -22,15 +22,12 @@ export const GARAGE_LOOK = {
   stripe: '#D8352A', // team red band along the walls
   stripe2: '#F2B233',
   gridLine: 'rgba(21,151,191,0.55)', // Build Mode shows the hidden grid
-  benchTop: '#3FA7D6', // the placeholder rest spot: a padded blue bench
-  benchFront: '#2C7FA8',
-  benchSide: '#236A8E',
 };
 
 // Stations. fp = footprint on the grid (blocked for walking). spot = where the station's worker stands;
 // spots = other named places to stand there (a second person at the desk…).
 // draw: art width as a share of the footprint's drawn width; drop = how far below the footprint's
-// bottom corner the art's base sits, in cell heights. art: null = drawn by code (a placeholder).
+// bottom corner the art's base sits, in cell heights. tag: show the station's name under it on the floor.
 export const STATIONS = [
   {
     id: 'F02',
@@ -54,16 +51,19 @@ export const STATIONS = [
     draw: { width: 1.12, drop: 0.3 },
   },
   {
-    // Milestone 3 placeholder until the Driver Simulator / Driver Gym (the rest & training stations) arrive.
+    // The rest spot until the Driver Simulator / Driver Gym (the rest & training stations) arrive. Milestone 8: drawn with
+    // Aaron's Driver Gym picture (its bench, drinks and screens) instead of the code-drawn blue bench; its name shows
+    // under it so it reads as the rest spot. Swap the art when a lounge picture exists.
     id: 'REST',
     name: 'Rest Spot',
     role: 'Rest',
-    art: null,
+    art: 'facility_f26',
+    tag: true,
     purpose: 'A bench and a drink: tired staff come here to get their Energy back.',
-    fp: { col: 9, row: 11, w: 2, h: 1 },
+    fp: { col: 9, row: 10, w: 2, h: 2 },
     spot: { col: 9, row: 12 },
     spots: { b: { col: 10, row: 12 }, c: { col: 11, row: 11 } },
-    draw: { height: 70 }, // bench height, drawn px
+    draw: { width: 1.02, drop: 0.3 },
   },
 ];
 export const REST_STATION = 'REST';

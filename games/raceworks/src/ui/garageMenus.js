@@ -17,6 +17,7 @@ import { leadRole } from '../systems/carProject.js';
 import { FOUNDER_FLAG } from '../../data/setup.js';
 import { COSTS } from '../../data/economy.js';
 import { moneyMenu, fmt } from './moneyMenu.js';
+import { liveryKey, teamColourId } from './livery.js';
 
 const C = THEME.color;
 
@@ -26,7 +27,7 @@ export function staffLine(s) {
   return [ROLES[s.role].name, `Level ${s.level}`, TIERS[s.tier].name, ...status].join(' · ');
 }
 
-export function createGarageMenus({ garage, team, open, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null }) {
+export function createGarageMenus({ garage, team, assets = null, open, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null }) {
   const menus = new MenuRegistry();
   for (const def of STATIONS) {
     if (def.id === 'F02') continue; // the Pit Bay's sheet is the car project's (below)
@@ -47,7 +48,7 @@ export function createGarageMenus({ garage, team, open, goRoster, goStaff, goBui
         subtitle: pitBay.purpose,
         art: pitBay.art,
         sections: [
-          { columns: 1, buttons: [{ id: 'newCar', label: 'New car', sub: can.ok ? 'Start a Club Hatch project' : can.reason, icon: CLASSES.clubHatch.art, onTap: goBuilder }] },
+          { columns: 1, buttons: [{ id: 'newCar', label: 'New car', sub: can.ok ? 'Start a Club Hatch project' : can.reason, icon: assets ? liveryKey(assets, CLASSES.clubHatch.art, teamColourId(team)) : CLASSES.clubHatch.art, onTap: goBuilder }] },
           { columns: 1, buttons: [garageButton()] },
         ],
       };

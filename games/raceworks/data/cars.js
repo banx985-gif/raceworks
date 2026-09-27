@@ -26,6 +26,43 @@ export const PARTS = {
   EL01: { slot: 'EL', name: 'Basic ECU', cost: 200, cx: 1, mods: { ACC: 5, REL: 4 }, art: 'part_el01' },
 };
 
+// Car visual families (bible §18, §41): each family is one showcase picture (3/4 front-side, the garage and results)
+// and one top-down race sprite (drawn nose DOWN; the race turns it to the heading), so a car looks like the same car
+// in the garage and on track. The pairs were matched by body shape (assets/ART_STATUS.md).
+//   paint: the colour family the art is painted in (a team in that colour sees the art exactly as drawn).
+//   liveryAnchors (bible §41.1): team-colour patches over the art, as polygons in fractions of the image (0–1).
+//     Inside a patch only the red body paint takes the team colour (its shading kept); windows, lights, tyres,
+//     the white and yellow stripes and the outlines are never touched. null = shown in its own colours (rivals).
+//     sponsorSlots: none yet (sponsors arrive with their milestone).
+const fam = (n, paint = 'red', liveryAnchors = null) => ({ showcase: `car_v${n}_showcase`, top: `car_v${n}_top`, paint, liveryAnchors });
+export const CAR_FAMILIES = {
+  V01: fam('01', 'red', {
+    showcase: [
+      // roof, roof scoop, the pillar behind the windscreen and the frame over the side windows
+      [[0.4, 0.1], [0.75, 0.08], [0.85, 0.15], [0.93, 0.22], [0.92, 0.26], [0.86, 0.22], [0.74, 0.2], [0.72, 0.46], [0.67, 0.48], [0.665, 0.3], [0.68, 0.21], [0.44, 0.21]],
+      // bonnet and front bumper (below the windscreen, clear of the front wheel) with the windscreen's left pillar
+      [[0.03, 0.42], [0.22, 0.38], [0.33, 0.17], [0.41, 0.1], [0.45, 0.19], [0.37, 0.22], [0.29, 0.39], [0.28, 0.41], [0.62, 0.45], [0.66, 0.55], [0.6, 0.63], [0.57, 0.94], [0.3, 0.995], [0.04, 0.95], [0.01, 0.7]],
+      // door and rear quarter (below the side windows, between the wheels)
+      [[0.62, 0.47], [0.7, 0.45], [0.9, 0.41], [0.88, 0.3], [0.99, 0.33], [0.98, 0.5], [0.9, 0.56], [0.86, 0.72], [0.8, 0.8], [0.78, 0.62], [0.66, 0.57]],
+      // the rear wing's end plate
+      [[0.92, 0.12], [1, 0.1], [1, 0.3], [0.93, 0.3]],
+    ],
+    race: [
+      // rear deck, roof and rear wings, and the side panels beside the cockpit (the art's nose points down)
+      [[0.04, 0.11], [0.96, 0.11], [0.96, 0.58], [0.7, 0.58], [0.68, 0.36], [0.32, 0.36], [0.3, 0.58], [0.04, 0.58]],
+      // bonnet and front wings (in front of the windscreen)
+      [[0.14, 0.55], [0.86, 0.55], [0.86, 0.86], [0.14, 0.86]],
+      // the front splitter's red tow hooks and fins
+      [[0.24, 0.86], [0.76, 0.86], [0.76, 1], [0.24, 1]],
+    ],
+    sponsorSlots: [],
+  }),
+  V02: fam('02'), V03: fam('03'), V04: fam('04'), V05: fam('05'), V06: fam('06'), V07: fam('07'), V08: fam('08'), V09: fam('09'), V10: fam('10'),
+  V11: fam('11'), V12: fam('12'), V13: fam('13'), V14: fam('14'), V15: fam('15'), V16: fam('16'), V17: fam('17'), V18: fam('18'), V19: fam('19'), V20: fam('20'),
+};
+// Which family a showcase or race picture belongs to (null for anything else).
+export const familyOfArt = (key) => Object.values(CAR_FAMILIES).find((f) => f.showcase === key || f.top === key) ?? null;
+
 // Car classes (bible §14.2, §16). weights sum to 100.
 //   base: the bare car's stats before parts and development. The bible gives none — PLACEHOLDER, to tune.
 export const CLASSES = {
@@ -34,8 +71,9 @@ export const CLASSES = {
     weights: { SPD: 15, ACC: 20, COR: 18, BRK: 15, REL: 15, EFF: 10, TYR: 7 },
     base: { SPD: 110, ACC: 100, COR: 100, BRK: 95, REL: 100, EFF: 100, TYR: 90 },
     starterParts: { PU: 'PU01', TR: 'TR01', CH: 'CH01', AE: 'AE01', HB: 'HB01', EL: 'EL01' },
-    art: 'car_v01_showcase', // bible §18 V01
-    raceArt: 'car_v01_top', // the top-down race sprite (drawn nose DOWN; the race rotates it to the heading)
+    family: 'V01', // bible §18 V01: the same car in the garage (art) and on track (raceArt)
+    art: CAR_FAMILIES.V01.showcase,
+    raceArt: CAR_FAMILIES.V01.top,
   },
 };
 

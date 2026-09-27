@@ -10,6 +10,7 @@ import { text, para, panel as drawPanel } from '../../../../core/ui/Kit.js';
 import { CAR_STATS, CAR_STAT_NAMES, PARTS, PHASES, BUDGETS, BUILD_ART } from '../../data/cars.js';
 import { ROLES } from '../../data/staff.js';
 import { COSTS } from '../../data/economy.js';
+import { liveryKey, teamColourId } from '../ui/livery.js';
 
 const C = THEME.color;
 const S = THEME.size;
@@ -45,7 +46,7 @@ export function createCarResultScreen({ layout, assets, team, topBar, goCarGarag
       text(ctx, rec.name, 32, y + 26, { size: S.title, bold: true, maxWidth: w - 64 });
       text(ctx, `${r.className} · finished on day ${r.finishedDay + 1} · ${rec.days} game days to build`, 32, y + 96, { size: S.small, color: C.textMuted, maxWidth: w - 64 });
       const art = { x: 24, y: y + 140, w: w * 0.55, h: 300 };
-      assets.drawContained(ctx, r.art, art);
+      assets.drawContained(ctx, liveryKey(assets, r.art, teamColourId(team)), art); // Milestone 8: in the team colour
       if (fresh && t < 2.5) {
         ctx.save();
         ctx.globalAlpha = Math.max(0, 1 - t / 2.5);
