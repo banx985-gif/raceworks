@@ -10,11 +10,8 @@ export const BOTTOM_SLOTS = [
   { id: 'money', label: 'Money', icon: 'race_ui_05', line: 'Credits, sponsors, contracts and saving.' },
 ];
 
-// Top bar. Placeholder values until the economy exists (Milestone 5); the calendar does not tick yet.
+// Top bar: the icons and speeds. Its numbers (Credits, Racing Tokens, Rank) come from team.money (Milestone 5).
 export const TOP_BAR = {
-  credits: 5000,
-  tokens: 0,
-  rank: 'E',
   icons: { credits: 'race_reward_01', tokens: 'race_reward_02' },
   speeds: [1, 2, 4], // bible §6.1: Pause / 1× / 2× / 4×
 };

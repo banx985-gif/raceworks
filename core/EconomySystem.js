@@ -4,8 +4,13 @@
 // spending kinds that are blocked while negative, and closure after N month-ends below the limit.
 //
 // Emits: 'economy:change' (every line), 'economy:debt' ({ inDebt }), 'economy:closure'.
+// maxLines (optional, Milestone 28 of Robot Workshop): once the ledger passes it, the oldest lines are folded into one
+// "earlier lines" line per currency (same total, same running balance), so a 16-year save never grows without limit.
+// Balances, reconcile() and totals() over the kept period stay exact.
 export class EconomySystem {
-  constructor({ bus = null, currencies, debt = {}, now = () => 0 }) {
+  constructor({ bus = null, currencies, debt = {}, now = () => 0, maxLines = Infinity, foldReason = 'Earlier lines (combined)' }) {
+    this.maxLines = maxLines;
+    this.foldReason = foldReason;
     this.bus = bus;
     this.currencies = currencies; // { credits: { name, ... }, ... } — names from game data
     this.debt = { warnBelow: 0, limit: -25000, monthlyInterestPct: 5, closureMonths: 3, blockedWhileNegative: [], ...debt };
@@ -43,6 +48,7 @@ export class EconomySystem {
       balance: this.balances[currency],
     };
     this.ledger.push(line);
+    if (this.ledger.length > this.maxLines * 1.25) this._fold();
     this.bus?.emit('economy:change', line);
     if (this.inDebt !== wasInDebt) this.bus?.emit('economy:debt', { inDebt: this.inDebt });
     return line;
@@ -82,6 +88,22 @@ export class EconomySystem {
       this.closed = true;
       this.bus?.emit('economy:closure', { badMonths: this.badMonths, balance: this.balances[c] });
     }
+  }
+
+  // Keep the newest maxLines lines; everything older becomes one line per currency.
+  _fold() {
+    const cut = this.ledger.length - this.maxLines;
+    if (cut <= 0) return;
+    const old = this.ledger.slice(0, cut);
+    const folded = [];
+    for (const cur of Object.keys(this.balances)) {
+      const lines = old.filter((l) => l.currency === cur);
+      if (!lines.length) continue;
+      const last = lines[lines.length - 1];
+      folded.push({ n: last.n, day: last.day, currency: cur, amount: lines.reduce((t, l) => t + l.amount, 0), reason: this.foldReason, category: 'carried', balance: last.balance, folded: lines.length + lines.reduce((t, l) => t + ((l.folded ?? 1) - 1), 0) });
+    }
+    folded.sort((a, b) => a.n - b.n);
+    this.ledger = [...folded, ...this.ledger.slice(cut)];
   }
 
   // --- checks ---------------------------------------------------------------

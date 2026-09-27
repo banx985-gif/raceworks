@@ -70,7 +70,7 @@ export class FounderPerks {
 
   carry(snapshot, legacyPicked = false) {
     if (!this.id) return null;
-    return { id: this.id, legacy: !!legacyPicked, pastRuns: [...this.pastRuns, { ...snapshot, pastRuns: undefined }] };
+    return { id: this.id, legacy: !!legacyPicked, pastRuns: [...this.pastRuns, { ...snapshot }] };
   }
 
   serialize() {

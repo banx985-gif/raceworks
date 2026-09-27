@@ -1,6 +1,9 @@
 // Fixed-step simulation + per-frame render.
 // update(dtSeconds) always runs with the same step size; render(alpha) runs once per animation frame.
 // Pauses automatically when the tab/app is hidden, and resumes when it comes back.
+// Milestone 27 (optional): loop.governor = a core/FrameGovernor — draw only every renderEvery-th animation frame (a
+// steady 30 FPS on a slow phone); the fixed steps still follow real time, so the game never runs slower.
+// renderCount counts the frames actually drawn.
 export class FixedStepLoop {
   constructor({ update, render, stepHz = 60, maxStepsPerFrame = 5, autoPauseOnHide = true, bus = null } = {}) {
     this.update = update || (() => {});
@@ -16,6 +19,9 @@ export class FixedStepLoop {
     this.lastTime = 0;
     this.stepCount = 0;
     this._rafId = 0;
+    this.governor = null;
+    this.renderCount = 0;
+    this._frameN = 0;
 
     // Timing stats (smoothed) for the debug overlay.
     this.stats = {
@@ -110,13 +116,20 @@ export class FixedStepLoop {
     }
     const tRender = performance.now();
     const alpha = this.paused ? 0 : this.accumulator / this.stepMs;
-    this.render(alpha);
+    const every = this.governor?.renderEvery ?? 1;
+    this._frameN = (this._frameN + 1) % every;
+    const draw = this._frameN === 0;
+    if (draw) {
+      this.render(alpha);
+      this.renderCount++;
+    }
     const tEnd = performance.now();
+    if (draw) this.governor?.frame(frameMs * every, tEnd - tUpdate);
 
     const s = this.stats;
     s.stepsLastFrame = steps;
     s.updateMs = lerp(s.updateMs, tRender - tUpdate, 0.1);
-    s.renderMs = lerp(s.renderMs, tEnd - tRender, 0.1);
+    if (draw) s.renderMs = lerp(s.renderMs, tEnd - tRender, 0.1);
   }
 
   _recordFrame(frameMs) {

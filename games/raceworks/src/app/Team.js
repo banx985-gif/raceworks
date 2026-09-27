@@ -12,6 +12,9 @@
 //   team.setup { teamName, principal, colour, founderId } · team.founder { id, flag, history } · team.isFounder(id)
 //   team.founderPerk(staff) → the perk when that person is the founder · team.noCandidates (never hiring candidates)
 //   team.playSeconds (real seconds played) · team.summary() → the save-slot card · team.useSlot(saveSlot)
+// Milestone 5: team.money (src/systems/economy.js) — Credits / RP / Racing Tokens on one ledger, Reputation and rank,
+//   Emergency Credit, salaries on day 1, the car build's costs, car upkeep and repairs, the development contract.
+//   team.startCar(opts) charges the parts and starts the build (or says why not: debt, not enough Credits).
 import { Clock } from '../../../../core/Clock.js';
 import { Rng } from '../../../../core/Rng.js';
 import { StaffSystem } from '../../../../core/StaffSystem.js';
@@ -24,6 +27,8 @@ import { createRatingsCache } from '../systems/driverRatings.js';
 import { createCarProjects } from '../systems/carProject.js';
 import { BUDGETS } from '../../data/cars.js';
 import { ASSIGNMENT } from '../../data/garage.js';
+import { createTeamMoney } from '../systems/economy.js';
+import { partsOf, partsCost } from '../systems/carProject.js';
 
 // A new game's setup when none is given (tests, and saves from before Milestone 4b).
 export const DEFAULT_SETUP = { teamName: 'RACEWORKS', principal: 'Principal', colour: 'red', founderId: 'MEC01' };
@@ -40,6 +45,8 @@ export const SAVE_MIGRATIONS = {
     founder.history.carsDeveloped = (d.cars?.cars?.records ?? []).filter((r) => r.team?.some((m) => m.id === founder.id)).length;
     return { ...record, data: { ...d, setup: { ...DEFAULT_SETUP, legacy: true }, founder, noCandidates: ['DRV01'], playSeconds: 0 } };
   },
+  //   2 → 3 (Milestone 5): money. Nothing to change here — Team.load() gives a save without it the §30.2 starting state.
+  2: (record) => record,
 };
 
 export class Team {
@@ -73,6 +80,7 @@ export class Team {
       perkOf: (s) => this.founderPerk(s),
       stationIds: () => Object.keys(ASSIGNMENT).filter((id) => this.staff.get(id)),
     });
+    this.money = createTeamMoney({ bus, seed, clock: this.clock, staff: this.staff, cars: this.cars });
     this.ratings = createRatingsCache();
     this.garageSnapshot = () => null; // the garage replaces this
     this.garageState = null; // positions from the last load, for the garage to put people back
@@ -83,12 +91,19 @@ export class Team {
     this.playSeconds = 0;
     bus.on('clock:day', () => {
       this.staff.dailyTick();
+      this.money.daily(this.cars.active); // the build's running cost for today (before it can finish)
       this.cars.projects.dailyTick(); // after the staff day, so today's Energy counts
+      this.money.dailyAfter(); // contract deadlines
       this.trackFounderDay();
     });
-    bus.on('clock:month', () => this.staff.monthlyTick());
+    // Day 1 of a month: the staff month, then interest / salaries / upkeep / the contract offer.
+    bus.on('clock:month', () => {
+      this.staff.monthlyTick();
+      this.money.monthStart();
+    });
     bus.on('project:complete', ({ record }) => {
       if (record?.team?.some((m) => m.id === this.founder.id)) this.founder.history.carsDeveloped++;
+      if (record) this.money.carFinished(record);
     });
   }
 
@@ -111,6 +126,22 @@ export class Team {
     this.cars.assignments.refresh();
     this.ratings = createRatingsCache();
     this.garageState = null;
+    this.money.newGame(); // §30.2 starting state, month 1 salaries, the first contract offer
+  }
+
+  // Start a car project, paying for its parts (Milestone 5). → { ok, job } or { ok: false, reason }.
+  canStartCar(classId = 'clubHatch') {
+    if (this.cars.active) return { ok: false, reason: 'A car is already being built' };
+    return this.money.canStartCar(partsCost(partsOf(classId)));
+  }
+
+  startCar(opts) {
+    const classId = opts.classId ?? 'clubHatch';
+    const can = this.canStartCar(classId);
+    if (!can.ok) return can;
+    const r = this.cars.start({ ...opts, classId });
+    if (r.ok) this.money.chargeParts(r.job.name, partsCost(r.job.data.parts));
+    return r;
   }
 
   get(id) {
@@ -166,7 +197,7 @@ export class Team {
       founderPerk: f?.perkName ?? '',
       year: this.clock.year,
       month: this.clock.month,
-      rank: SLOT_PLACEHOLDERS.rank,
+      rank: this.money.rank,
       ngPlus: SLOT_PLACEHOLDERS.ngPlus,
       grade: SLOT_PLACEHOLDERS.grade,
       playSeconds: Math.round(this.playSeconds),
@@ -201,6 +232,7 @@ export class Team {
       founder: JSON.parse(JSON.stringify(this.founder)),
       noCandidates: [...this.noCandidates],
       playSeconds: Math.round(this.playSeconds * 10) / 10,
+      money: this.money.serialize(),
     };
   }
 
@@ -217,6 +249,15 @@ export class Team {
     this.noCandidates = [...(data.noCandidates ?? [])];
     this.playSeconds = data.playSeconds ?? 0;
     this.ratings = createRatingsCache();
+    if (data.money) this.money.load(data.money);
+    else this.adoptMoney(); // a save from before Milestone 5
+  }
+
+  // A team saved before Milestone 5 had no money: it gets the §30.2 starting state today, and each car it already
+  // finished counts for Reputation (and gets a full Condition).
+  adoptMoney() {
+    this.money.newGame();
+    for (const rec of this.cars.cars.list()) this.money.carFinished(rec);
   }
 
   // The single pre-4b save key (the tests use it; the game saves through core/CampaignSlots and useSlot()).

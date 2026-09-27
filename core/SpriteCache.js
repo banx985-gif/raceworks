@@ -3,12 +3,16 @@
 // pixel size, shrinking in halves for a clean result (one big jump looks jagged or muddy).
 // After that the copy is drawn 1:1, which is fast and sharp. When the screen's pixel scale
 // changes (window resize, rotate) every copy is thrown away and remade on demand.
+// Milestone 27 (memory): prune(ageSec) drops the copies of any image not drawn for ageSec seconds (a screen you have
+// left), so memory stays flat over a long session; the next draw simply makes them again. stats.pruned counts them.
 export class SpriteCache {
   constructor({ maxSizesPerImage = 16 } = {}) {
     this.pixelScale = 1; // real screen pixels per logical unit
     this.maxSizesPerImage = maxSizesPerImage;
     this.byKey = new Map(); // key → Map(sizeCode → canvas)
-    this.stats = { made: 0, hits: 0, cleared: 0 };
+    this.stats = { made: 0, hits: 0, cleared: 0, pruned: 0 };
+    this.used = new Map(); // key → the prune clock when it was last drawn
+    this.clock = 0;
   }
 
   setPixelScale(scale) {
@@ -20,6 +24,7 @@ export class SpriteCache {
 
   clear() {
     this.byKey.clear();
+    this.used.clear();
     this.stats.cleared++;
   }
 
@@ -33,6 +38,7 @@ export class SpriteCache {
     const pw = Math.max(1, Math.round(w * this.pixelScale));
     const ph = Math.max(1, Math.round(h * this.pixelScale));
     const code = pw * 65536 + ph; // number key: no string built per frame
+    this.used.set(key, this.clock);
     let sizes = this.byKey.get(key);
     if (!sizes) {
       sizes = new Map();
@@ -48,6 +54,21 @@ export class SpriteCache {
     sizes.set(code, copy);
     this.stats.made++;
     return copy;
+  }
+
+  // Call now and then (e.g. every few seconds) with the seconds since the last call.
+  prune(dtSec, ageSec = 45) {
+    this.clock += dtSec;
+    let n = 0;
+    for (const [key, t] of this.used) {
+      if (this.clock - t < ageSec) continue;
+      const sizes = this.byKey.get(key);
+      n += sizes?.size ?? 0;
+      this.byKey.delete(key);
+      this.used.delete(key);
+    }
+    this.stats.pruned += n;
+    return n;
   }
 
   get count() {

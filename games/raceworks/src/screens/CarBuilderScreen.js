@@ -1,6 +1,7 @@
 // New car (Milestone 4): the simple builder the Pit Bay's "New car" opens.
 //   Class (Club Hatch only for now) · the six slots with their starter parts · budget focus · the 5-slot team ·
-//   the total part cost (shown, not charged until money exists in Milestone 5) · Start.
+//   the total part cost (paid at Start, Milestone 5) and the daily running cost · Start (greyed with the reason when the
+//   team cannot start a car: Emergency Credit, not enough Credits).
 // Tap a person in a team slot to take them off; tap someone under "Available" to put them on.
 import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
@@ -9,6 +10,7 @@ import { text, para, panel as drawPanel, tabRects, drawTabs, listRow, listRowHei
 import { CLASSES, PARTS, SLOTS, BUDGETS, BUDGET_ORDER, PHASES, PROJECT, CAR_STATS } from '../../data/cars.js';
 import { ROLES } from '../../data/staff.js';
 import { partsOf, partsCost, tierFor, leadRole } from '../systems/carProject.js';
+import { COSTS } from '../../data/economy.js';
 
 const C = THEME.color;
 const S = THEME.size;
@@ -126,7 +128,8 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart }
     heading('Total');
     const days = teamIds.length ? estimateDays() : Infinity;
     const lines = [
-      `Parts: ${fmt(partsCost(parts))} Credits (charged once money arrives in Milestone 5)`,
+      `Parts: ${fmt(partsCost(parts))} Credits, paid at Start (you have ${fmt(team.money.credits)})`,
+      `Running cost: ${fmt(Math.round(COSTS.carDaily * (1 + BUDGETS[budget].costPct / 100)))} Credits a day while it is built (${BUDGETS[budget].name})`,
       `${tier.name} project · complexity ${tier.cx} · ${tier.target} work per phase`,
       teamIds.length ? `About ${days} game days with this team (${(days / 28).toFixed(1)} months)` : 'Nobody on the team: the car would never be built',
     ];
@@ -136,9 +139,12 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart }
     }
     y += 16;
     const start = { x: 0, y, w, h: 130 };
-    if (ctx) drawButton(ctx, start, 'Start', { disabled: !teamIds.length });
-    hits.push({ rect: start, id: 'start', onTap: () => teamIds.length && onStart({ classId, budget, staffIds: [...teamIds] }) });
-    y += 130 + 30;
+    const can = team.canStartCar(classId);
+    if (ctx) drawButton(ctx, start, 'Start', { disabled: !teamIds.length || !can.ok });
+    hits.push({ rect: start, id: 'start', onTap: () => teamIds.length && can.ok && onStart({ classId, budget, staffIds: [...teamIds] }) });
+    y += 130 + 16;
+    if (!can.ok) y += para(ctx, can.reason, 8, y, w - 16, { size: S.small, color: C.bad }) + 14;
+    y += 14;
     return y;
   }
 

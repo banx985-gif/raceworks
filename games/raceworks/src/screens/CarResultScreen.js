@@ -1,6 +1,7 @@
 // A finished car (Milestone 4): shown when a build finishes, and again from the Car Garage.
 //   The car, its QUALITY (0–100, bible §14.10) big, RATING / FAULTS / INNOVATION, the 7 stats (bible §14.4),
 //   and a short history: phases (days, budget), faults, breakthroughs, the team and the parts.
+// Milestone 5: its Condition (0–100), the monthly upkeep and Repair (Credits per point; races damage cars from M6).
 // enter({ number, fresh, from }) — number = the Car Garage record; fresh = it has just been built (a gold sparkle).
 import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
@@ -8,13 +9,14 @@ import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { text, para, panel as drawPanel } from '../../../../core/ui/Kit.js';
 import { CAR_STATS, CAR_STAT_NAMES, PARTS, PHASES, BUDGETS, BUILD_ART } from '../../data/cars.js';
 import { ROLES } from '../../data/staff.js';
+import { COSTS } from '../../data/economy.js';
 
 const C = THEME.color;
 const S = THEME.size;
 const PHASE_NAME = Object.fromEntries(PHASES.map((p) => [p.id, p.name]));
 const STAT_BAR_FULL = 400; // bars fill at this value (a first-season car is ~150–250)
 
-export function createCarResultScreen({ layout, assets, team, topBar, goCarGarage }) {
+export function createCarResultScreen({ layout, assets, team, topBar, goCarGarage, debugEnabled = false, toast = () => {} }) {
   const panel = new ScrollPanel({
     getRect: () => {
       const t = topBar.rect();
@@ -81,13 +83,33 @@ export function createCarResultScreen({ layout, assets, team, topBar, goCarGarag
     }
     y += 12;
 
+    // --- condition and repair (Milestone 5) ---
+    const cond = rec.condition ?? 100;
+    const cost = team.money.repairCost(rec);
+    if (ctx) {
+      text(ctx, 'Condition', 8, y, { size: S.heading, bold: true, color: C.actionDark });
+      bar(ctx, 440, y + 16, w - 440 - 130, 28, cond / 100, cond < 50 ? C.bad : C.good);
+      text(ctx, String(cond), w - 8, y + 4, { size: S.heading, bold: true, align: 'right' });
+    }
+    y += 64;
+    y += para(ctx, `Upkeep ${COSTS.maintenance.perCarMonthly} Credits a month (paid on day 1). Races wear the car; a repair costs ${COSTS.repair.perPoint} Credits per point.`, 8, y, w - 16, { size: S.small, color: C.textMuted }) + 16;
+    const rb = { x: 0, y, w: debugEnabled ? w * 0.62 : w, h: 124 };
+    if (ctx) drawButton(ctx, rb, cost ? `Repair · ${cost.toLocaleString('en-US')} Cr` : 'Repair · in full condition', { disabled: !cost || !team.money.affordable(cost), accent: C.progress });
+    hits.push({ rect: rb, id: 'repair', onTap: () => cost && toast(team.money.repairCar(rec.number).ok ? 'Car repaired' : 'Not enough Credits') });
+    if (debugEnabled) {
+      const db = { x: w * 0.62 + 16, y, w: w * 0.38 - 16, h: 124 };
+      if (ctx) drawButton(ctx, db, 'Damage −30', { accent: C.purple });
+      hits.push({ rect: db, id: 'dbgDamage', onTap: () => (rec.condition = Math.max(0, cond - 30)) });
+    }
+    y += 124 + 40;
+
     // --- history ---
     if (ctx) text(ctx, 'History', 8, y, { size: S.heading, bold: true, color: C.actionDark });
     y += 64;
     const lines = [];
     rec.phases.forEach((p, i) => lines.push({ text: `${i + 1}. ${PHASE_NAME[p.phaseId]} — ${p.days} days · ${BUDGETS[r.budgets[i] ?? 'balanced'].name}` }));
     if (!r.faultList.length) lines.push({ text: 'No faults.', color: C.good });
-    for (const f of r.faultList) lines.push({ text: `Fault in ${PHASE_NAME[f.phase]} (day ${f.day + 1}, ${f.stat}) — ${f.fixed ? `fixed by ${f.fixed === 'testing' ? 'testing' : 'a breakthrough'}` : `left open: ${f.stat} −10, Quality −3`}`, color: f.fixed ? C.textMuted : C.bad });
+    for (const f of r.faultList) lines.push({ text: `Fault in ${PHASE_NAME[f.phase]} (day ${f.day + 1}, ${f.stat}) — ${f.fixed ? `fixed by ${{ testing: 'testing', emergency: 'an Emergency Fix' }[f.fixed] ?? 'a breakthrough'}` : `left open: ${f.stat} −10, Quality −3`}`, color: f.fixed ? C.textMuted : C.bad });
     if (!r.breakthroughs.length) lines.push({ text: 'No breakthroughs this time (4% chance at 60% of each phase).', color: C.textMuted });
     for (const b of r.breakthroughs) lines.push({ text: `Breakthrough in ${PHASE_NAME[b.phase]} (day ${b.day + 1}): ${b.kind}, +10 Innovation`, color: C.gold });
     lines.push({ text: `Team: ${rec.team.map((m) => `${m.name} (${ROLES[m.role]?.name ?? m.role})`).join(', ')}` });

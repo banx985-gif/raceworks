@@ -7,6 +7,8 @@
 //   slots.count · slots.slot(i) → SaveSlot (i from 0)
 //   await slots.peek(i)   → the slot's data (migrated), or null when empty; { error } when every copy is damaged
 //   await slots.peekAll() → [data | null | { error }] for every slot
+//   slots.savedAt[i]      → when the slot was last saved (ms), as the last peek found it (null when empty)
+//   await slots.newest()  → the index of the most recently saved slot, or -1
 //   await slots.lastUsed() / setLastUsed(i)
 //   await slots.firstEmpty() → index or -1
 //   await slots.remove(i) → clears that slot's copies (and forgets it as last used)
@@ -19,6 +21,7 @@ export class SaveSlots {
     this.keys = keys;
     this.metaKey = metaKey;
     this.slots = keys.map((key) => new SaveSlot({ adapter, key, version, migrations, rolling, bus }));
+    this.savedAt = keys.map(() => null);
   }
 
   get count() {
@@ -34,8 +37,11 @@ export class SaveSlots {
     const s = this.slots[i];
     const reader = new SaveSlot({ adapter: this.adapter, key: s.key, version: s.version, migrations: s.migrations, rolling: s.rolling });
     try {
-      return await reader.load();
+      const data = await reader.load();
+      this.savedAt[i] = data ? (reader.lastSavedAt ?? 0) : null;
+      return data;
     } catch (err) {
+      this.savedAt[i] = null;
       return { error: err.message ?? String(err) };
     }
   }
@@ -44,6 +50,15 @@ export class SaveSlots {
     const out = [];
     for (let i = 0; i < this.slots.length; i++) out.push(await this.peek(i));
     return out;
+  }
+
+  async newest() {
+    await this.peekAll();
+    let best = -1;
+    this.savedAt.forEach((t, i) => {
+      if (t != null && (best < 0 || t > this.savedAt[best])) best = i;
+    });
+    return best;
   }
 
   async lastUsed() {

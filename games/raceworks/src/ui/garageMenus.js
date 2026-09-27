@@ -4,6 +4,8 @@
 //   goRoster() · goStaff(id) open the staff screens (Milestone 3).
 //   goBuilder() · goCarGarage() open the car screens (Milestone 4). debug: extra buttons with ?debug=1.
 //   goMainMenu() saves and returns to the main menu (Milestone 4b: from the Money sheet, "saving" lives there).
+// Milestone 5: the Money sheet (src/ui/moneyMenu.js), the Pit Bay's Emergency Fix and running cost. toast(text) says
+//   why something was refused.
 import { MenuRegistry } from '../../../../core/ui/BottomSheet.js';
 import { THEME } from '../../../../core/Theme.js';
 import { STATIONS } from '../../data/garage.js';
@@ -12,7 +14,9 @@ import { ROLES, TIERS } from '../../data/staff.js';
 import { STATUS_ORDER, STATUS_NAME } from './statusIcons.js';
 import { PHASES, BUDGETS, BUDGET_ORDER, CLASSES, PROJECT } from '../../data/cars.js';
 import { leadRole } from '../systems/carProject.js';
-import { PLAYER_TITLE, FOUNDER_FLAG } from '../../data/setup.js';
+import { FOUNDER_FLAG } from '../../data/setup.js';
+import { COSTS } from '../../data/economy.js';
+import { moneyMenu, fmt } from './moneyMenu.js';
 
 const C = THEME.color;
 
@@ -22,7 +26,7 @@ export function staffLine(s) {
   return [ROLES[s.role].name, `Level ${s.level}`, TIERS[s.tier].name, ...status].join(' · ');
 }
 
-export function createGarageMenus({ garage, team, open, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null }) {
+export function createGarageMenus({ garage, team, open, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {} }) {
   const menus = new MenuRegistry();
   for (const def of STATIONS) {
     if (def.id === 'F02') continue; // the Pit Bay's sheet is the car project's (below)
@@ -37,12 +41,13 @@ export function createGarageMenus({ garage, team, open, goRoster, goStaff, goBui
     const cars = team.cars;
     const job = cars.active;
     if (!job) {
+      const can = team.canStartCar();
       return {
         title: pitBay.name,
         subtitle: pitBay.purpose,
         art: pitBay.art,
         sections: [
-          { columns: 1, buttons: [{ id: 'newCar', label: 'New car', sub: 'Start a Club Hatch project', icon: CLASSES.clubHatch.art, onTap: goBuilder }] },
+          { columns: 1, buttons: [{ id: 'newCar', label: 'New car', sub: can.ok ? 'Start a Club Hatch project' : can.reason, icon: CLASSES.clubHatch.art, onTap: goBuilder }] },
           { columns: 1, buttons: [garageButton()] },
         ],
       };
@@ -66,10 +71,27 @@ export function createGarageMenus({ garage, team, open, goRoster, goStaff, goBui
           { text: `Faults: ${open} open (${job.data.faults.length} so far) · Breakthroughs: ${job.data.breakthroughs.length}`, color: open ? C.bad : C.text },
           `Team (${teamList.length} of ${PROJECT.teamSlots}): ${teamList.map((s) => s.name.split(' ')[0]).join(', ')}${lead ? ` · ${lead.name.split(' ')[0]} leads this phase (+${PROJECT.roleMatchPct}%)` : ''}`,
           `Budget focus (changes between phases): ${BUDGETS[job.data.budget].name}${job.data.nextBudget ? ` → ${BUDGETS[job.data.nextBudget].name} next phase` : ''}`,
+          `Running cost: ${fmt(team.money.carDailyCost(job))} Credits a day`,
         ],
       },
       { buttons: budgetButtons, columns: 3 },
-      { columns: 1, buttons: [{ id: 'emergencyFix', label: 'Emergency Fix', sub: open ? 'Costs Credits: arrives with money in Milestone 5' : 'No open faults', disabled: true }, garageButton()] },
+      {
+        columns: 1,
+        buttons: [
+          {
+            id: 'emergencyFix',
+            label: 'Emergency Fix',
+            sub: open ? `Fix one fault now: ${fmt(COSTS.emergencyFix.credits)} Credits, −${COSTS.emergencyFix.innovation} Innovation` : 'No open faults',
+            disabled: !open || !team.money.affordable(COSTS.emergencyFix.credits),
+            accent: C.bad,
+            onTap: () => {
+              const r = team.money.emergencyFix(job);
+              toast(r.ok ? 'Fault fixed' : r.reason);
+            },
+          },
+          garageButton(),
+        ],
+      },
     ];
     if (debug) {
       sections.push({
@@ -126,15 +148,7 @@ export function createGarageMenus({ garage, team, open, goRoster, goStaff, goBui
           { buttons: team.roster.map((s) => ({ id: `staff_${s.id}`, label: s.name.split(' ')[0], sub: ROLES[s.role].name, icon: s.art, accent: C.progress, onTap: () => goStaff(s.id) })), columns: 3 },
         ];
       }
-      if (slot.id === 'money' && goMainMenu) {
-        menu.sections = [
-          {
-            lines: [{ text: `${team.setup.teamName} · ${PLAYER_TITLE} ${team.setup.principal}`, color: C.actionDark }, 'Your team saves by itself every day and whenever something changes.'],
-            columns: 1,
-            buttons: [{ id: 'mainMenu', label: 'Save & main menu', sub: 'Switch teams, start a new one or load a slot', icon: slot.icon, accent: C.progress, onTap: goMainMenu }],
-          },
-        ];
-      }
+      if (slot.id === 'money') return moneyMenu({ slot, team, goMainMenu, debug, toast });
       return menu;
     });
   }

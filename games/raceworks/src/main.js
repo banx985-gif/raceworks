@@ -5,7 +5,8 @@
 // there if it is empty; &founder=AER01 picks its founder). Debug badge check: ?debug=1 then B cycles a red badge
 // through the bottom-bar buttons (or ?debug=1&badge=staff on a phone). ?debug=1&reset=1 empties every save slot;
 // with ?debug=1 the staff detail screen has stat / Energy / Morale nudge buttons, and the Pit Bay sheet has
-// +5 days / Finish phase / Fault now / Breakthrough buttons while a car is being built.
+// +5 days / Finish phase / Fault now / Breakthrough buttons while a car is being built. Milestone 5: the Money sheet has
+// −20,000 / +20,000 Credits (a forced-negative test), To next month and +100 Rep; a car screen has Damage −30.
 import { THEME, font } from '../../../core/Theme.js';
 import { EventBus } from '../../../core/EventBus.js';
 import { Rng } from '../../../core/Rng.js';
@@ -17,7 +18,8 @@ import { AssetManager } from '../../../core/AssetManager.js';
 import { FixedStepLoop } from '../../../core/FixedStepLoop.js';
 import { DebugOverlay } from '../../../core/DebugOverlay.js';
 import { BottomSheet } from '../../../core/ui/BottomSheet.js';
-import { createTopBar } from '../../../core/ui/TopBar.js';
+import { createTopBar, topBarRect } from '../../../core/ui/TopBar.js';
+import { drawToasts } from '../../../core/ui/Toast.js';
 import { createBottomBar } from '../../../core/ui/BottomBar.js';
 import { createStorageAdapter } from '../../../core/StorageAdapter.js';
 import { Autosave } from '../../../core/Autosave.js';
@@ -106,12 +108,18 @@ const loop = new FixedStepLoop({
     router.update(dt);
     sheet.update(dt);
     dialog.update(dt);
+    for (const t of toasts) t.age += dt;
+    while (toasts.length && toasts[0].age > TOAST_LIFE) toasts.shift();
     backNav.sync();
   },
   render: (alpha) => {
     const ctx = renderer.begin(COL.bg);
     router.render(ctx, alpha);
     sheet.render(ctx);
+    if (toasts.length && GAME_SCREENS.includes(router.currentName)) {
+      const tb = topBarRect(layout);
+      drawToasts(ctx, toasts, { x: tb.x + 40, y: tb.y + tb.h + 16, w: tb.w - 80, life: TOAST_LIFE });
+    }
     dialog.render(ctx);
     if (onTestScreen()) drawButton(ctx, pauseButton(), loop.paused ? 'RESUME' : 'PAUSE', { selected: loop.paused });
     if (loop.paused) drawPaused(ctx);
@@ -136,7 +144,7 @@ bus.on('clock:speed', ({ speed }) => debug.log(speed ? `speed ${speed}×` : 'gam
 // Autosave (core/Autosave): every game day and after any change, plus when the app goes to the background.
 const autosave = new Autosave({
   bus,
-  triggers: ['clock:day', 'team:changed', 'project:start', 'project:phase', 'project:complete', 'car:fault', 'car:fix', 'car:breakthrough'],
+  triggers: ['clock:day', 'team:changed', 'project:start', 'project:phase', 'project:complete', 'car:fault', 'car:fix', 'car:breakthrough', 'contract:accepted', 'contract:success', 'car:repaired', 'economy:debt'],
   save: () => team.save(),
   stamp: () => JSON.stringify(team.serialize()),
   running: () => !clock.paused,
@@ -254,15 +262,38 @@ const carDebug = {
     while (team.cars.active === job && job.phaseIndex === i) clock.advanceDay();
   },
 };
-const menus = createGarageMenus({ garage: () => garage, team, open: openMenu, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null });
+// ?debug=1 money buttons (Money sheet): force Credits up or down (a forced-negative test), jump to next month's day 1.
+carDebug.money = (n) => team.money.economy.add('credits', n, n < 0 ? 'Debug: money taken' : 'Debug: money added', 'debug');
+carDebug.nextMonth = () => {
+  const m = clock.month;
+  while (clock.month === m) clock.advanceDay();
+};
+const menus = createGarageMenus({ garage: () => garage, team, open: openMenu, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t) => toast(t) });
+
+// ---------------------------------------------------------------------------
+// Toasts (core/ui/Toast): short money news under the top bar — salary day, a contract paid, Emergency Credit on / off,
+// a new rank — and why a button was refused.
+const toasts = [];
+const TOAST_LIFE = 3.2;
+function toast(title, body = '') {
+  toasts.push({ entry: { title, body }, age: 0 });
+  if (toasts.length > 3) toasts.shift();
+}
+const fmtCr = (n) => Math.round(n).toLocaleString('en-US');
+bus.on('clock:month', () => teamReady && toast(`Month ${clock.month}: salaries paid`, `−${fmtCr(team.money.salaryBill())} Credits${team.money.upkeepBill() ? ` · car upkeep −${fmtCr(team.money.upkeepBill())}` : ''}`));
+bus.on('economy:debt', ({ inDebt }) => teamReady && (inDebt ? toast('Emergency Credit is on', 'Cash is below 0: no new cars, interest monthly. See Money.') : toast('Out of Emergency Credit', 'Cash is back above 0.')));
+bus.on('contract:success', ({ contract }) => teamReady && toast('Contract paid', `+${fmtCr(contract.credits)} Credits · +${contract.rp} RP`));
+bus.on('contract:failed', ({ contract }) => teamReady && toast('Contract ended', `${contract.title}: the deadline passed`));
+bus.on('reputation:rankUp', ({ rank }) => teamReady && toast(`Rank ${rank.id}!`, 'Your team has moved up a rank.'));
 
 // ---------------------------------------------------------------------------
 // The shared bars (core/ui), filled with RACEWORKS content.
 const topBarStats = () => [
-  { icon: TOP_BAR.icons.credits, iconSize: 60, text: TOP_BAR.credits.toLocaleString('en-US'), gap: 14 },
-  { icon: TOP_BAR.icons.tokens, text: String(TOP_BAR.tokens) },
-  { text: `Rank ${TOP_BAR.rank}`, color: COL.actionDark },
+  { icon: TOP_BAR.icons.credits, iconSize: 60, text: team.money.credits.toLocaleString('en-US'), gap: 14 },
+  { icon: TOP_BAR.icons.tokens, text: String(team.money.tokens) },
+  { text: `Rank ${team.money.rank}`, color: COL.actionDark },
 ];
+const statsBad = () => teamReady && team.money.inDebt; // Emergency Credit: the chip turns red
 const badges = Object.fromEntries(BOTTOM_SLOTS.map((s) => [s.id, null])); // slot → badge text (data; nothing sets them yet)
 const topBar = createTopBar({
   layout,
@@ -270,6 +301,7 @@ const topBar = createTopBar({
   clock,
   home: true,
   stats: () => topBarStats(),
+  statsBad,
   onStats: () => openMenu('money'),
   onInbox: () => openMenu('inbox'),
   onHelp: () => openMenu('help'),
@@ -287,6 +319,7 @@ const screenBar = createTopBar({
     onTap: () => back(),
   },
   stats: () => topBarStats(),
+  statsBad,
   // From a staff screen these return to the garage and open their sheet there.
   onStats: () => fromScreen('money'),
   onInbox: () => fromScreen('inbox'),
@@ -394,13 +427,14 @@ const carBuilderScreen = createCarBuilderScreen({
   team,
   topBar: screenBar,
   onStart: (opts) => {
-    const r = team.cars.start(opts);
+    const r = team.startCar(opts); // pays for the parts (Milestone 5)
     debug.log(r.ok ? `car started: ${r.job.name} (${opts.budget}, team ${opts.staffIds.join(', ')})` : `car not started: ${r.reason}`);
+    if (!r.ok) return toast(r.reason);
     router.go('garage');
-    if (r.ok) garage.focusPitBay?.();
+    garage.focusPitBay?.();
   },
 });
-const carResultScreen = createCarResultScreen({ layout, assets, team, topBar: screenBar, goCarGarage });
+const carResultScreen = createCarResultScreen({ layout, assets, team, topBar: screenBar, goCarGarage, debugEnabled: debug.enabled, toast: (x) => toast(x) });
 const carGarageScreen = createCarGarageScreen({ layout, assets, team, topBar: screenBar, goCar });
 // The garage tells the daily tick what each person is doing, and its workers' places travel in the save.
 team.activityOf = (s) => garage.activityOf(s.id);
@@ -568,7 +602,7 @@ const setupScreen = createTeamSetupScreen({
   onBack: () => router.go(setupFrom, setupFrom === 'slots' ? { mode: slotsScreen.mode } : {}),
 });
 
-if (debug.enabled) window.__rw = { slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, screenBar, badges, cycleDebugBadge, taps: [] };
+if (debug.enabled) window.__rw = { slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, screenBar, badges, cycleDebugBadge, taps: [] };
 
 router
   .register('boot', bootScreen)
