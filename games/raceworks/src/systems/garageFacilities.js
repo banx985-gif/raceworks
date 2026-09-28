@@ -17,10 +17,13 @@ import { FacilitySystem } from '../../../../core/FacilitySystem.js';
 import { rankIndexOf } from '../../../../core/CompanyRank.js';
 import { FACILITIES, REST_SPOT, PROPS, SELL_REFUND_PCT, STARTER_AREA, EXPANSIONS, ENTRANCE, START_LAYOUT, PHASE_AREAS, BUILD_TEXT } from '../../data/facilities.js';
 import { RANKS } from '../../data/economy.js';
+import { nodeLabel } from './research.js';
 
 export const FACILITY_DEFS = Object.fromEntries([...FACILITIES, REST_SPOT, ...PROPS].map((d) => [d.id, { ...d, w: d.size.w, h: d.size.h }]));
 
-export function createGarageFacilities({ bus, money, research = () => new Set() }) {
+// research() → the finished research nodes (Milestone 11); extraBonus(key) / extraKeys() → effects from elsewhere (research
+// bonuses) added into bonus(key), so every system still asks the one query.
+export function createGarageFacilities({ bus, money, research = () => new Set(), extraBonus = () => 0, extraKeys = () => [] }) {
   const system = new FacilitySystem({
     bus,
     defs: FACILITY_DEFS,
@@ -59,7 +62,7 @@ export function createGarageFacilities({ bus, money, research = () => new Set() 
   ];
 
   // --- the effect queries -------------------------------------------------------------------------------------------
-  const bonus = (key) => system.total(key);
+  const bonus = (key) => system.total(key) + extraBonus(key);
   const api = {
     system,
     defs: FACILITY_DEFS,
@@ -71,7 +74,8 @@ export function createGarageFacilities({ bus, money, research = () => new Set() 
     // The development bonus on each car stat: { SPD: 2.5, … }.
     devBonus() {
       const out = {};
-      for (const d of Object.values(FACILITY_DEFS)) for (const e of d.effects) if (e.key.startsWith('dev.')) out[e.key.slice(4)] = bonus(e.key);
+      const keys = [...Object.values(FACILITY_DEFS).flatMap((d) => d.effects.map((e) => e.key)), ...extraKeys()];
+      for (const k of keys) if (k.startsWith('dev.')) out[k.slice(4)] = bonus(k);
       return out;
     },
 
@@ -86,7 +90,7 @@ export function createGarageFacilities({ bus, money, research = () => new Set() 
     lockReason(defId) {
       const u = FACILITY_DEFS[defId]?.unlock ?? {};
       if (u.rank && !hasRank(u.rank)) return `Needs Rank ${u.rank}`;
-      if (u.research && !research().has(u.research)) return `Needs research: ${u.research}`;
+      if (u.research && !research().has(u.research)) return `Needs ${nodeLabel(u.research)} research`;
       return null;
     },
     status(defId) {
@@ -96,7 +100,8 @@ export function createGarageFacilities({ bus, money, research = () => new Set() 
       const why = owned ? BUILD_TEXT.owned : api.lockReason(defId) ?? (money.economy.isBlocked('facility') ? BUILD_TEXT.debt : !money.affordable(def.cost) ? `Needs ${def.cost.toLocaleString('en-US')} Credits` : null);
       return { def, owned, ok: !why, why, locked: !!api.lockReason(defId) };
     },
-    // The shop: every bible facility here (F01–F15), ready ones first, then locked, then the ones already built.
+    // The shop: every bible facility here (F01–F15, Milestone 11 adds the ones research opens), ready ones first, then
+    // locked, then the ones already built.
     shopList: () =>
       FACILITIES.map((f) => api.status(f.id)).sort((a, b) => a.owned - b.owned || a.locked - b.locked || a.def.cost - b.def.cost || a.def.id.localeCompare(b.def.id)),
 

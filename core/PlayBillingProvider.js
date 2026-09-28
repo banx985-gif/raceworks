@@ -6,7 +6,12 @@
 // unavailable" or returns no products. Then every call reports 'unavailable' and the game shows its plain "store
 // unavailable" message and plays on. Nothing here can charge money until 29b puts the products on Play.
 //
-//   new PlayBillingProvider({ bridge, products: { key: { kind, entitlement? } } })   product keys = Play product ids
+//   new PlayBillingProvider({ bridge, products: { key: { kind, entitlement?, basePlan? } } })   product keys = Play product ids
+//
+// Subscriptions (M29b): Play sells a subscription through one of its base plans, so each subscription product names
+// its basePlan (the id made in Play Console). The plugin lists a subscription by its base plan id (identifier) with
+// the product id in planIdentifier, and buying one needs the base plan id — both handled here. A subscription
+// without a basePlan is reported 'unavailable' rather than sent to Play (Play would refuse it).
 const TYPE = { consumable: 'inapp', nonConsumable: 'inapp', subscription: 'subs' };
 
 export class PlayBillingProvider {
@@ -16,6 +21,7 @@ export class PlayBillingProvider {
     this.products = products;
     this.supported = null; // null = not asked yet
     this.tokens = new Map(); // transaction id → Play purchase token (needed to acknowledge it)
+    this.offers = new Map(); // subscription key → the offer token of its base plan (from getProducts)
     this.log = [];
   }
 
@@ -41,7 +47,17 @@ export class PlayBillingProvider {
       const ids = keys.filter((k) => (TYPE[this.products[k]?.kind] ?? 'inapp') === type);
       if (!ids.length) continue;
       const r = await this.bridge.call('NativePurchases', 'getProducts', { productIdentifiers: ids, productType: type });
-      for (const p of r?.products ?? []) out.push({ key: p.identifier, price: p.priceString, title: p.title });
+      for (const p of r?.products ?? []) {
+        if (type === 'subs') {
+          // identifier = the base plan, planIdentifier = the product. Only the product's own base plan counts, and
+          // only its plain offer (a trial or intro offer under the same plan would list a different price).
+          const key = p.planIdentifier ?? p.identifier;
+          const plan = this.products[key]?.basePlan;
+          if (!plan || p.identifier !== plan || p.offerId) continue;
+          if (p.offerToken) this.offers.set(key, p.offerToken);
+          out.push({ key, price: p.priceString, title: p.title });
+        } else out.push({ key: p.identifier, price: p.priceString, title: p.title });
+      }
     }
     this._note(`products: ${out.length}`);
     // No products at all = the store is not set up for this app yet (29a): the same as unavailable.
@@ -52,9 +68,19 @@ export class PlayBillingProvider {
     if (!(await this._ok())) return { status: 'unavailable' };
     const p = this.products[key];
     const plugin = this.bridge.plugin('NativePurchases');
+    const type = TYPE[p?.kind] ?? 'inapp';
+    const options = { productIdentifier: key, productType: type, quantity: 1, isConsumable: p?.kind === 'consumable', autoAcknowledgePurchases: false };
+    if (type === 'subs') {
+      if (!p.basePlan) {
+        this._note(`buy ${key}: no base plan named`);
+        return { status: 'unavailable' };
+      }
+      options.planIdentifier = p.basePlan;
+      if (this.offers.has(key)) options.offerToken = this.offers.get(key);
+    }
     let tx;
     try {
-      tx = await plugin.purchaseProduct({ productIdentifier: key, productType: TYPE[p?.kind] ?? 'inapp', quantity: 1, isConsumable: p?.kind === 'consumable', autoAcknowledgePurchases: false });
+      tx = await plugin.purchaseProduct(options);
     } catch (err) {
       const msg = String(err?.message ?? err).toLowerCase();
       this._note(`buy ${key}: ${msg}`);

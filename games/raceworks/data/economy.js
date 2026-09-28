@@ -115,6 +115,7 @@ export const CATEGORY_NAMES = {
   prize: 'Prize money',
   interest: 'Emergency Credit interest',
   facilities: 'Facilities',
+  research: 'Research',
   debug: 'Debug',
   carried: 'Earlier lines',
 };

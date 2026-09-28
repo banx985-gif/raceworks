@@ -1,5 +1,7 @@
-// FPS / loop timing / log overlay. Only active when the page URL has ?debug=1.
+// FPS / loop timing / log overlay. Only active when the page URL has ?debug=1 (never in a store release build).
 // Drawn in logical units on top of everything, inside the safe area.
+import { RELEASE } from './BuildFlags.js';
+
 export class DebugOverlay {
   constructor({ loop, renderer, layout = null, input = null, bus = null, maxLines = 8, top = 16 } = {}) {
     this.enabled = DebugOverlay.isRequested();
@@ -25,6 +27,7 @@ export class DebugOverlay {
   }
 
   static isRequested() {
+    if (RELEASE) return false;
     return new URLSearchParams(window.location.search).get('debug') === '1';
   }
 

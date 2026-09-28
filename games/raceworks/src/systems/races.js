@@ -158,7 +158,7 @@ export function createRaces({ bus, team }) {
     },
     setTyre(id) {
       const w = cur();
-      if (!w || w.quali || !TYRES[id]?.unlocked) return false;
+      if (!w || w.quali || !team.research.tyreOpen(id)) return false; // Milestone 11: research opens Hard / Inter / Wet
       w.setup.tyre = id;
       bus.emit('race:progress', {});
       return true;

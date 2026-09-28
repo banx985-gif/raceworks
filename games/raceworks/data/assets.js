@@ -9,6 +9,7 @@ import { BOTTOM_SLOTS, TOP_BAR } from './home.js';
 import { T01 } from './tracks/T01.js';
 import { RIVAL_TEAMS, PRIVATEERS } from './rivals.js';
 import { TYRES, RACE_ICONS } from './race.js';
+import { RESEARCH_ICONS } from './research.js';
 
 const art = (folder, key) => [key, `assets/images/${folder}/${key}.png`];
 
@@ -41,6 +42,8 @@ export const ASSETS = {
   // Home bars (Milestone 2): the five bottom-bar icons, Credits and Racing Tokens.
   ...Object.fromEntries(BOTTOM_SLOTS.map((s) => art('ui', s.icon))),
   ...Object.fromEntries(Object.values(TOP_BAR.icons).map((k) => art('rewards', k))),
+  // Research (Milestone 11): the Research Token (RP).
+  ...Object.fromEntries([RESEARCH_ICONS.rp].map((k) => art('rewards', k))),
   // Milestone 0 loader test (?screen=test): one real file and one deliberately missing one.
   m0Real: 'assets/branding/pwa/icon-512.png',
   m0Missing: 'assets/m0-missing-test.png',

@@ -12,7 +12,8 @@
 // Daily progress for a queue with a node and a worker:
 //   perDay = (basePerDay + workerStat / statDivisor + bonusPerDay()) × (1 + speedPct() / 100)
 // Game hooks (all optional except workerStat):
-//   conditionMet(rule) → bool,  workerStat(staff, node) → number,  bonusPerDay() → number,  speedPct() → number
+//   conditionMet(rule) → bool,  workerStat(staff, node) → number,  bonusPerDay(node) → number,  speedPct(node) → number
+//   (bonusPerDay / speedPct get the node being researched, e.g. a lab that speeds up one branch; they may ignore it)
 //   costPct() → % change on node costs (e.g. New Game+),  busyElsewhere(staffId) → reason | null (e.g. on a project)
 //   onComplete(node, { staffId }) after the actions have fired
 //   extraCostBlock(node) → reason | null, payExtraCost(node): a second price paid on the first start (e.g. prestige)
@@ -209,8 +210,8 @@ export class ResearchSystem {
     const n = q?.nodeId ? this.byId[q.nodeId] : null;
     if (!s || !n || !this.queueOpen(i)) return 0;
     const r = this.rules;
-    const base = r.basePerDay + (this.hooks.workerStat?.(s, n) ?? 0) / r.statDivisor + (this.hooks.bonusPerDay?.() ?? 0);
-    return base * (1 + (this.hooks.speedPct?.() ?? 0) / 100);
+    const base = r.basePerDay + (this.hooks.workerStat?.(s, n) ?? 0) / r.statDivisor + (this.hooks.bonusPerDay?.(n) ?? 0);
+    return base * (1 + (this.hooks.speedPct?.(n) ?? 0) / 100);
   }
 
   // Days left on queue i at today's rate (Infinity if nobody is working).

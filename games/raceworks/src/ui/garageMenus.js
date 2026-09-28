@@ -9,6 +9,9 @@
 // Milestone 10: every station's sheet shows its effect (bible §19) and leads to Build Mode; in Build Mode, 'facility'
 //   (a tapped station: effect, sell for 50%) and 'shop' (build a facility: F01–F15 with cost, effect or why not). The
 //   Build sheet's Facilities / Shop buttons open Build Mode, and it lists the garage's wings.
+// Milestone 11: the Research sheet — bottom-bar Research, the Strategy Desk and the research stations (CFD Station,
+//   Engine Lab) — RP, the node being researched (progress, days left, Stop), the locked second queue and "Research tree"
+//   (goResearch). A research station's sheet also shows its effect and Build Mode.
 import { MenuRegistry } from '../../../../core/ui/BottomSheet.js';
 import { THEME } from '../../../../core/Theme.js';
 import { STATIONS } from '../../data/garage.js';
@@ -22,6 +25,8 @@ import { COSTS } from '../../data/economy.js';
 import { moneyMenu, fmt } from './moneyMenu.js';
 import { BUILD_TEXT } from '../../data/facilities.js';
 import { liveryKey, teamColourId } from './livery.js';
+import { RESEARCH_ICONS } from '../../data/research.js';
+import { NODE, nodeLabel } from '../systems/research.js';
 
 const C = THEME.color;
 
@@ -31,7 +36,7 @@ export function staffLine(s) {
   return [ROLES[s.role].name, `Level ${s.level}`, TIERS[s.tier].name, ...status].join(' · ');
 }
 
-export function createGarageMenus({ garage, team, assets = null, open, close = () => {}, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null }) {
+export function createGarageMenus({ garage, team, assets = null, open, close = () => {}, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null, goResearch = () => {} }) {
   const menus = new MenuRegistry();
   const fac = team.facilities;
   // What a facility does, for its sheets (bible §19): its effect, its role and what it cost.
@@ -41,8 +46,32 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
   ];
   const enterBuild = () => garage().setBuildMode(true);
   const buildButton = () => ({ id: 'buildMode', label: 'Build Mode', sub: 'Move, sell or build stations', icon: 'race_ui_01', accent: C.progress, onTap: enterBuild });
+  // The Research sheet (Milestone 11): what is being researched, RP, the queues and the way into the tree.
+  const research = team.research;
+  function researchSections() {
+    const act = research.active;
+    const q2 = research.secondQueue;
+    const lines = [{ text: `${fmt(research.rp)} RP · ${research.system.doneCount} of 36 topics done`, color: C.actionDark }];
+    const bars = [];
+    const buttons = [{ id: 'researchTree', label: 'Research tree', sub: act ? 'Six branches: parts, facilities, tyres' : 'Pick what to research next', icon: RESEARCH_ICONS.tree, onTap: goResearch }];
+    if (act) {
+      const days = research.daysLeft();
+      lines.push(`Researching: ${NODE[act].name} (${nodeLabel(act)}) · about ${days === Infinity ? '—' : days} day${days === 1 ? '' : 's'} left`);
+      bars.push({ label: 'Progress', value: Math.floor(research.fraction(act) * 100), max: 100, text: `${Math.floor(research.fraction(act) * 100)}%` });
+      buttons.push({ id: 'researchStop', label: 'Stop', sub: 'Keeps its progress', accent: C.progress, onTap: () => research.stop() });
+    } else lines.push({ text: 'Nothing being researched: open the tree and start a topic.', color: C.bad });
+    return [
+      { lines, bars },
+      { columns: 1, buttons },
+      { columns: 1, buttons: [{ id: 'queue2', label: 'Second queue', sub: q2.open ? 'Open' : q2.why, icon: RESEARCH_ICONS.tree, locked: !q2.open, onTap: () => {} }] },
+    ];
+  }
   for (const def of STATIONS) {
     if (def.id === 'F02') continue; // the Pit Bay's sheet is the car project's (below)
+    if (def.research) {
+      menus.register(def.id, () => ({ title: def.name, subtitle: def.purpose, art: def.art, sections: [...researchSections(), { lines: effectLines(def), columns: 1, buttons: [buildButton()] }] }));
+      continue;
+    }
     menus.register(def.id, () => ({ title: def.name, subtitle: def.purpose, art: def.art ?? 'race_ui_02', sections: [{ lines: effectLines(def), columns: 1, buttons: [buildButton()] }] }));
   }
 
@@ -240,6 +269,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
         ];
       }
       if (slot.id === 'money') return moneyMenu({ slot, team, goMainMenu, debug, toast });
+      if (slot.id === 'research') return { ...menu, sections: researchSections() }; // Milestone 11
       if (slot.id === 'compete' && goWeekend) {
         // Milestone 7: race weekends (Practice → Setup → Qualifying → Race); championships arrive in Milestone 20.
         const cur = team.races.current;

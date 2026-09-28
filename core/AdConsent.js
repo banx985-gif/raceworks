@@ -4,8 +4,11 @@
 //
 //   const consent = new AdConsent({ key: 'robot-workshop:adConsent' })
 //   consent.answered          has the player answered yet?
-//   consent.value             → { given, personalised, at } (given = ads allowed at all)
+//   consent.value             → { given, personalised, at, source } (given = ads allowed at all)
 //   consent.set({ personalised })   the player chose (always "given": the game shows ads either way; personalised or not)
+//   consent.set({ source: 'google', given })   the answer came from Google's own form (core/GoogleConsent, EU/UK):
+//                             Google keeps the details, so ads are not forced non-personalised; given = Google says
+//                             ads may be asked for. source is 'game' (the game's own question) otherwise.
 export class AdConsent {
   constructor({ key, storage = globalThis.localStorage, now = () => Date.now() } = {}) {
     this.key = key;
@@ -24,11 +27,11 @@ export class AdConsent {
   }
 
   get value() {
-    return { given: !!this._value?.given, personalised: !!this._value?.personalised, at: this._value?.at ?? null };
+    return { given: !!this._value?.given, personalised: !!this._value?.personalised, at: this._value?.at ?? null, source: this._value?.source ?? 'game' };
   }
 
-  set({ personalised = false } = {}) {
-    this._value = { given: true, personalised: !!personalised, at: this.now() };
+  set({ personalised = false, given = true, source = 'game' } = {}) {
+    this._value = { given: !!given, personalised: !!personalised, at: this.now(), source };
     try {
       this.storage?.setItem(this.key, JSON.stringify(this._value));
     } catch {

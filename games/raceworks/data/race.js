@@ -38,13 +38,14 @@ export const RACE = {
 
 // Tyres (bible §21). pace: time change (−1.2% = faster). wearPerLap: share of the tyre used per lap at Normal pace.
 // Worn tyres slow the car: + wearPace × wear, and past the cliff + cliffPace × (wear − cliff) more.
-// Hard / Inter / Wet exist but are locked (Handling 2, Electronics & Race Ops 3).
+// Hard / Inter / Wet start locked; research opens them (Milestone 11: research = the node, HAN2 / ELE3). unlocked = open
+// from the start. Whether a team may pick one: team.research.tyreOpen(id).
 export const TYRES = {
   soft: { name: 'Soft', icon: 'tyre_soft', pace: -0.012, wearPerLap: 0.1, unlocked: true },
   medium: { name: 'Medium', icon: 'tyre_medium', pace: 0, wearPerLap: 0.062, unlocked: true },
-  hard: { name: 'Hard', icon: 'tyre_hard', pace: 0.008, wearPerLap: 0.04, unlocked: false, unlock: 'Handling research 2' },
-  inter: { name: 'Intermediate', icon: 'tyre_inter', pace: 0.03, wearPerLap: 0.06, unlocked: false, unlock: 'Electronics & Race Ops 3' },
-  wet: { name: 'Wet', icon: 'tyre_wet', pace: 0.05, wearPerLap: 0.06, unlocked: false, unlock: 'Electronics & Race Ops 3' },
+  hard: { name: 'Hard', icon: 'tyre_hard', pace: 0.008, wearPerLap: 0.04, unlocked: false, research: 'HAN2', unlock: 'Handling research 2' },
+  inter: { name: 'Intermediate', icon: 'tyre_inter', pace: 0.03, wearPerLap: 0.06, unlocked: false, research: 'ELE3', unlock: 'Electronics & Race Ops 3 research' },
+  wet: { name: 'Wet', icon: 'tyre_wet', pace: 0.05, wearPerLap: 0.06, unlocked: false, research: 'ELE3', unlock: 'Electronics & Race Ops 3 research' },
 };
 export const TYRE_ORDER = ['soft', 'medium', 'hard', 'inter', 'wet'];
 export const TYRE_WEAR = {

@@ -17,7 +17,7 @@ import { CachedLayer } from '../../../../core/CachedLayer.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { text, para, panel as drawPanel } from '../../../../core/ui/Kit.js';
 import { fitView, drawCircuit, drawCar, drawMinimap, toScreen } from '../race/trackDraw.js';
-import { RACE, TYRES, PACE_MODES, ORDERS, KEY_MOMENTS, RACE_ICONS } from '../../data/race.js';
+import { RACE, TYRES, TYRE_ORDER, PACE_MODES, ORDERS, KEY_MOMENTS, RACE_ICONS } from '../../data/race.js';
 import { createRaceFx } from '../race/raceFx.js';
 import { liveryKey, teamColourId } from '../ui/livery.js';
 
@@ -52,6 +52,11 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
   let buttons = [];
   let banner = null; // { title, body, kind: 'moment' | 'hint' }
   let nextTyre = 'medium';
+  // The Pit Now tyre button steps through the compounds this team has (Soft, Medium, and whatever research opened).
+  const nextOpenTyre = (id) => {
+    const open = TYRE_ORDER.filter((t) => team.research.tyreOpen(t));
+    return open[(open.indexOf(id) + 1) % open.length];
+  };
   let camera = settings?.get('raceCamera') ?? 'overview';
   const layer = new CachedLayer({ width: 1, height: 1, draw: (g) => drawTrackLayer(g) });
   const ws = () => sim.geo.def.display?.widthScale ?? 1;
@@ -299,7 +304,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     const pitLabel = c?.pit ? 'In pits' : c?.pitReq ? `Pit ${TYRES[c.pitReq.tyre].name[0]} ✓` : 'Pit Now';
     row(y, [
       ...Object.entries(ORDERS).map(([id, m]) => ({ id: `order_${id}`, label: m.name, selected: c?.order === id, disabled: done, accent: auto ? C.textFaint : C.action, onTap: () => cmd('order', id) })),
-      { id: 'nextTyre', label: TYRES[nextTyre].name, icon: TYRES[nextTyre].icon, w: 230, disabled: done, accent: C.progress, onTap: () => (nextTyre = nextTyre === 'soft' ? 'medium' : 'soft') },
+      { id: 'nextTyre', label: TYRES[nextTyre].name, icon: TYRES[nextTyre].icon, w: 230, disabled: done, accent: C.progress, onTap: () => (nextTyre = nextOpenTyre(nextTyre)) }, // Milestone 11: every compound research has opened
       { id: 'pit', label: pitLabel, w: 190, disabled: done || !!c?.pit, selected: !!c?.pitReq, accent: C.bad, onTap: () => (c?.pitReq && !c.auto ? cmd('pitCancel') : cmd('pit', nextTyre)) },
     ]);
     y += CTRL_H + GAP;

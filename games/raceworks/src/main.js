@@ -7,6 +7,7 @@
 // with ?debug=1 the staff detail screen has stat / Energy / Morale nudge buttons, and the Pit Bay sheet has
 // +5 days / Finish phase / Fault now / Breakthrough buttons while a car is being built. Milestone 5: the Money sheet has
 // −20,000 / +20,000 Credits (a forced-negative test), To next month and +100 Rep; a car screen has Damage −30.
+// Milestone 11: the Research screen has +500 RP, Finish now, Branch and All 36.
 import { THEME, font } from '../../../core/Theme.js';
 import { EventBus } from '../../../core/EventBus.js';
 import { Rng } from '../../../core/Rng.js';
@@ -53,6 +54,8 @@ import { createRaceResultScreen } from './screens/RaceResultScreen.js';
 import { createWeekendScreen } from './screens/WeekendScreen.js';
 import { Settings } from '../../../core/Settings.js';
 import { TRACKS } from './race/tracks.js';
+import { createResearchScreen } from './screens/ResearchScreen.js';
+import { drawResearchBanner, researchBannerHeight } from './ui/researchBanner.js';
 const COL = THEME.color;
 
 const W = 1080;
@@ -61,11 +64,11 @@ const MAX_H = 2640; // up to 9:22 fills edge to edge; taller still gets thin bar
 const START_SCREEN = new URLSearchParams(window.location.search).get('screen') === 'test' ? 'test' : 'menu';
 const MENU_SCREENS = ['slots', 'setup']; // screens off the main menu: Back returns towards it
 const TEST_SCREENS = ['test', 'route']; // the Milestone 0 screens: pause button, full debug box
-const GAME_SCREENS = ['garage', 'roster', 'staff', 'carBuilder', 'car', 'cars', 'weekend', 'raceIntro', 'race', 'raceResult'];
+const GAME_SCREENS = ['garage', 'roster', 'staff', 'carBuilder', 'car', 'cars', 'weekend', 'raceIntro', 'race', 'raceResult', 'research'];
 const RACE_SCREENS = ['weekend', 'raceIntro', 'race', 'raceResult']; // Milestone 6: the garage calendar waits while a race is on // the game's screens: P pauses the game clock here
 // Screens opened from the garage (or from each other). A back stack remembers the way in (with each screen's
 // params: which person, which car), so the back button and the phone's Back retrace it one step at a time.
-const SUB_SCREENS = { roster: 'Roster', staff: 'Details', carBuilder: 'New car', car: 'Car', cars: 'Car Garage', weekend: 'Weekend', raceIntro: 'Race', race: 'Race', raceResult: 'Result' };
+const SUB_SCREENS = { roster: 'Roster', staff: 'Details', carBuilder: 'New car', car: 'Car', cars: 'Car Garage', weekend: 'Weekend', raceIntro: 'Race', race: 'Race', raceResult: 'Result', research: 'Research' };
 const BACK_LABEL = { garage: 'Garage', ...SUB_SCREENS };
 const trail = []; // [{ name, params }] — the screens under the current one, oldest first
 let hereParams = {}; // the current sub-screen's params (so it can be returned to exactly)
@@ -124,6 +127,7 @@ const loop = new FixedStepLoop({
     sheet.update(dt);
     dialog.update(dt);
     for (const t of toasts) t.age += dt;
+    if (researchNews.length && router.currentName !== 'race' && (researchNews[0].age += dt) > RESEARCH_NEWS_LIFE) researchNews.shift();
     while (toasts.length && toasts[0].age > TOAST_LIFE) toasts.shift();
     backNav.sync();
   },
@@ -131,10 +135,11 @@ const loop = new FixedStepLoop({
     const ctx = renderer.begin(COL.bg);
     router.render(ctx, alpha);
     sheet.render(ctx);
-    if (toasts.length && GAME_SCREENS.includes(router.currentName)) {
-      const tb = topBarRect(layout);
-      drawToasts(ctx, toasts, { x: tb.x + 40, y: tb.y + tb.h + 16, w: tb.w - 80, life: TOAST_LIFE });
-    }
+    const onGame = GAME_SCREENS.includes(router.currentName);
+    const tb = topBarRect(layout);
+    const news = onGame && router.currentName !== 'race' ? researchNews[0] : null; // Milestone 11: research done
+    if (news) drawResearchBanner(ctx, assets, { x: tb.x + 24, y: tb.y + tb.h + 16, w: tb.w - 48 }, news, RESEARCH_NEWS_LIFE);
+    if (toasts.length && onGame) drawToasts(ctx, toasts, { x: tb.x + 40, y: tb.y + tb.h + 16 + (news ? researchBannerHeight() + 16 : 0), w: tb.w - 80, life: TOAST_LIFE });
     dialog.render(ctx);
     if (onTestScreen()) drawButton(ctx, pauseButton(), loop.paused ? 'RESUME' : 'PAUSE', { selected: loop.paused });
     if (loop.paused) drawPaused(ctx);
@@ -159,7 +164,7 @@ bus.on('clock:speed', ({ speed }) => debug.log(speed ? `speed ${speed}×` : 'gam
 // Autosave (core/Autosave): every game day and after any change, plus when the app goes to the background.
 const autosave = new Autosave({
   bus,
-  triggers: ['race:created', 'race:progress', 'race:finished', 'clock:day', 'team:changed', 'project:start', 'project:phase', 'project:complete', 'car:fault', 'car:fix', 'car:breakthrough', 'contract:accepted', 'contract:success', 'car:repaired', 'economy:debt', 'facility:layout'],
+  triggers: ['race:created', 'race:progress', 'race:finished', 'clock:day', 'team:changed', 'project:start', 'project:phase', 'project:complete', 'car:fault', 'car:fix', 'car:breakthrough', 'contract:accepted', 'contract:success', 'car:repaired', 'economy:debt', 'facility:layout', 'research:start', 'research:stop', 'research:complete'],
   save: () => {
     if (router.currentName === 'race') raceScreen.exit(); // the race's exact state goes in the save too
     return team.save();
@@ -257,6 +262,11 @@ const goBuilder = () => goSub('carBuilder');
 // From a car that was opened from the Car Garage, its Car Garage button is simply Back (no pile of screens).
 const goCarGarage = () => (trail[trail.length - 1]?.name === 'cars' && router.currentName === 'car' ? back() : goSub('cars'));
 const goCar = (number) => goSub('car', { number });
+// Milestone 11: the Research tree (from the Research sheet).
+const goResearch = (params = {}) => {
+  sheet.close();
+  goSub('research', params);
+};
 // A finished car: set when the project completes, opened after the reveal has played on the bay.
 let pendingCar = null;
 bus.on('project:complete', ({ record }) => {
@@ -340,7 +350,7 @@ carDebug.nextMonth = () => {
   const m = clock.month;
   while (clock.month === m) clock.advanceDay();
 };
-const menus = createGarageMenus({ garage: () => garage, team, assets, open: openMenu, close: () => sheet.close(), goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t, b) => toast(t, b), goWeekend: () => goWeekend(), goTestRace: debug.enabled ? () => goTestRace() : null, goRaceResult: (index) => goSub('raceResult', { index }) });
+const menus = createGarageMenus({ garage: () => garage, team, assets, open: openMenu, close: () => sheet.close(), goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t, b) => toast(t, b), goWeekend: () => goWeekend(), goTestRace: debug.enabled ? () => goTestRace() : null, goRaceResult: (index) => goSub('raceResult', { index }), goResearch: () => goResearch() });
 
 // ---------------------------------------------------------------------------
 // Toasts (core/ui/Toast): short money news under the top bar — salary day, a contract paid, Emergency Credit on / off,
@@ -358,6 +368,15 @@ bus.on('contract:success', ({ contract }) => teamReady && toast('Contract paid',
 bus.on('contract:failed', ({ contract }) => teamReady && toast('Contract ended', `${contract.title}: the deadline passed`));
 bus.on('reputation:rankUp', ({ rank }) => teamReady && toast(`Rank ${rank.id}!`, 'Your team has moved up a rank.'));
 bus.on('facility:expansion', ({ zone }) => teamReady && toast(`${zone.name} open!`, 'The garage is bigger: more floor to build on.')); // Milestone 10
+// Milestone 11: a finished research node gets the medium moment (one at a time; a run of them folds into "+N more").
+const researchNews = [];
+const RESEARCH_NEWS_LIFE = 3.6;
+bus.on('research:complete', ({ node, fired }) => {
+  debug.log(`research done: ${node.id} ${node.name} (${fired.map((a) => a.id).join(' ')})`);
+  if (!teamReady) return;
+  if (researchNews.length < 3) researchNews.push({ node, fired, age: 0, more: 0 });
+  else researchNews[2].more++;
+});
 
 // ---------------------------------------------------------------------------
 // The shared bars (core/ui), filled with RACEWORKS content.
@@ -515,6 +534,7 @@ const carBuilderScreen = createCarBuilderScreen({
 });
 const carResultScreen = createCarResultScreen({ layout, assets, team, topBar: screenBar, goCarGarage, debugEnabled: debug.enabled, toast: (x) => toast(x) });
 const carGarageScreen = createCarGarageScreen({ layout, assets, team, topBar: screenBar, goCar });
+const researchScreen = createResearchScreen({ layout, assets, team, topBar: screenBar, toast: (a, b) => toast(a, b), debugEnabled: debug.enabled }); // Milestone 11
 const raceIntroScreen = createRaceIntroScreen({ layout, assets, team, topBar: screenBar, onStart: startRace });
 const raceScreen = createRaceScreen({ renderer, layout, assets, team, bus, settings, onFinished: raceFinished, onLeave: () => leaveRace(), toast: (a, b) => toast(a, b) });
 const weekendScreen = createWeekendScreen({ layout, assets, team, topBar: screenBar, onStartRace: startRace, toast: (a, b) => toast(a, b) });
@@ -526,6 +546,7 @@ const resultLines = (e) => {
     out.push({ text: me?.status === 'retired' ? 'No prize money for a retirement' : `Prize money +${e.prize.toLocaleString('en-US')} Credits · Reputation +${e.reputation}`, color: C_GOOD });
     if (e.quali) out.push({ text: `Qualified P${e.quali.rows.find((r) => r.isPlayer)?.pos} · setup score ${e.setupScore} / 100 · tyres ${me?.stints?.join(' → ') ?? ''}${me?.stops ? ` (${me.stops} stop${me.stops === 1 ? '' : 's'})` : ''}` });
   } else out.push({ text: `Test race at ${TRACKS[e.trackId].name}: no prize money`, color: COL.textMuted });
+  if (e.rp) out.push({ text: `Research +${e.rp} RP (${e.rpLines.map((l) => `${l.reason} +${l.amount}`).join(' · ')})`, color: COL.progress }); // Milestone 11
   return out;
 };
 const C_GOOD = COL.good;
@@ -696,7 +717,7 @@ const setupScreen = createTeamSetupScreen({
   onBack: () => router.go(setupFrom, setupFrom === 'slots' ? { mode: slotsScreen.mode } : {}),
 });
 
-if (debug.enabled) window.__rw = { slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, taps: [] };
+if (debug.enabled) window.__rw = { slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, researchNews, goResearch, taps: [] };
 
 router
   .register('boot', bootScreen)
@@ -713,6 +734,7 @@ router
   .register('raceIntro', raceIntroScreen)
   .register('race', raceScreen)
   .register('raceResult', raceResultScreen)
+  .register('research', researchScreen)
   .register('test', createTestScreen({ renderer, layout, assets, openSheet: () => sheet.open(testSheet), onTapLogged: (p) => window.__rw?.taps.push({ x: p.x, y: p.y }) }))
   .register('route', createRouteTestScreen({ renderer, layout, onBack: back }));
 router.go('boot');

@@ -63,10 +63,11 @@ export function createCarResultScreen({ layout, assets, team, topBar, goCarGarag
         ['FAULTS', r.faults],
         ['INNOVATION', r.innovation],
       ];
+      if (rec.rp) small.push(['RESEARCH', `+${rec.rp} RP`]); // Milestone 11
       small.forEach(([k, v], i) => {
-        const x = 32 + i * ((w - 64) / 3);
+        const x = 32 + i * ((w - 64) / small.length);
         text(ctx, k, x, y + headH - 76, { size: S.small, bold: true, color: C.textMuted });
-        text(ctx, String(v), x, y + headH - 46, { size: S.heading, bold: true, color: k === 'FAULTS' && v ? C.bad : C.text });
+        text(ctx, String(v), x, y + headH - 46, { size: S.heading, bold: true, color: k === 'FAULTS' && v ? C.bad : k === 'RESEARCH' ? C.progress : C.text, maxWidth: (w - 64) / small.length - 12 });
       });
     }
     y += headH + 28;
@@ -115,6 +116,8 @@ export function createCarResultScreen({ layout, assets, team, topBar, goCarGarag
     for (const b of r.breakthroughs) lines.push({ text: `Breakthrough in ${PHASE_NAME[b.phase]} (day ${b.day + 1}): ${b.kind}, +10 Innovation`, color: C.gold });
     lines.push({ text: `Team: ${rec.team.map((m) => `${m.name} (${ROLES[m.role]?.name ?? m.role})`).join(', ')}` });
     lines.push({ text: `Parts: ${r.parts.map((id) => PARTS[id].name).join(', ')} · ${r.partsCost.toLocaleString('en-US')} Credits` });
+    // Milestone 11: the RP this car earned for research (older cars have none).
+    if (rec.rp) lines.push({ text: `Research: +${rec.rp} RP (${rec.rpLines.map((l) => `${l.reason} +${l.amount}`).join(' · ')})`, color: C.progress });
     for (const l of lines) y += para(ctx, l.text, 8, y, w - 16, { size: S.body, color: l.color ?? C.text }) + 10;
     y += 24;
 

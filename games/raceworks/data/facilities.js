@@ -7,6 +7,7 @@
 // draw { width: art width as a share of the footprint's drawn width, drop: how far below the footprint's front corner
 // the art's base sits, in cell heights }, purpose (the sheet's one line).
 //   keep: the reason it can't be sold (the garage always needs it); it can still be moved.
+//   research: true = a research station (its sheet leads to the Research tree, Milestone 11).
 //
 // Effect keys (what systems ask for — never "is F05 built?"):
 //   workPct.<role>             +% work from staff of that role on every car phase (core/ProjectSystem workerModifier)
@@ -17,6 +18,7 @@
 //   dev.<stat>                 + development points on a finished car's stat (SPD ACC COR BRK REL EFF TYR)
 //   tyreWearPct                ±% race tyre wear for your car
 //   revealReputation           + Reputation when a finished car is revealed
+//   researchSpeedPct.<branch>  +% research speed on that branch's nodes (Milestone 11: CFD Station AER, Engine Lab PWR)
 //   forecast                   + race forecast accuracy — STORED: forecasts arrive with weather (later milestone)
 //   unlock.<feature>           1 = that feature is open — STORED: Auto Training / manual drills (staff training,
 //                              Milestone 13) and the sponsor portfolio (sponsors, later milestone) switch on then.
@@ -80,7 +82,7 @@ export const FACILITIES = [
     purpose: 'Brakes bedded in and balanced: every car stops better.',
   },
   {
-    id: 'F09', name: 'Gearbox Bench', role: 'Specialist', unlock: { research: 'Transmission 1' }, cost: 1800,
+    id: 'F09', name: 'Gearbox Bench', role: 'Specialist', unlock: { research: 'TRN1' }, cost: 1800,
     effectText: '+8% Transmission phase speed',
     effects: [{ key: 'phaseSpeedPct.transmission', value: 8 }],
     art: 'facility_f09', size: { w: 2, h: 2 }, draw: { width: 1.06, drop: 0.3 },
@@ -100,6 +102,7 @@ export const FACILITIES = [
     art: 'facility_f11', size: { w: 2, h: 3 }, draw: { width: 1.12, drop: 0.3 },
     purpose: 'Research, race forecasts and strategy.',
     keep: 'The Strategy Desk is where your crew plans: it stays',
+    research: true,
   },
   {
     id: 'F12', name: 'Driver Simulator', role: 'Rest/Training', unlock: {}, cost: 1800,
@@ -128,6 +131,74 @@ export const FACILITIES = [
     effects: [{ key: 'unlock.sponsorPortfolio', value: 1 }],
     art: 'facility_f15', size: { w: 3, h: 1 }, draw: { width: 1.1, drop: 0.25 },
     purpose: 'Logos on the wall: the sponsor portfolio opens with it (sponsors come later).',
+  },
+  // Milestone 11: the facilities research opens (bible §19 F16–F24, F33; the node from §20). Effects the game can't use
+  // yet are STORED (see the key list above): setupKnowledge.technical (track types), chassisCostPct.highTier,
+  // reliabilityData, unlock.hybridProjects, forecast.
+  {
+    id: 'F16', name: 'Wind Tunnel', role: 'Specialist', unlock: { research: 'AER4' }, cost: 6500,
+    effectText: '+12 Aero development; +5 setup knowledge on technical tracks',
+    effects: [{ key: 'dev.COR', value: 12 }, { key: 'setupKnowledge.technical', value: 5 }],
+    art: 'facility_f16', size: { w: 3, h: 3 }, draw: { width: 1.02, drop: 0.3 },
+    purpose: 'Air over a scale car: every car corners better.',
+  },
+  {
+    id: 'F17', name: 'CFD Station', role: 'Specialist', unlock: { research: 'AER5' }, cost: 7200,
+    effectText: '+15% Aero research speed',
+    effects: [{ key: 'researchSpeedPct.AER', value: 15 }],
+    art: 'facility_f17', size: { w: 2, h: 2 }, draw: { width: 1.08, drop: 0.3 },
+    purpose: 'Airflow on screen: Aerodynamics research goes faster.',
+    research: true,
+  },
+  {
+    id: 'F18', name: 'Carbon Fabrication', role: 'Specialist', unlock: { research: 'CHA4' }, cost: 7600,
+    effectText: '+10 Chassis development; -5% high-tier chassis cost',
+    effects: [{ key: 'dev.REL', value: 5 }, { key: 'dev.COR', value: 5 }, { key: 'chassisCostPct.highTier', value: -5 }],
+    art: 'facility_f18', size: { w: 3, h: 3 }, draw: { width: 1.02, drop: 0.3 },
+    purpose: 'Carbon laid up in-house: every chassis comes out stronger.',
+  },
+  {
+    id: 'F19', name: 'Advanced Dyno', role: 'Specialist', unlock: { research: 'PWR4' }, cost: 8000,
+    effectText: '+14 Power development; reliability data',
+    effects: [{ key: 'dev.SPD', value: 7 }, { key: 'dev.ACC', value: 7 }, { key: 'reliabilityData', value: 1 }],
+    art: 'facility_f19', size: { w: 3, h: 3 }, draw: { width: 1.02, drop: 0.3 },
+    purpose: 'A full engine dyno: much more power in every car.',
+  },
+  {
+    id: 'F20', name: 'Engine Lab', role: 'Specialist', unlock: { research: 'PWR5' }, cost: 9000,
+    effectText: '+15% Powertrain research speed',
+    effects: [{ key: 'researchSpeedPct.PWR', value: 15 }],
+    art: 'facility_f20', size: { w: 3, h: 3 }, draw: { width: 1.0, drop: 0.3 },
+    purpose: 'Engines taken apart and measured: Powertrain research goes faster.',
+    research: true,
+  },
+  {
+    id: 'F21', name: 'Hybrid Lab', role: 'Specialist', unlock: { research: 'PWR6' }, cost: 11000,
+    effectText: 'Unlocks hybrid/electric special projects',
+    effects: [{ key: 'unlock.hybridProjects', value: 1 }],
+    art: 'facility_f21', size: { w: 3, h: 3 }, draw: { width: 1.02, drop: 0.3 },
+    purpose: 'Batteries and motors: hybrid and electric special projects open with it (later).',
+  },
+  {
+    id: 'F22', name: 'Telemetry Room', role: 'Specialist', unlock: { research: 'ELE3' }, cost: 7800,
+    effectText: '+18 practice setup knowledge',
+    effects: [{ key: 'setupKnowledge', value: 18 }],
+    art: 'facility_f22', size: { w: 3, h: 3 }, draw: { width: 1.02, drop: 0.3 },
+    purpose: 'Every lap on screens: practice teaches the crew much more about the setup.',
+  },
+  {
+    id: 'F24', name: 'Tyre Lab', role: 'Specialist', unlock: { research: 'HAN4' }, cost: 7600,
+    effectText: 'Tyre compounds gain +8% life',
+    effects: [{ key: 'tyreWearPct', value: -7.4 }],
+    art: 'facility_f24', size: { w: 2, h: 2 }, draw: { width: 1.06, drop: 0.3 },
+    purpose: 'Rubber tested to the limit: every tyre lasts longer.',
+  },
+  {
+    id: 'F33', name: 'Weather Station', role: 'Thinker', unlock: { research: 'ELE5' }, cost: 8500,
+    effectText: 'Forecast accuracy +20%',
+    effects: [{ key: 'forecast', value: 20 }],
+    art: 'facility_f33', size: { w: 2, h: 2 }, draw: { width: 1.06, drop: 0.3 },
+    purpose: 'Wind, rain and track temperature: better race forecasts (weather comes later).',
   },
 ];
 

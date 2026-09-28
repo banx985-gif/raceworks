@@ -123,8 +123,9 @@ export function createWeekendScreen({ layout, assets, team, topBar, onStartRace,
         const tw = (w - 48 - 4 * 12) / 5;
         TYRE_ORDER.forEach((id, i) => {
           const t = TYRES[id];
+          const open = team.research.tyreOpen(id); // Milestone 11: research opens Hard / Inter / Wet
           const r = { x: 24 + i * (tw + 12), y: yy, w: tw, h: 110 };
-          btn(`tyre_${id}`, r, t.name.slice(0, 6), { selected: wk.setup.tyre === id, locked: !t.unlocked, disabled: locked && t.unlocked }, () => (t.unlocked ? R.setTyre(id) : toast(`${t.name}: unlocks with ${t.unlock}`)));
+          btn(`tyre_${id}`, r, t.name.slice(0, 6), { selected: wk.setup.tyre === id, locked: !open, disabled: locked && open }, () => (open ? R.setTyre(id) : toast(`${t.name}: unlocks with ${t.unlock}`)));
         });
         yy += 130;
         const k = R.knowledge();

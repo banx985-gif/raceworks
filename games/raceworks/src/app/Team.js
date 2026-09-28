@@ -18,6 +18,9 @@
 // Milestone 6: team.races (src/systems/races.js) — the race being run, with its fixed seed, and past results.
 // Milestone 10: team.facilities (src/systems/garageFacilities.js) — the garage layout (core/FacilitySystem), building
 //   through the ledger, and the effect queries every system asks (bonus(key), phaseSpeedPct, workPct…).
+// Milestone 11: team.research (src/systems/research.js) — the 36-node tree on core/ResearchSystem, RP on the ledger, one
+//   queue; finished nodes open parts (team.unlocks.research → the car builder), facilities (the shop), tyres and
+//   bonuses (added into team.facilities.bonus(key)).
 import { Clock } from '../../../../core/Clock.js';
 import { Rng } from '../../../../core/Rng.js';
 import { StaffSystem } from '../../../../core/StaffSystem.js';
@@ -36,6 +39,7 @@ import { partsOf, partsCost } from '../systems/carProject.js';
 import { unlockContext, checkCar } from '../systems/carCatalog.js';
 import { CLASSES } from '../../data/cars.js';
 import { createGarageFacilities } from '../systems/garageFacilities.js';
+import { createResearch } from '../systems/research.js';
 
 // A new game's setup when none is given (tests, and saves from before Milestone 4b).
 export const DEFAULT_SETUP = { teamName: 'RACEWORKS', principal: 'Principal', colour: 'red', founderId: 'MEC01' };
@@ -57,6 +61,9 @@ export const SAVE_MIGRATIONS = {
   //   3 → 4 (Milestone 10): the garage layout. Nothing to change here — Team.load() gives a save without one the
   //   starting garage (its Pit Bay, Strategy Desk and rest spot where they always stood).
   3: (record) => record,
+  //   4 → 5 (Milestone 11): research. Nothing to change here — Team.load() gives a save without it an empty tree (its
+  //   RP is already on the ledger).
+  4: (record) => record,
 };
 
 export class Team {
@@ -92,7 +99,8 @@ export class Team {
       facilities: () => this.facilities,
     });
     this.money = createTeamMoney({ bus, seed, clock: this.clock, staff: this.staff, cars: this.cars, revealBonus: () => this.facilities.bonus('revealReputation') });
-    this.facilities = createGarageFacilities({ bus, money: this.money, research: () => new Set(this.unlocks.research) }); // Milestone 10
+    this.facilities = createGarageFacilities({ bus, money: this.money, research: () => new Set(this.unlocks.research), extraBonus: (key) => this.research.bonus(key), extraKeys: () => this.research.bonusKeys() }); // Milestone 10
+    this.research = createResearch({ bus, team: this }); // Milestone 11
     this.races = createRaces({ bus, team: this }); // Milestone 6: the race being run (fixed seed) and the results
     this.ratings = createRatingsCache();
     this.garageSnapshot = () => null; // the garage replaces this
@@ -141,6 +149,7 @@ export class Team {
     this.garageState = null;
     this.money.newGame(); // §30.2 starting state, month 1 salaries, the first contract offer
     this.facilities.newGame(); // Milestone 10: the starting garage (bible §19)
+    this.research.newGame(); // Milestone 11: nothing researched; 120 RP came with the money (§30.2)
     this.races.load(null);
   }
 
@@ -180,11 +189,13 @@ export class Team {
     return r;
   }
 
-  // What this team has unlocked beyond its rank (Milestone 9: research M11, events and secrets later fill these lists;
-  // carCatalog reads them). Milestone 10: facilities = the facilities standing in the garage now.
+  // What this team has unlocked beyond its rank (Milestone 9: events and secrets later fill these lists; carCatalog
+  // reads them). Milestone 10: facilities = the facilities standing in the garage now. Milestone 11: research = the
+  // finished research nodes.
   get unlocks() {
     const u = this._unlocks ?? (this._unlocks = { research: [], events: [], secrets: [] });
     u.facilities = this.facilities?.builtIds() ?? [];
+    u.research = this.research?.doneIds() ?? [];
     return u;
   }
 
@@ -279,6 +290,7 @@ export class Team {
       money: this.money.serialize(),
       races: this.races.serialize(),
       facilities: this.facilities.serialize(), // Milestone 10
+      research: this.research.serialize(), // Milestone 11
     };
   }
 
@@ -299,6 +311,7 @@ export class Team {
     else this.adoptMoney(); // a save from before Milestone 5
     this.facilities.load(data.facilities); // Milestone 10 (after the money: the rank opens the Bay Extension)
     this.races.load(data.races); // none before Milestone 6
+    this.research.load(data.research); // none before Milestone 11
   }
 
   // A team saved before Milestone 5 had no money: it gets the §30.2 starting state today, and each car it already

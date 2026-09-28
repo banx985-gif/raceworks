@@ -11,6 +11,7 @@
 //   nb.keepAwake(on)                          keep the screen on (only calls the phone when it changes)
 //   nb.vibrate(msOrPattern)                   the phone's own vibration (a pattern plays its buzz parts)
 //   nb.hideSplash()                           hide the native splash once the game has drawn
+//   nb.openUrl(url)                           a web page outside the game: the phone's browser in the app, a new tab on the web
 export class NativeBridge {
   constructor({ win = globalThis.window } = {}) {
     this.win = win;
@@ -92,5 +93,11 @@ export class NativeBridge {
 
   hideSplash() {
     return this.call('SplashScreen', 'hide');
+  }
+
+  openUrl(url) {
+    // In the app, Capacitor hands any address outside the app to the phone's browser (the game stays where it was).
+    if (this.isNative) this.win.location.href = url;
+    else this.win?.open?.(url, '_blank', 'noopener');
   }
 }
