@@ -57,7 +57,7 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
     for (const ph of p.phases) {
       let score = 0;
       for (const id of teamIds) score += p.workerScore(job, ph, team.get(id));
-      const per = p._progress(score);
+      const per = p._progress(score) * (1 + team.facilities.phaseSpeedPct(ph.id) / 100); // Milestone 10: facility phase speed
       days += per > 0 ? Math.ceil(tier.target / per) : Infinity;
     }
     return days;
@@ -236,8 +236,10 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
     // --- totals and start ---
     heading('Total');
     const days = teamIds.length ? estimateDays() : Infinity;
+    const price = team.carPrice({ classId, parts });
     const lines = [
-      { t: `${cls.baseCost ? `Class ${fmt(cls.baseCost)} + parts ${fmt(partsCost(parts))} = ${fmt(carCost({ classId, parts }))}` : `Parts: ${fmt(partsCost(parts))}`} Credits, paid at Start (you have ${fmt(team.money.credits)})` },
+      // Milestone 10: the price after the facilities' material cost bonus (the Parts Rack's −3%).
+      { t: `${price.shell ? `Class ${fmt(price.shell)} + parts ${fmt(price.parts)} = ${fmt(price.total)}` : `Parts: ${fmt(price.parts)}`} Credits, paid at Start${price.total !== carCost({ classId, parts }) ? ` (${fmt(carCost({ classId, parts }))} before your facilities' discount)` : ''} (you have ${fmt(team.money.credits)})` },
       { t: `Running cost: ${fmt(Math.round(COSTS.carDaily * (1 + BUDGETS[budget].costPct / 100)))} Credits a day while it is built (${BUDGETS[budget].name})` },
       { t: `${tier.name} project · complexity ${tier.cx} · ${tier.target} work per phase`, color: tierOk.open ? C.text : C.bad },
       { t: teamIds.length ? `About ${days} game days with this team (${(days / 28).toFixed(1)} months)` : 'Nobody on the team: the car would never be built' },

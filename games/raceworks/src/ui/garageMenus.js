@@ -6,6 +6,9 @@
 //   goMainMenu() saves and returns to the main menu (Milestone 4b: from the Money sheet, "saving" lives there).
 // Milestone 5: the Money sheet (src/ui/moneyMenu.js), the Pit Bay's Emergency Fix and running cost. toast(text) says
 //   why something was refused.
+// Milestone 10: every station's sheet shows its effect (bible §19) and leads to Build Mode; in Build Mode, 'facility'
+//   (a tapped station: effect, sell for 50%) and 'shop' (build a facility: F01–F15 with cost, effect or why not). The
+//   Build sheet's Facilities / Shop buttons open Build Mode, and it lists the garage's wings.
 import { MenuRegistry } from '../../../../core/ui/BottomSheet.js';
 import { THEME } from '../../../../core/Theme.js';
 import { STATIONS } from '../../data/garage.js';
@@ -17,6 +20,7 @@ import { leadRole } from '../systems/carProject.js';
 import { FOUNDER_FLAG } from '../../data/setup.js';
 import { COSTS } from '../../data/economy.js';
 import { moneyMenu, fmt } from './moneyMenu.js';
+import { BUILD_TEXT } from '../../data/facilities.js';
 import { liveryKey, teamColourId } from './livery.js';
 
 const C = THEME.color;
@@ -27,12 +31,87 @@ export function staffLine(s) {
   return [ROLES[s.role].name, `Level ${s.level}`, TIERS[s.tier].name, ...status].join(' · ');
 }
 
-export function createGarageMenus({ garage, team, assets = null, open, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null }) {
+export function createGarageMenus({ garage, team, assets = null, open, close = () => {}, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null }) {
   const menus = new MenuRegistry();
+  const fac = team.facilities;
+  // What a facility does, for its sheets (bible §19): its effect, its role and what it cost.
+  const effectLines = (def) => [
+    { text: `Effect: ${def.effectText}`, color: C.actionDark },
+    `${def.role} station${def.cost ? ` · built for ${fmt(def.cost)} Credits` : ''}`,
+  ];
+  const enterBuild = () => garage().setBuildMode(true);
+  const buildButton = () => ({ id: 'buildMode', label: 'Build Mode', sub: 'Move, sell or build stations', icon: 'race_ui_01', accent: C.progress, onTap: enterBuild });
   for (const def of STATIONS) {
     if (def.id === 'F02') continue; // the Pit Bay's sheet is the car project's (below)
-    menus.register(def.id, () => ({ title: def.name, subtitle: def.purpose, art: def.art ?? 'race_ui_02' }));
+    menus.register(def.id, () => ({ title: def.name, subtitle: def.purpose, art: def.art ?? 'race_ui_02', sections: [{ lines: effectLines(def), columns: 1, buttons: [buildButton()] }] }));
   }
+
+  // Build Mode (Milestone 10): a tapped station or prop — what it does, and Sell (half its price back) when it may go.
+  menus.register('facility', (st) => {
+    if (!st || !fac.system.get(st.uid)) return null;
+    garage().setSheetTarget?.(st);
+    const def = st.def;
+    const why = fac.sellWhy(st.uid);
+    const refund = fac.refundOf(st.uid);
+    return {
+      title: def.name,
+      subtitle: def.prop ? 'Garage prop' : def.purpose,
+      art: def.art,
+      sections: [
+        { lines: def.prop ? ['Drag it on the floor to move it.'] : [...effectLines(def), 'Drag it on the floor to move it.'] },
+        {
+          columns: 1,
+          buttons: [
+            {
+              id: 'sell',
+              label: why ? 'Can’t sell' : `Sell for ${fmt(refund)} Credits`,
+              sub: why ?? `Half of its ${fmt(def.cost)} Credits back`,
+              icon: def.art,
+              disabled: !!why,
+              accent: C.bad,
+              onTap: () => {
+                const r = fac.sell(st.uid);
+                toast(r.ok ? `Sold: ${def.name}` : r.reason, r.ok ? `+${fmt(r.refund)} Credits` : '');
+                if (r.ok) garage().say(`Sold: ${def.name} (+${fmt(r.refund)} Credits)`);
+                close();
+              },
+            },
+          ],
+        },
+      ],
+    };
+  });
+  // The Shop (Milestone 10): every facility of the first fifteen, ready ones first; Build places it on the free spot
+  // nearest the middle of the view and pays through the ledger.
+  menus.register('shop', () => {
+    const debt = team.money.economy.isBlocked('facility');
+    return {
+      title: 'Build a facility',
+      subtitle: debt ? BUILD_TEXT.debt : `You have ${fmt(team.money.credits)} Credits · sell back for half`,
+      art: 'race_ui_01',
+      accent: C.progress,
+      sections: [
+        {
+          columns: 1,
+          buttons: fac.shopList().map((s) => ({
+            id: `buy_${s.def.id}`,
+            label: s.owned ? `${s.def.name} ✓` : s.def.name,
+            sub: s.ok ? `${fmt(s.def.cost)} Credits · ${s.def.effectText}` : `${s.why} · ${s.def.effectText}`,
+            icon: s.def.art,
+            disabled: !s.ok,
+            locked: s.locked,
+            onTap: () => {
+              const r = fac.buy(s.def.id, garage().viewCell());
+              if (!r.ok) return toast(r.reason);
+              toast(`Built: ${s.def.name}`, `−${fmt(r.cost)} Credits`);
+              close();
+              garage().built(r.item, r.cost);
+            },
+          })),
+        },
+      ],
+    };
+  });
 
   // The Pit Bay (Milestone 4): "New car" when it is free; while a car is being built, the project's numbers
   // (the show itself plays on the bay).
@@ -137,9 +216,20 @@ export function createGarageMenus({ garage, team, assets = null, open, goRoster,
       const menu = { title: slot.label, subtitle: slot.line, art: slot.icon, sections: [] };
       if (slot.id === 'build') {
         const job = team.cars.active;
+        const wings = fac.expansions().filter((z) => z.state !== 'hidden');
         menu.sections = [
           { columns: 1, buttons: [{ id: 'pitBay', label: pitBay.name, sub: job ? `${job.name}: ${team.cars.phase(job).name}` : 'New car', icon: pitBay.art, onTap: () => open(pitBay.id) }] },
           { columns: 1, buttons: [garageButton()] },
+          // Milestone 10: Build → Facilities (Build Mode) and the Shop.
+          {
+            title: 'Facilities',
+            lines: [`${fac.items().filter((p) => !fac.defs[p.def].prop).length} stations in the garage · ${wings.map((z) => (z.state === 'open' ? z.name : `${z.name} (${z.why})`)).join(' · ')}`],
+            columns: 2,
+            buttons: [
+              { id: 'facilities', label: 'Facilities', sub: 'Move or sell stations', icon: 'race_ui_01', accent: C.progress, onTap: enterBuild },
+              { id: 'shop', label: 'Shop', sub: team.money.economy.isBlocked('facility') ? BUILD_TEXT.debt : 'Build a facility', icon: 'race_ui_01', onTap: () => { enterBuild(); open('shop'); } },
+            ],
+          },
         ];
       }
       if (slot.id === 'staff') {

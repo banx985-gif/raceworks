@@ -1,5 +1,8 @@
 // RACEWORKS image list: key → path (relative to index.html).
 import { STATIONS } from './garage.js';
+import { PROPS, START_LAYOUT } from './facilities.js';
+
+const START_IDS = new Set(START_LAYOUT.map((p) => p.def));
 import { STAFF, ROLES } from './staff.js';
 import { CLASSES, PARTS, START_PARTS, BUILD_ART, CAR_FAMILIES } from './cars.js';
 import { BOTTOM_SLOTS, TOP_BAR } from './home.js';
@@ -10,8 +13,10 @@ import { TYRES, RACE_ICONS } from './race.js';
 const art = (folder, key) => [key, `assets/images/${folder}/${key}.png`];
 
 export const ASSETS = {
-  // Garage: the stations with art (the rest spot is drawn by code).
-  ...Object.fromEntries(STATIONS.filter((s) => s.art).map((s) => art('facilities', s.art))),
+  // Garage: the starting garage's stations (Milestone 10: data/facilities.js START_LAYOUT) and the garage props. The
+  // other facilities' pictures (bought later) load behind the game: LATER_ASSETS.
+  ...Object.fromEntries(STATIONS.filter((s) => s.art && START_IDS.has(s.id)).map((s) => art('facilities', s.art))),
+  ...Object.fromEntries(PROPS.map((p) => art('props', p.art))),
   // Staff (Milestone 3): the three starters' portraits and the five role badges.
   // (The Tired / Stressed / Inspired icons are drawn by code at start: src/ui/statusIcons.js.)
   ...Object.fromEntries(STAFF.map((s) => art('staff', s.art))),
@@ -45,6 +50,7 @@ export const ASSETS = {
 // a few at a time behind the game (main.js), so the first screen never waits for them; a picture still on its way
 // draws nothing for a moment and pops in.
 export const LATER_ASSETS = {
+  ...Object.fromEntries(STATIONS.filter((s) => s.art && !START_IDS.has(s.id)).map((s) => art('facilities', s.art))), // Milestone 10
   ...Object.fromEntries(Object.values(CAR_FAMILIES).flatMap((f) => [art('cars', f.showcase), art('cars', f.top)])),
   ...Object.fromEntries(Object.values(PARTS).map((p) => art('parts', p.art))),
 };

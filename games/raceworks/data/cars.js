@@ -189,8 +189,9 @@ export const PROJECT = {
   roleMatchPct: 8, // bible §10.7: a role that matches the phase
   // bible §14.6: progress per day = (base + teamScore / divisor) × scale. scale is the PACING KNOB (not the bible's
   // formula shape). Measured with the 3 starters on Balanced (resting when tired): scale 1 → the first Club Hatch took
-  // 113 game days (~4 months); scale 1.95 → 56 days = 2 game months, the Milestone 4 target.
-  progress: { base: 8, divisor: 75, scale: 1.95 },
+  // 113 game days (~4 months); scale 1.95 → 56 days = 2 game months, the Milestone 4 target. Milestone 10: the
+  // starting garage's facilities (Workbench, Engine Bench, Chassis Jig, Aero Desk…) speed the build up, so 1.91 keeps 56.
+  progress: { base: 8, divisor: 75, scale: 1.91 },
   checkpoint: 0.6, // bible §14.9: the one breakthrough roll per phase
   faults: {
     baseDailyPct: 2.2, // bible §14.8
@@ -215,13 +216,14 @@ export const PROJECT = {
 };
 
 // Pit Bay spots for the project team (one each, in slot order), spread round the bay so nobody hides anyone:
-// left front, right side, right front, then the two in between.
+// left front, right side, right front, then the two in between. Milestone 10: counted from the bay's back corner
+// (dc, dr), so they move with it; one that is built over falls back to the bay's free standing places.
 export const PROJECT_SPOTS = [
-  { col: 6, row: 6 },
-  { col: 10, row: 3 },
-  { col: 9, row: 6 },
-  { col: 10, row: 5 },
-  { col: 7, row: 6 },
+  { dc: 0, dr: 4 },
+  { dc: 4, dr: 1 },
+  { dc: 3, dr: 4 },
+  { dc: 4, dr: 3 },
+  { dc: 1, dr: 4 },
 ];
 
 // The visible build in the Pit Bay (style guide §5). art: effects used by the show.

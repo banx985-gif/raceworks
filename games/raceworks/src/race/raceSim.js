@@ -53,7 +53,7 @@ export function wearPerLap(entry, tyre) {
   const base = (TYRES[tyre] ?? TYRES.medium).wearPerLap;
   const care = 1 - ((entry.ratings.tyreCare - w.tyreCareRef) / 10) * w.tyreCarePer10;
   const stat = 1 - (((entry.car.TYR ?? w.tyreStatRef) - w.tyreStatRef) / 15) * w.tyreStatPer15;
-  return base * clamp(care, 0.6, 1.4) * clamp(stat, 0.6, 1.4);
+  return base * clamp(care, 0.6, 1.4) * clamp(stat, 0.6, 1.4) * (entry.tyreWearMult ?? 1); // Milestone 10: tyre prep (facilities)
 }
 
 // Qualifying (§22.3): one flying lap each on the starting tyre, seeded bounded variance. → rows fastest first.

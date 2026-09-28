@@ -13,6 +13,8 @@
 //   races.finish(sim) → the result: the player's car wears (Condition); a weekend pays prize Credits and Reputation
 //     through the Milestone 5 ledger and rank; the result joins races.history
 //   races.history → [{ n, kind, trackId, laps, day, carNumber, result, wear, prize, reputation }] newest last
+// Milestone 10: facility effects through the garage's queries — setupKnowledge is added to practice's Setup Knowledge,
+//   tyreWearPct is fixed into your car's entry when the race is created (tyre prep, saved with the race).
 import { Rng } from '../../../../core/Rng.js';
 import { createRaceSim, runQualifying } from '../race/raceSim.js';
 import { buildField, playerEntry } from '../race/field.js';
@@ -32,11 +34,15 @@ export function createRaces({ bus, team }) {
     return Math.round(clamp(s.base + ((mec - s.mechRef) / 10) * s.perMech10, s.min, s.max) * 100) / 100;
   };
 
+  const facilityKnowledge = () => team.facilities?.bonus('setupKnowledge') ?? 0;
+
   function newRace(kind, rec, config, laps) {
     const n = ++api.count;
     const seed = api.seedFor(n);
     const track = TRACKS[config.trackId];
     const player = { ...playerEntry(team, rec), pitService: serviceFor(best('MEC')), tyre: 'medium', auto: true };
+    const wearPct = team.facilities?.bonus('tyreWearPct') ?? 0;
+    if (wearPct) player.tyreWearMult = 1 + wearPct / 100;
     const { entries, grid } = buildField({ player, rivalPool: config.rivalPool, band: config.band, fieldSize: config.fieldSize, seed });
     for (const e of entries) if (!e.isPlayer) e.pitService = serviceFor(77 + ((e.crew ?? 80) - 80) / 2);
     return { n, kind, seed, trackId: track.id, laps, entries, grid, carNumber: rec.number, createdDay: team.clock.totalDays, state: null, status: 'ready' };
@@ -88,7 +94,7 @@ export function createRaces({ bus, team }) {
       const w = cur();
       if (!w || w.kind !== 'weekend' || w.stage !== 'practice') return null;
       const u = new Rng(`practice:${w.seed}`).range(-1, 1) * WEEKEND.practice.variance;
-      w.practice = { knowledge: Math.round(clamp(api.practiceValue() + u, 0, 100)), skipped: false };
+      w.practice = { knowledge: Math.round(clamp(api.practiceValue() + u + facilityKnowledge(), 0, 100)), skipped: false };
       w.stage = 'setup';
       api.autoSetup(true);
       bus.emit('race:progress', {});
@@ -97,7 +103,7 @@ export function createRaces({ bus, team }) {
     skipPractice() {
       const w = cur();
       if (!w || w.kind !== 'weekend' || w.stage !== 'practice') return null;
-      w.practice = { knowledge: Math.round(clamp(api.practiceValue() * WEEKEND.practice.skipShare, 0, 100)), skipped: true };
+      w.practice = { knowledge: Math.round(clamp(api.practiceValue() * WEEKEND.practice.skipShare + facilityKnowledge(), 0, 100)), skipped: true };
       w.stage = 'setup';
       api.autoSetup(true);
       bus.emit('race:progress', {});

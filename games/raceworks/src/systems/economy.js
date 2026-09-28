@@ -18,7 +18,8 @@ import { Rng } from '../../../../core/Rng.js';
 import { CURRENCIES, START_MONEY, START_REPUTATION, RANKS, DEBT, COSTS, REPUTATION, CONTRACTS, LEDGER } from '../../data/economy.js';
 import { BUDGETS, CLASSES } from '../../data/cars.js';
 
-export function createTeamMoney({ bus, seed, clock, staff, cars, staffName = (s) => s.name }) {
+// revealBonus() → extra Reputation for a finished car (Milestone 10: the facilities' revealReputation, the Detail Bay).
+export function createTeamMoney({ bus, seed, clock, staff, cars, staffName = (s) => s.name, revealBonus = () => 0 }) {
   const today = () => clock.totalDays;
   const economy = new EconomySystem({
     bus,
@@ -160,7 +161,7 @@ export function createTeamMoney({ bus, seed, clock, staff, cars, staffName = (s)
     },
     carFinished(rec) {
       rec.condition = 100;
-      const rep = REPUTATION.carFinished + Math.floor(rec.result.quality / 10) * REPUTATION.carQualityBonusPer10;
+      const rep = REPUTATION.carFinished + Math.floor(rec.result.quality / 10) * REPUTATION.carQualityBonusPer10 + revealBonus();
       reputation.add(rep, `Car finished: ${rec.name}`);
       for (const c of [...contracts.active]) if (carFits(c, rec).ok) contracts.deliver(c.id, rec, today());
     },

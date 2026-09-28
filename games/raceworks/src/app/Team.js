@@ -16,6 +16,8 @@
 //   Emergency Credit, salaries on day 1, the car build's costs, car upkeep and repairs, the development contract.
 //   team.startCar(opts) charges the parts and starts the build (or says why not: debt, not enough Credits).
 // Milestone 6: team.races (src/systems/races.js) — the race being run, with its fixed seed, and past results.
+// Milestone 10: team.facilities (src/systems/garageFacilities.js) — the garage layout (core/FacilitySystem), building
+//   through the ledger, and the effect queries every system asks (bonus(key), phaseSpeedPct, workPct…).
 import { Clock } from '../../../../core/Clock.js';
 import { Rng } from '../../../../core/Rng.js';
 import { StaffSystem } from '../../../../core/StaffSystem.js';
@@ -33,6 +35,7 @@ import { createRaces } from '../systems/races.js';
 import { partsOf, partsCost } from '../systems/carProject.js';
 import { unlockContext, checkCar } from '../systems/carCatalog.js';
 import { CLASSES } from '../../data/cars.js';
+import { createGarageFacilities } from '../systems/garageFacilities.js';
 
 // A new game's setup when none is given (tests, and saves from before Milestone 4b).
 export const DEFAULT_SETUP = { teamName: 'RACEWORKS', principal: 'Principal', colour: 'red', founderId: 'MEC01' };
@@ -51,6 +54,9 @@ export const SAVE_MIGRATIONS = {
   },
   //   2 → 3 (Milestone 5): money. Nothing to change here — Team.load() gives a save without it the §30.2 starting state.
   2: (record) => record,
+  //   3 → 4 (Milestone 10): the garage layout. Nothing to change here — Team.load() gives a save without one the
+  //   starting garage (its Pit Bay, Strategy Desk and rest spot where they always stood).
+  3: (record) => record,
 };
 
 export class Team {
@@ -83,8 +89,10 @@ export class Team {
       today: () => this.clock.totalDays,
       perkOf: (s) => this.founderPerk(s),
       stationIds: () => Object.keys(ASSIGNMENT).filter((id) => this.staff.get(id)),
+      facilities: () => this.facilities,
     });
-    this.money = createTeamMoney({ bus, seed, clock: this.clock, staff: this.staff, cars: this.cars });
+    this.money = createTeamMoney({ bus, seed, clock: this.clock, staff: this.staff, cars: this.cars, revealBonus: () => this.facilities.bonus('revealReputation') });
+    this.facilities = createGarageFacilities({ bus, money: this.money, research: () => new Set(this.unlocks.research) }); // Milestone 10
     this.races = createRaces({ bus, team: this }); // Milestone 6: the race being run (fixed seed) and the results
     this.ratings = createRatingsCache();
     this.garageSnapshot = () => null; // the garage replaces this
@@ -132,6 +140,7 @@ export class Team {
     this.ratings = createRatingsCache();
     this.garageState = null;
     this.money.newGame(); // §30.2 starting state, month 1 salaries, the first contract offer
+    this.facilities.newGame(); // Milestone 10: the starting garage (bible §19)
     this.races.load(null);
   }
 
@@ -144,9 +153,17 @@ export class Team {
     const classId = car.classId ?? 'clubHatch';
     const parts = car.parts ?? partsOf(classId);
     if (this.cars.active) return { ok: false, reason: 'A car is already being built' };
+    if (this.facilities.bonus('carBays') < 1) return { ok: false, reason: 'Build a Pit Bay first' };
     const legal = checkCar({ classId, parts }, unlockContext(this, { debugAll }));
     if (!legal.ok) return { ok: false, reason: legal.reasons[0] };
-    return this.money.canStartCar(CLASSES[classId].baseCost + partsCost(parts));
+    return this.money.canStartCar(this.carPrice({ classId, parts }).total);
+  }
+
+  // What a car costs at Start (Milestone 10: after the facilities' material cost bonus, e.g. the Parts Rack −3%).
+  carPrice({ classId = 'clubHatch', parts = partsOf(classId) } = {}) {
+    const shell = this.facilities.materialPrice(CLASSES[classId].baseCost);
+    const partsPrice = this.facilities.materialPrice(partsCost(parts));
+    return { shell, parts: partsPrice, total: shell + partsPrice };
   }
 
   startCar(opts) {
@@ -156,17 +173,19 @@ export class Team {
     if (!can.ok) return can;
     const r = this.cars.start({ ...opts, classId, parts });
     if (r.ok) {
-      const base = CLASSES[classId].baseCost;
-      if (base) this.money.chargeParts(`${r.job.name} (${CLASSES[classId].name} shell)`, base);
-      this.money.chargeParts(r.job.name, partsCost(r.job.data.parts));
+      const price = this.carPrice({ classId, parts: r.job.data.parts });
+      if (price.shell) this.money.chargeParts(`${r.job.name} (${CLASSES[classId].name} shell)`, price.shell);
+      this.money.chargeParts(r.job.name, price.parts);
     }
     return r;
   }
 
-  // What this team has unlocked beyond its rank (Milestone 9: nothing yet — research M11, facilities M10, events and
-  // secrets later fill these lists; carCatalog reads them).
+  // What this team has unlocked beyond its rank (Milestone 9: research M11, events and secrets later fill these lists;
+  // carCatalog reads them). Milestone 10: facilities = the facilities standing in the garage now.
   get unlocks() {
-    return this._unlocks ?? (this._unlocks = { research: [], events: [], facilities: [], secrets: [] });
+    const u = this._unlocks ?? (this._unlocks = { research: [], events: [], secrets: [] });
+    u.facilities = this.facilities?.builtIds() ?? [];
+    return u;
   }
 
   get(id) {
@@ -259,6 +278,7 @@ export class Team {
       playSeconds: Math.round(this.playSeconds * 10) / 10,
       money: this.money.serialize(),
       races: this.races.serialize(),
+      facilities: this.facilities.serialize(), // Milestone 10
     };
   }
 
@@ -277,6 +297,7 @@ export class Team {
     this.ratings = createRatingsCache();
     if (data.money) this.money.load(data.money);
     else this.adoptMoney(); // a save from before Milestone 5
+    this.facilities.load(data.facilities); // Milestone 10 (after the money: the rank opens the Bay Extension)
     this.races.load(data.races); // none before Milestone 6
   }
 

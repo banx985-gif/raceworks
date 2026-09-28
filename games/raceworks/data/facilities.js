@@ -1,0 +1,220 @@
+// Facilities and the garage floor (Milestone 10, bible §19 / §19.1 / §6.4). Plain data only: the shared
+// core/FacilitySystem holds the layout, src/systems/garageFacilities.js adds money, unlocks and the effect queries.
+//
+// Every facility: id, name, role (bible §6.4 station role), unlock ({} = Start, { rank }, { research }), cost (bible),
+// effectText (the bible's words), effects [{ key, value }] (summed by core/FacilitySystem.total(key)), art,
+// size { w, h } in grid cells (col × row; not in the bible — chosen to match each picture, see DECISIONS.md),
+// draw { width: art width as a share of the footprint's drawn width, drop: how far below the footprint's front corner
+// the art's base sits, in cell heights }, purpose (the sheet's one line).
+//   keep: the reason it can't be sold (the garage always needs it); it can still be moved.
+//
+// Effect keys (what systems ask for — never "is F05 built?"):
+//   workPct.<role>             +% work from staff of that role on every car phase (core/ProjectSystem workerModifier)
+//   phaseSpeedPct.<area>       +% car phase speed for phases covering that area (PHASE_AREAS below)
+//   carBays                    active cars the garage can build at once (0 = no car can be started)
+//   materialCostPct            ±% on a car's class and parts price at Start
+//   setupKnowledge             + Setup Knowledge after practice (race weekends)
+//   dev.<stat>                 + development points on a finished car's stat (SPD ACC COR BRK REL EFF TYR)
+//   tyreWearPct                ±% race tyre wear for your car
+//   revealReputation           + Reputation when a finished car is revealed
+//   forecast                   + race forecast accuracy — STORED: forecasts arrive with weather (later milestone)
+//   unlock.<feature>           1 = that feature is open — STORED: Auto Training / manual drills (staff training,
+//                              Milestone 13) and the sponsor portfolio (sponsors, later milestone) switch on then.
+
+export const FACILITIES = [
+  {
+    id: 'F01', name: 'Basic Workbench', role: 'Maker', unlock: {}, cost: 1200,
+    effectText: '+6% mechanic work on car phases',
+    effects: [{ key: 'workPct.mechanic', value: 6 }],
+    art: 'facility_f01', size: { w: 3, h: 2 }, draw: { width: 1.04, drop: 0.3 },
+    purpose: 'Tools and a bench: mechanics get more done on every car phase.',
+  },
+  {
+    id: 'F02', name: 'Pit Bay', role: 'Maker', unlock: {}, cost: 1800,
+    effectText: 'Required to build/maintain one active car',
+    effects: [{ key: 'carBays', value: 1 }],
+    art: 'facility_f02', size: { w: 4, h: 4 }, draw: { width: 1.08, drop: 0.35 },
+    purpose: 'Start a car project and work on the active build.',
+    keep: 'The garage needs its Pit Bay to build cars',
+  },
+  {
+    id: 'F03', name: 'Engine Bench', role: 'Specialist', unlock: {}, cost: 1400,
+    effectText: '+8% Power Unit phase speed',
+    effects: [{ key: 'phaseSpeedPct.power', value: 8 }],
+    art: 'facility_f03', size: { w: 2, h: 2 }, draw: { width: 1.06, drop: 0.3 },
+    purpose: 'Engines are built and tuned here: the Powertrain phase goes faster.',
+  },
+  {
+    id: 'F04', name: 'Basic Dyno', role: 'Specialist', unlock: { rank: 'D' }, cost: 2400,
+    effectText: '+6 setup knowledge; +5 Power development',
+    effects: [{ key: 'setupKnowledge', value: 6 }, { key: 'dev.SPD', value: 2.5 }, { key: 'dev.ACC', value: 2.5 }],
+    art: 'facility_f04', size: { w: 3, h: 3 }, draw: { width: 1.02, drop: 0.3 },
+    purpose: 'A rolling road: more power in every car and a head start on setups.',
+  },
+  {
+    id: 'F05', name: 'Chassis Jig', role: 'Specialist', unlock: {}, cost: 1500,
+    effectText: '+8% Chassis phase speed',
+    effects: [{ key: 'phaseSpeedPct.chassis', value: 8 }],
+    art: 'facility_f05', size: { w: 3, h: 3 }, draw: { width: 0.98, drop: 0.3 },
+    purpose: 'Holds the frame true while it is built: the Chassis & Aero phase goes faster.',
+  },
+  {
+    id: 'F06', name: 'Alignment Rig', role: 'Specialist', unlock: { rank: 'D' }, cost: 1900,
+    effectText: '+6 Cornering development',
+    effects: [{ key: 'dev.COR', value: 6 }],
+    art: 'facility_f06', size: { w: 3, h: 3 }, draw: { width: 1.0, drop: 0.3 },
+    purpose: 'Wheel alignment to the millimetre: every car corners better.',
+  },
+  {
+    id: 'F07', name: 'Tyre Station', role: 'Specialist', unlock: { rank: 'D' }, cost: 1600,
+    effectText: '-5% race tyre wear after prep',
+    effects: [{ key: 'tyreWearPct', value: -5 }],
+    art: 'facility_f07', size: { w: 2, h: 2 }, draw: { width: 1.06, drop: 0.3 },
+    purpose: 'Tyres prepped before every race wear a little slower.',
+  },
+  {
+    id: 'F08', name: 'Brake Station', role: 'Specialist', unlock: { rank: 'D' }, cost: 1700,
+    effectText: '+6 Braking development',
+    effects: [{ key: 'dev.BRK', value: 6 }],
+    art: 'facility_f08', size: { w: 2, h: 2 }, draw: { width: 1.06, drop: 0.3 },
+    purpose: 'Brakes bedded in and balanced: every car stops better.',
+  },
+  {
+    id: 'F09', name: 'Gearbox Bench', role: 'Specialist', unlock: { research: 'Transmission 1' }, cost: 1800,
+    effectText: '+8% Transmission phase speed',
+    effects: [{ key: 'phaseSpeedPct.transmission', value: 8 }],
+    art: 'facility_f09', size: { w: 2, h: 2 }, draw: { width: 1.06, drop: 0.3 },
+    purpose: 'Gearboxes built and shimmed here: the Powertrain phase goes faster.',
+  },
+  {
+    id: 'F10', name: 'Aero Desk', role: 'Specialist', unlock: {}, cost: 1500,
+    effectText: '+8% Aero phase speed',
+    effects: [{ key: 'phaseSpeedPct.aero', value: 8 }],
+    art: 'facility_f10', size: { w: 2, h: 2 }, draw: { width: 1.1, drop: 0.3 },
+    purpose: 'Screens full of airflow: the car is drawn here, and the Chassis & Aero phase goes faster.',
+  },
+  {
+    id: 'F11', name: 'Strategy Desk', role: 'Thinker', unlock: {}, cost: 1300,
+    effectText: '+8% Strategist work; forecast +3',
+    effects: [{ key: 'workPct.strategist', value: 8 }, { key: 'forecast', value: 3 }],
+    art: 'facility_f11', size: { w: 2, h: 3 }, draw: { width: 1.12, drop: 0.3 },
+    purpose: 'Research, race forecasts and strategy.',
+    keep: 'The Strategy Desk is where your crew plans: it stays',
+  },
+  {
+    id: 'F12', name: 'Driver Simulator', role: 'Rest/Training', unlock: {}, cost: 1800,
+    effectText: 'Unlocks Auto Training and manual drills',
+    effects: [{ key: 'unlock.autoTraining', value: 1 }, { key: 'unlock.manualDrills', value: 1 }],
+    art: 'facility_f12', size: { w: 2, h: 2 }, draw: { width: 1.08, drop: 0.3 },
+    purpose: 'Laps on screen: drivers test the car here, and training opens with it (staff training comes later).',
+  },
+  {
+    id: 'F13', name: 'Parts Rack', role: 'Support', unlock: {}, cost: 900,
+    effectText: '-3% car build material cost',
+    effects: [{ key: 'materialCostPct', value: -3 }],
+    art: 'facility_f13', size: { w: 2, h: 1 }, draw: { width: 1.12, drop: 0.25 },
+    purpose: 'Spares on the shelf: every car costs a little less to build.',
+  },
+  {
+    id: 'F14', name: 'Detail Bay', role: 'Showcase', unlock: { rank: 'D' }, cost: 1200,
+    effectText: '+4 Reputation on car reveal',
+    effects: [{ key: 'revealReputation', value: 4 }],
+    art: 'facility_f14', size: { w: 3, h: 3 }, draw: { width: 1.0, drop: 0.3 },
+    purpose: 'A polish before the reveal: every finished car earns a little more Reputation.',
+  },
+  {
+    id: 'F15', name: 'Sponsor Wall', role: 'Front desk', unlock: { rank: 'C' }, cost: 2000,
+    effectText: 'Unlocks sponsor portfolio screen',
+    effects: [{ key: 'unlock.sponsorPortfolio', value: 1 }],
+    art: 'facility_f15', size: { w: 3, h: 1 }, draw: { width: 1.1, drop: 0.25 },
+    purpose: 'Logos on the wall: the sponsor portfolio opens with it (sponsors come later).',
+  },
+];
+
+// The rest spot (Milestone 1; Milestone 8 art): not a bible facility — it stays, can be moved, costs nothing.
+export const REST_SPOT = {
+  id: 'REST', name: 'Rest Spot', role: 'Rest', unlock: {}, cost: 0, effectText: 'Tired staff get their Energy back here',
+  effects: [], art: 'facility_f26', size: { w: 2, h: 2 }, draw: { width: 1.02, drop: 0.3 }, tag: true,
+  purpose: 'A bench and a drink: tired staff come here to get their Energy back.',
+  keep: 'Your crew needs somewhere to rest',
+};
+
+// Props (garage dressing): no effect, never sold, but they can be moved in Build Mode.
+export const PROPS = [
+  { id: 'P01', name: 'Tyre Stack', art: 'race_prop_01' },
+  { id: 'P04', name: 'Wheel-Gun Trolley', art: 'race_prop_04' },
+  { id: 'P06', name: 'Racing Jack', art: 'race_prop_06' },
+  { id: 'P08', name: 'Fire-Safety Station', art: 'race_prop_08' },
+  { id: 'P09', name: 'Helmet Rack', art: 'race_prop_09' },
+  { id: 'P11', name: 'Spare Wing Rack', art: 'race_prop_11' },
+].map((p) => ({ ...p, prop: true, role: 'Prop', unlock: {}, cost: 0, effects: [], size: { w: 1, h: 1 }, draw: { width: 1.18, drop: 0.25 }, purpose: 'Garage kit: it makes the place look like a race team works here.', keep: 'Props can be moved, not sold' }));
+
+export const SELL_REFUND_PCT = 50; // bible §19
+
+// The garage floor (bible §19.1). The Starter Garage is the Milestone 1 room (12 × 16 cells); each wing is a block of
+// floor that opens later. Walls run along row 0 and col 0 over the whole building, so a wing grows the room forward.
+//   rank: the rank that opens it (automatically, no cost — see DECISIONS.md). openInM10: false = it stays locked
+//   (greyed floor) whatever the rank until its milestone. secret: never drawn until opened (the Ghost Annex, F35).
+export const STARTER_AREA = { id: 'starter', name: 'Starter Garage', cols: 12, rows: 16 };
+export const EXPANSIONS = [
+  { id: 'bay', name: 'Bay Extension', rank: 'D', col: 12, row: 0, w: 4, h: 16, requires: [], openInM10: true },
+  { id: 'engineering', name: 'Engineering Wing', rank: 'C', col: 0, row: 16, w: 16, h: 6, requires: ['bay'], openInM10: false },
+  { id: 'raceOps', name: 'Race Operations Wing', rank: 'B', col: 16, row: 0, w: 4, h: 22, requires: ['engineering'], openInM10: false },
+  { id: 'worldAnnex', name: 'World Team Annex', rank: 'A', col: 0, row: 22, w: 20, h: 4, requires: ['raceOps'], openInM10: false },
+  // F35 Ghost Garage's secret room (SEC-FAC-02): a separate room with its own entrance, below the building. Hidden.
+  { id: 'ghost', name: 'Ghost Annex', secret: 'SEC-FAC-02', col: 0, row: 27, w: 6, h: 4, requires: [], entrance: { col: 0, row: 27 }, openInM10: false },
+];
+
+// Where people come in (always kept clear; every station must be reachable from here): the door in the left wall.
+export const ENTRANCE = { col: 0, row: 14 };
+
+// The starting garage (bible §19: ~8 functional stations plus props, already placed). col/row = the back corner.
+export const START_LAYOUT = [
+  // The big Pit Bay stands out on the floor, in front, so the build on it is always in view (Milestone 1 had it
+  // against the back; the old saves' Pit Bay, Strategy Desk and rest spot move here with the rest of the garage).
+  { def: 'F02', col: 7, row: 5 }, // Pit Bay
+  // Along the right-hand back wall: Workbench, Engine Bench, Parts Rack, Chassis Jig.
+  { def: 'F01', col: 1, row: 0 },
+  { def: 'F03', col: 5, row: 0 },
+  { def: 'F13', col: 7, row: 0 },
+  { def: 'F05', col: 9, row: 0 },
+  // Along the left-hand wall: Aero Desk, Strategy Desk, Driver Simulator (the door is further down).
+  { def: 'F10', col: 0, row: 3 },
+  { def: 'F11', col: 0, row: 6 },
+  { def: 'F12', col: 0, row: 10 },
+  { def: 'REST', col: 4, row: 12 }, // Rest Spot, out on the floor near the door
+  // Props.
+  { def: 'P11', col: 4, row: 0 }, // Spare Wing Rack
+  { def: 'P09', col: 0, row: 0 }, // Helmet Rack, in the back corner
+  { def: 'P08', col: 0, row: 9 }, // Fire-Safety Station
+  { def: 'P01', col: 11, row: 4 }, // Tyre Stack
+  { def: 'P04', col: 11, row: 10 }, // Wheel-Gun Trolley
+  { def: 'P06', col: 6, row: 9 }, // Racing Jack
+];
+
+// Which facilities each car phase is worked at (style guide §5: staff walk to the right station for each stage). The
+// car's team takes these in turn (slot order); a station that isn't built is skipped; with none, they work at the Pit Bay.
+export const PHASE_STATIONS = {
+  concept: ['F10', 'F11', 'F02'],
+  chassisAero: ['F05', 'F10', 'F02'],
+  powertrain: ['F03', 'F09', 'F01', 'F02'],
+  assembly: ['F02', 'F01', 'F13'],
+  testing: ['F12', 'F02', 'F04'],
+};
+
+// Car phases → the areas whose phaseSpeedPct counts for them (each facility's bonus applies in full to its phase).
+export const PHASE_AREAS = {
+  concept: [],
+  chassisAero: ['chassis', 'aero'],
+  powertrain: ['power', 'transmission'],
+  assembly: [],
+  testing: [],
+};
+
+// Build Mode words.
+export const BUILD_TEXT = {
+  hint: 'Drag to move · tap to sell · Shop to build',
+  debt: 'No building while on Emergency Credit',
+  noSpot: 'No free spot for it: move or sell something first',
+  owned: 'Already in the garage',
+};

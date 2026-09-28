@@ -28,7 +28,8 @@ export const RANKS = [
 //   floorByRank: how far below 0 a purchase may take the cash (Rank E −5,000; it scales with rank). Salaries,
 //     running project costs and interest are still paid past it — they are never refused.
 //   monthlyInterestPct: charged on the negative balance at each month end.
-//   blocked: spending kinds refused while the cash is below 0 ('newCar' = a new car project: non-essential building).
+//   blocked: spending kinds refused while the cash is below 0 ('newCar' = a new car project: non-essential building;
+//     'facility' = building a facility, Milestone 10 — moving and selling stay open).
 //     Essential repairs stay possible. A car may still be started for an active rescue contract (it pays for itself).
 //   tokensAutoSpend: Racing Tokens are never spent automatically (bible §30.5) — nothing spends them yet.
 //   rescueInvestorMonths: bible §3's Rescue Investor (6 months beyond the floor) arrives in a later milestone; the
@@ -36,7 +37,7 @@ export const RANKS = [
 export const DEBT = {
   floorByRank: { E: -5000, D: -8000, C: -15000, B: -30000, A: -50000, S: -80000 },
   monthlyInterestPct: 2,
-  blocked: ['newCar'],
+  blocked: ['newCar', 'facility'],
   tokensAutoSpend: false,
   rescueInvestorMonths: 6,
 };
@@ -113,6 +114,7 @@ export const CATEGORY_NAMES = {
   contract: 'Contracts',
   prize: 'Prize money',
   interest: 'Emergency Credit interest',
+  facilities: 'Facilities',
   debug: 'Debug',
   carried: 'Earlier lines',
 };

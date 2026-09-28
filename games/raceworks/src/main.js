@@ -79,7 +79,14 @@ bus.on('renderer:resize', () => layout.refresh());
 const input = new Input(renderer, bus);
 const assets = new AssetManager({ bus });
 const router = new ScreenRouter(bus);
-const sheet = new BottomSheet({ layout, assets, onClose: () => garage.selection.clear() });
+const sheet = new BottomSheet({
+  layout,
+  assets,
+  onClose: () => {
+    garage.selection.clear();
+    garage.setSheetTarget(null); // Milestone 10: Build Mode's facility sheet
+  },
+});
 const dialog = new Dialog({ layout, assets }); // "are you sure" boxes and Help (Milestone 4b)
 const textPrompt = new TextPrompt({ renderer }); // typing the team and player names
 
@@ -152,7 +159,7 @@ bus.on('clock:speed', ({ speed }) => debug.log(speed ? `speed ${speed}×` : 'gam
 // Autosave (core/Autosave): every game day and after any change, plus when the app goes to the background.
 const autosave = new Autosave({
   bus,
-  triggers: ['race:created', 'race:progress', 'race:finished', 'clock:day', 'team:changed', 'project:start', 'project:phase', 'project:complete', 'car:fault', 'car:fix', 'car:breakthrough', 'contract:accepted', 'contract:success', 'car:repaired', 'economy:debt'],
+  triggers: ['race:created', 'race:progress', 'race:finished', 'clock:day', 'team:changed', 'project:start', 'project:phase', 'project:complete', 'car:fault', 'car:fix', 'car:breakthrough', 'contract:accepted', 'contract:success', 'car:repaired', 'economy:debt', 'facility:layout'],
   save: () => {
     if (router.currentName === 'race') raceScreen.exit(); // the race's exact state goes in the save too
     return team.save();
@@ -333,7 +340,7 @@ carDebug.nextMonth = () => {
   const m = clock.month;
   while (clock.month === m) clock.advanceDay();
 };
-const menus = createGarageMenus({ garage: () => garage, team, assets, open: openMenu, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t) => toast(t), goWeekend: () => goWeekend(), goTestRace: debug.enabled ? () => goTestRace() : null, goRaceResult: (index) => goSub('raceResult', { index }) });
+const menus = createGarageMenus({ garage: () => garage, team, assets, open: openMenu, close: () => sheet.close(), goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t, b) => toast(t, b), goWeekend: () => goWeekend(), goTestRace: debug.enabled ? () => goTestRace() : null, goRaceResult: (index) => goSub('raceResult', { index }) });
 
 // ---------------------------------------------------------------------------
 // Toasts (core/ui/Toast): short money news under the top bar — salary day, a contract paid, Emergency Credit on / off,
@@ -350,6 +357,7 @@ bus.on('economy:debt', ({ inDebt }) => teamReady && (inDebt ? toast('Emergency C
 bus.on('contract:success', ({ contract }) => teamReady && toast('Contract paid', `+${fmtCr(contract.credits)} Credits · +${contract.rp} RP`));
 bus.on('contract:failed', ({ contract }) => teamReady && toast('Contract ended', `${contract.title}: the deadline passed`));
 bus.on('reputation:rankUp', ({ rank }) => teamReady && toast(`Rank ${rank.id}!`, 'Your team has moved up a rank.'));
+bus.on('facility:expansion', ({ zone }) => teamReady && toast(`${zone.name} open!`, 'The garage is bigger: more floor to build on.')); // Milestone 10
 
 // ---------------------------------------------------------------------------
 // The shared bars (core/ui), filled with RACEWORKS content.

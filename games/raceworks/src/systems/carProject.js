@@ -11,7 +11,11 @@
 // per phase) comes from the parts' total complexity (§15.7).
 //   statModifier    the founder's perk (Milestone 4b): +6% on their perk stat's share of their work
 //   (onDay also takes a live founder perk extra for its phase off the fault chance: Tessa's −5% assembly faults)
-// createCarProjects({ bus, rng, staff, isResting, today, stationIds, perkOf }) → { projects, assignments, cars, … helpers }
+// Milestone 10: the garage's facilities through their effect queries (facilities() → src/systems/garageFacilities.js):
+//   workerModifier  × (1 + workPct(role)%)       e.g. the Basic Workbench's +6% mechanic work
+//   progressModifier × (1 + phaseSpeedPct(phase)%) e.g. the Engine Bench's +8% on the Powertrain phase
+//   onComplete      + devBonus() development points on the finished car's stats (the Dyno, Alignment Rig, Brake Station)
+// createCarProjects({ bus, rng, staff, isResting, today, stationIds, perkOf, facilities }) → { projects, assignments, cars, … helpers }
 //   perkOf(staff) → the founder perk ({ stat, pct, extras }) when that person is the founder, else null.
 //   stationIds() → staff with a garage station duty: they count as assigned (working) even when not on a car.
 import { ProjectSystem } from '../../../../core/ProjectSystem.js';
@@ -51,7 +55,7 @@ export function finalCar({ classId, parts, dev = {}, faults = [], innovation = 0
   return { stats, classFit, rating: Math.round(clamp(classFit, 0, 999)), developmentScore, quality, faults: open.length };
 }
 
-export function createCarProjects({ bus, rng, staff, isResting = () => false, today = () => 0, stationIds = () => [], perkOf = () => null }) {
+export function createCarProjects({ bus, rng, staff, isResting = () => false, today = () => 0, stationIds = () => [], perkOf = () => null, facilities = () => null }) {
   let projects = null;
   const assignments = new AssignmentSystem({ staff, getJobs: () => projects.jobs, bus, otherBusyIds: stationIds });
   const cars = new JobHistory({ bus });
@@ -67,7 +71,11 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
   const hooks = {
     workerModifier(job, phase, s) {
       if (isResting(s.id)) return 0; // away recovering at the rest spot
-      return ROLES[s.role]?.primaryStat === leadStat(phase) ? 1 + PROJECT.roleMatchPct / 100 : 1;
+      const match = ROLES[s.role]?.primaryStat === leadStat(phase) ? 1 + PROJECT.roleMatchPct / 100 : 1;
+      return match * (1 + (facilities()?.workPct(s.role) ?? 0) / 100);
+    },
+    progressModifier(job, phase) {
+      return 1 + (facilities()?.phaseSpeedPct(phase.id) ?? 0) / 100;
     },
     // Founder perk: "+6% <stat> contribution" — their perk stat counts 6% more in their share of the work.
     statModifier(job, phase, s, statKey) {
@@ -116,6 +124,7 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
     onComplete(job) {
       const sums = job.phaseSummaries;
       const avgScore = sums.length ? sums.reduce((t, p) => t + p.avgScore, 0) / sums.length : 0;
+      for (const [k, v] of Object.entries(facilities()?.devBonus() ?? {})) if (v) job.data.dev[k] = (job.data.dev[k] ?? 0) + v;
       const car = finalCar({ classId: job.data.classId, parts: job.data.parts, dev: job.data.dev, faults: job.data.faults, innovation: job.data.innovation, avgScore });
       const vis = visualFamily({ classId: job.data.classId, parts: job.data.parts });
       return {

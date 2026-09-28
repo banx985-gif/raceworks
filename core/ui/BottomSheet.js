@@ -10,6 +10,8 @@
 //                                                  each with its own sections (then menu.sections is not used)
 //   A section may also hold bars (CAREWORKS Milestone 2; optional, drawn after its lines):
 //     bars: [{ label, value, max = 100, color?, text? }]   one row each: label · a filled bar · text (default the value)
+//   Header extras (CAREWORKS Milestone 3; optional): badge (image key) — a small round badge on the picture's corner
+//   (e.g. a role badge); tag: { text, color? } — a chip beside the title (e.g. FOUNDER)
 // A MenuRegistry maps what was tapped (a station type, 'worker', 'floor'…) to the function that builds its menu.
 //   sheet.open(builder) — builder() → menu        sheet.close()        sheet.active
 //   sheet.handleInput(hook, p) → true when the sheet used it (tap a button, tap above it to close, drag to scroll)
@@ -298,14 +300,52 @@ export class BottomSheet {
       else ctx.rect(art.x, art.y, art.w, art.h);
       ctx.fill();
       this.assets.drawContained(ctx, m.art, { x: art.x + 8, y: art.y + 8, w: art.w - 16, h: art.h - 16 });
+      if (m.badge) {
+        const bs = 78;
+        const bx = art.x + art.w - bs + 14;
+        const by = art.y + art.h - bs + 14;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.strokeStyle = C.outline;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(bx + bs / 2, by + bs / 2, bs / 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        this.assets.drawContained(ctx, m.badge, { x: bx + 6, y: by + 6, w: bs - 12, h: bs - 12 });
+      }
     }
     const tx = m.art ? art.x + art.w + 28 : r.x + PAD;
     const tw = this.closeRect().x - 20 - tx;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
+    let tagW = 0;
+    if (m.tag?.text) {
+      ctx.font = font(S.small, true);
+      tagW = Math.min(tw * 0.45, ctx.measureText(m.tag.text).width + 32);
+    }
     ctx.fillStyle = C.text;
     ctx.font = font(S.title, true);
-    ctx.fillText(m.title ?? '', tx, r.y + 48, tw);
+    const titleMax = tagW ? tw - tagW - 16 : tw;
+    ctx.fillText(m.title ?? '', tx, r.y + 48, titleMax);
+    if (tagW) {
+      const titleW = Math.min(titleMax, ctx.measureText(m.title ?? '').width);
+      const cx = tx + titleW + 16;
+      ctx.fillStyle = m.tag.color ?? C.gold;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(cx, r.y + 54, tagW, 48, 24);
+      else ctx.rect(cx, r.y + 54, tagW, 48);
+      ctx.fill();
+      ctx.strokeStyle = C.outline;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.fillStyle = C.outline;
+      ctx.font = font(S.small, true);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(m.tag.text, cx + tagW / 2, r.y + 79, tagW - 16);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+    }
     if (m.subtitle) {
       ctx.fillStyle = C.textMuted;
       ctx.font = font(S.body);
