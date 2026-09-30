@@ -10,16 +10,24 @@
 // Player actions (each returns { ok, reason }): canStartCar(parts) / chargeParts(…) · emergencyFix(job) ·
 //   repairCar(number) · accept(id) · deliverFromGarage(id)
 // Readers: credits · inDebt · floor · rank · monthInOut() · contracts · reconcile()
+// Milestone 21: the contracts are the eight §29 types (src/systems/contracts.js, data/contracts.js): three offers a month
+//   from generateOffer(rng, takenTypes) (the Team passes it: only what the team can meet now), at most 2 active; while in
+//   debt one of them is a rescue job. A goal that counts races or drills is delivered with { type: 'progress' }. Paid
+//   once on success (Credits, RP, Reputation, and onPaid(c): sponsor reputation, part-event progress, secret facts);
+//   a failure costs a little Reputation (data/contracts.js CONTRACT_FAIL_REPUTATION). firstOffers() fills the board.
 import { EconomySystem } from '../../../../core/EconomySystem.js';
 import { ReputationSystem } from '../../../../core/ReputationSystem.js';
 import { ContractSystem } from '../../../../core/ContractSystem.js';
 import { valueForRank } from '../../../../core/CompanyRank.js';
 import { Rng } from '../../../../core/Rng.js';
 import { CURRENCIES, START_MONEY, START_REPUTATION, RANKS, DEBT, COSTS, REPUTATION, CONTRACTS, LEDGER } from '../../data/economy.js';
-import { BUDGETS, CLASSES } from '../../data/cars.js';
+import { BUDGETS, CLASSES, PARTS } from '../../data/cars.js';
+import { CONTRACT_RULES, CONTRACT_FAIL_REPUTATION } from '../../data/contracts.js';
 
 // revealBonus() → extra Reputation for a finished car (Milestone 10: the facilities' revealReputation, the Detail Bay).
-export function createTeamMoney({ bus, seed, clock, staff, cars, staffName = (s) => s.name, revealBonus = () => 0 }) {
+// Milestone 21: generateOffer(rng, takenTypes) → the terms of one development contract offer (null: none); onPaid(c) —
+// a contract's extra rewards.
+export function createTeamMoney({ bus, seed, clock, staff, cars, staffName = (s) => s.name, revealBonus = () => 0, generateOffer = null, onPaid = () => {} }) {
   const today = () => clock.totalDays;
   const economy = new EconomySystem({
     bus,
@@ -37,6 +45,8 @@ export function createTeamMoney({ bus, seed, clock, staff, cars, staffName = (s)
     const target = rng.int(def.qualityMin, def.qualityMax);
     return {
       kind: def.kind,
+      type: 'supplier_test', // Milestone 21: the §29 type
+      goal: 'build',
       title: def.title,
       client: clientName(def, rng),
       classId: def.classId,
@@ -50,9 +60,11 @@ export function createTeamMoney({ bus, seed, clock, staff, cars, staffName = (s)
   // Can this finished car deliver this contract?
   function carFits(c, rec) {
     const fails = [];
+    if (c.goal && c.goal !== 'build') return { ok: false, failures: ['not a car contract'] }; // Milestone 21: races / drills
     if (!rec?.result) return { ok: false, failures: ['no car'] };
-    if (rec.result.classId !== c.classId) fails.push(`needs a ${CLASSES[c.classId].name}`);
-    if (rec.result.quality < c.targetQuality) fails.push(`Quality ${rec.result.quality} is under the target ${c.targetQuality}`);
+    if (c.classId && rec.result.classId !== c.classId) fails.push(`needs a ${CLASSES[c.classId].name}`);
+    if (c.targetQuality !== undefined && rec.result.quality < c.targetQuality) fails.push(`Quality ${rec.result.quality} is under the target ${c.targetQuality}`);
+    if (c.partId && !(rec.result.parts ?? []).includes(c.partId)) fails.push(`needs the ${PARTS[c.partId]?.name ?? c.partId} fitted`);
     if (c.newBuildOnly && rec.number <= (c.carsAtAccept ?? 0)) fails.push('needs a car finished after accepting');
     // A build contract keeps its car; a rescue job only borrows one for a test run, so any car will do again.
     if (rec.contractId && c.kind !== 'rescue') fails.push('that car has already delivered a contract');
@@ -62,16 +74,25 @@ export function createTeamMoney({ bus, seed, clock, staff, cars, staffName = (s)
   const contracts = new ContractSystem({
     rng: new Rng(`${seed}-contracts`),
     bus,
-    maxActive: CONTRACTS.maxActive,
-    offersPerMonth: CONTRACTS.offersPerMonth,
+    maxActive: CONTRACT_RULES.maxActive,
+    offersPerMonth: CONTRACT_RULES.offersPerMonth,
     hooks: {
-      generate: (ctx, rng) => terms(ctx.inDebt ? CONTRACTS.rescue : CONTRACTS.clubBuild, rng),
-      check: (c, rec) => carFits(c, rec),
+      // Milestone 21: while in debt a rescue job first (unless one is on the board); then the §29 types the team can meet
+      generate: (ctx, rng) => {
+        if (ctx.inDebt && !contracts.offers.some((c) => c.kind === 'rescue')) return terms(CONTRACTS.rescue, rng);
+        return generateOffer ? generateOffer(rng, contracts.offers.map((c) => c.type)) : terms(CONTRACTS.clubBuild, rng);
+      },
+      check: (c, d) => (d?.type === 'progress' ? ((c.progress ?? 0) >= c.need ? { ok: true, failures: [] } : { ok: false, failures: [`${c.progress ?? 0} of ${c.need} done`] }) : carFits(c, d)),
       onSuccess(c, rec) {
-        rec.contractId = c.id;
+        if (rec?.result) rec.contractId = c.id;
         economy.add('credits', c.credits, `Contract paid: ${c.title} (${c.client})`, 'contract');
         economy.add('rp', c.rp, `Contract RP: ${c.title}`, 'contract');
         reputation.add(REPUTATION.contractDone, `Contract delivered: ${c.title}`);
+        onPaid(c);
+      },
+      // Milestone 21: a missed deadline (or giving up) costs a little Reputation — never below the rank's floor
+      onFail(c) {
+        reputation.add(-CONTRACT_FAIL_REPUTATION, `Contract failed: ${c.title}`);
       },
     },
   });
@@ -144,7 +165,13 @@ export function createTeamMoney({ bus, seed, clock, staff, cars, staffName = (s)
       contracts.reset();
       for (const [cur, amount] of Object.entries(START_MONEY)) economy.add(cur, amount, `Starting ${CURRENCIES[cur].name}`, 'start');
       paySalaries(); // day 1 of month 1 is a salary day too
-      contracts.monthStart({ inDebt: false }, today());
+      // (Milestone 21: the first contract offers come from firstOffers(), once the garage and research are set up)
+    },
+    // The board's offers now (a new team, or a save from before Milestone 21: three fresh ones; the active ones stay).
+    firstOffers() {
+      for (const c of contracts.offers) c.status = 'expired';
+      contracts.offers = [];
+      contracts.monthStart({ inDebt: economy.inDebt }, today());
     },
     daily(job) {
       if (job) economy.add('credits', -carDailyCost(job), `Build running cost: ${job.name}`, 'project');
@@ -216,6 +243,7 @@ export function createTeamMoney({ bus, seed, clock, staff, cars, staffName = (s)
     garageCarFor(id) {
       const c = contracts.active.find((x) => x.id === id);
       if (!c) return null;
+      if (c.goal && c.goal !== 'build') return null;
       const fits = cars.cars.list().filter((r) => carFits(c, r).ok);
       return fits.sort((a, b) => a.result.quality - b.result.quality)[0] ?? null; // the lowest that still fits
     },
@@ -224,6 +252,10 @@ export function createTeamMoney({ bus, seed, clock, staff, cars, staffName = (s)
       if (!rec) return { ok: false, reason: 'No car in the Car Garage fits' };
       const r = contracts.deliver(id, rec, today());
       return r.ok ? { ok: true, record: rec } : { ok: false, reason: r.failures.join('; ') };
+    },
+    // Give up an active contract (it fails now: the small Reputation cost).
+    cancel(id) {
+      return contracts.cancel(id, today());
     },
     carFits,
 

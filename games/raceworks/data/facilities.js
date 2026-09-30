@@ -17,11 +17,12 @@
 //   setupKnowledge             + Setup Knowledge after practice (race weekends)
 //   dev.<stat>                 + development points on a finished car's stat (SPD ACC COR BRK REL EFF TYR)
 //   tyreWearPct                ±% race tyre wear for your car
+//   telemetry                  1 = your races run with telemetry on (Milestone 21: HexaCom's obligation; the Telemetry Room)
 //   revealReputation           + Reputation when a finished car is revealed
 //   researchSpeedPct.<branch>  +% research speed on that branch's nodes (Milestone 11: CFD Station AER, Engine Lab PWR)
 //   forecast                   + race forecast accuracy — STORED: forecasts arrive with weather (later milestone)
 //   unlock.<feature>           1 = that feature is open: Auto Training (Milestone 12: staff training needs it) — STORED:
-//                              manual drills (Milestone 14) and the sponsor portfolio (sponsors, later milestone).
+//                              manual drills (Milestone 14) and the sponsor portfolio (Milestone 21: +1 sponsor offer a month).
 //   trainingSeats.<slot>       Milestone 12: training capacity — simulator = people on the Driver Simulator course at
 //                              once; study = extra training places for the other courses (data/training.js)
 
@@ -184,7 +185,7 @@ export const FACILITIES = [
   {
     id: 'F22', name: 'Telemetry Room', role: 'Specialist', unlock: { research: 'ELE3' }, cost: 7800,
     effectText: '+18 practice setup knowledge',
-    effects: [{ key: 'setupKnowledge', value: 18 }],
+    effects: [{ key: 'setupKnowledge', value: 18 }, { key: 'telemetry', value: 1 }], // (telemetry: Milestone 21)
     art: 'facility_f22', size: { w: 3, h: 3 }, draw: { width: 1.02, drop: 0.3 },
     purpose: 'Every lap on screens: practice teaches the crew much more about the setup.',
   },

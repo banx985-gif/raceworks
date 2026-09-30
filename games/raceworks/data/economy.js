@@ -62,7 +62,9 @@ export const REPUTATION = {
   contractDone: 20, // a development contract delivered
 };
 
-// Development contracts (bible §29): Milestone 5 has one simple kind — build a Club Hatch that reaches a Quality
+// Development contracts (bible §29). Milestone 21 completes them (data/contracts.js: eight types, three offers a month, at
+// most 2 active); clubBuild below is still the Supplier test's Club Hatch build, and rescue the debt job.
+// Milestone 5 had one simple kind — build a Club Hatch that reaches a Quality
 // target before the deadline. One offer a month; an offer not taken goes at the next month start; a missed deadline
 // just ends it (no penalty beyond the missed payout). PLACEHOLDER numbers (the first Club Hatch is Quality ~36).
 //   rescue: while the cash is below 0 the offer is a rescue job instead — an easier target that any car already in the
@@ -119,6 +121,7 @@ export const CATEGORY_NAMES = {
   hiring: 'Hiring and recruitment', // Milestone 12
   training: 'Training', // Milestone 12
   championship: 'Championships (entry fees, title bonuses)', // Milestone 20
+  sponsor: 'Sponsors (stipends, race bonuses, obligation bonuses)', // Milestone 21
   debug: 'Debug',
   carried: 'Earlier lines',
 };

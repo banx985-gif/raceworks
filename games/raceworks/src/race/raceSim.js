@@ -731,6 +731,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
       c.coldTo = P.exitAbs + INCIDENTS.coldLaps * L; // new tyres start cold
       c.wear = 0;
       c.stops++;
+      if (P.by === 'forced' || (P.outside ?? 0) > 0) c.pitErrors = (c.pitErrors ?? 0) + 1; // Milestone 21: a stop with pitError (count only)
       // the next stint plans afresh (a new window); your Manual next-tyre choice is used up
       c.win = null;
       c.missed = null;
@@ -1072,6 +1073,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
           fails: [...c.fails],
           contacts: c.contacts,
           stops: c.stops,
+          pitErrors: c.pitErrors ?? 0, // Milestone 21: stops forced by a fault or taken outside the window (IronPeak)
           stints: c.stints.map((x) => x.tyre),
           wear: Math.round(c.wear * 100),
           // Milestone 16: the strategy record (swings, caution gains — Milestone 17), fuel at the flag, time lost outside windows

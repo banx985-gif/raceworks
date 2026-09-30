@@ -64,7 +64,11 @@ export const STAFF_PORTRAITS = Object.fromEntries(ALL_STAFF.map((d) => d.art).fi
 // Milestone 9: every car family's two pictures and every part icon (about 17 MB in all). Registered at boot and loaded
 // a few at a time behind the game (main.js), so the first screen never waits for them; a picture still on its way
 // draws nothing for a moment and pops in.
+import { SPONSORS } from './sponsors.js';
+
 export const LATER_ASSETS = {
+  // Milestone 21: the eight sponsor logos (the Sponsor sheet)
+  ...Object.fromEntries(SPONSORS.map((s) => art('logos', s.logo))),
   // Milestone 20: the rival logos, the Club / National / World trophies and the standings / rival icons (the Compete sheet)
   ...Object.fromEntries(Object.values(RIVAL_TEAMS).filter((r) => r.logo).map((r) => art('logos', r.logo))),
   ...Object.fromEntries(['race_reward_07', 'race_reward_08', 'race_reward_09'].map((k) => art('rewards', k))),

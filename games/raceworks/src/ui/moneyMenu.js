@@ -3,11 +3,15 @@
 //              Emergency Credit status, Save & main menu (Milestone 4b), debug money buttons with ?debug=1
 //   Ledger     the newest Credits ledger lines (date · amount · reason → balance) with the reconcile check, this
 //              month by kind, and the RP / Racing Token lines
-//   Contracts  the active contract (Deliver now when a car in the Car Garage fits), the offer (Accept), past ones
+//   Contracts  the active contracts (Deliver now when a car in the Car Garage fits; progress for race / drill goals;
+//              Give up), the offers (Accept), past ones — Milestone 21: the eight §29 types, three offers, 2 at once
+//   Sponsors   (Milestone 21) the sponsor slots, deals, obligations, offers (src/ui/sponsorMenu.js)
 // Built again every frame while open, so it stays live.
 import { THEME } from '../../../../core/Theme.js';
 import { PLAYER_TITLE } from '../../data/setup.js';
 import { LEDGER, CATEGORY_NAMES, DEBT, CURRENCIES } from '../../data/economy.js';
+import { goalText, progressText } from '../systems/contracts.js';
+import { sponsorSections } from './sponsorMenu.js';
 
 const C = THEME.color;
 export const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -32,7 +36,7 @@ export function moneyMenu({ slot, team, goMainMenu = null, debug = null, toast =
         { text: `${fmt(m.credits)} Credits · ${fmt(m.rp)} RP · ${fmt(m.tokens)} Racing Tokens`, color: m.inDebt ? C.bad : C.actionDark },
         `Rank ${m.rank} · ${repLine}`,
         `This month: in ${fmt(month.in)} · out ${fmt(month.out)} · net ${signed(month.net)}`,
-        `Every month (day 1): salaries ${fmt(m.salaryBill())}${m.upkeepBill() ? ` · car upkeep ${fmt(m.upkeepBill())}` : ''}`,
+        `Every month (day 1): salaries ${fmt(m.salaryBill())}${m.upkeepBill() ? ` · car upkeep ${fmt(m.upkeepBill())}` : ''}${team.sponsors?.deals.length ? ` · sponsor stipends +${fmt(team.sponsors.deals.reduce((t, d) => t + team.sponsors.stipendNow(d), 0))}` : ''}`,
         ...debtLines,
       ],
     },
@@ -78,6 +82,7 @@ export function moneyMenu({ slot, team, goMainMenu = null, debug = null, toast =
       { id: 'money', label: 'Money', sections: overview },
       { id: 'ledger', label: 'Ledger', sections: ledger },
       { id: 'contracts', label: 'Contracts', badge: m.contracts.offers.length ? String(m.contracts.offers.length) : null, sections: contractSections(team, toast) },
+      ...(team.sponsors ? [{ id: 'sponsors', label: 'Sponsors', badge: team.sponsors.offers.length && team.sponsors.freeSlots() ? String(team.sponsors.offers.length) : null, sections: sponsorSections(team, toast) }] : []), // Milestone 21
     ],
   };
 }
@@ -101,32 +106,37 @@ function contractSections(team, toast) {
   const cs = m.contracts;
   const today = team.clock.totalDays;
   const secs = [];
-  const describe = (c) => `${c.client}: a Club Hatch with Quality ${c.targetQuality}+${c.newBuildOnly ? ', finished after you accept' : ' (a car you already have will do)'}. Pays ${fmt(c.credits)} Credits + ${c.rp} RP.`;
+  // Milestone 21: every §29 type (src/systems/contracts.js goalText); rewards beyond Credits / RP when it has them
+  const extras = (c) => [c.sponsorRep ? `+${c.sponsorRep} sponsor reputation` : null, c.partEvent ? 'part-event progress' : null].filter(Boolean);
+  const describe = (c) => `${c.client}: ${goalText(c)}. Pays ${fmt(c.credits)} Credits + ${c.rp} RP${extras(c).length ? ` + ${extras(c).join(' + ')}` : ''}.`;
+  secs.push({ lines: [{ text: `${cs.active.length} of ${cs.maxActive} active · three new offers on day 1 of each month · a missed deadline costs a little Reputation`, color: C.textMuted }] });
   for (const c of cs.active) {
     const car = m.garageCarFor(c.id);
+    const prog = progressText(c);
+    const buttons = car ? [{ id: `deliver_${c.id}`, label: 'Deliver now', sub: `${car.name} · Quality ${car.result.quality}`, accent: C.good, onTap: () => toast(m.deliverFromGarage(c.id).ok ? 'Contract delivered and paid' : 'That car does not fit') }] : [];
+    buttons.push({ id: `giveup_${c.id}`, label: 'Give up', sub: 'Ends it now (a little Reputation)', accent: C.bad, onTap: () => m.cancel(c.id) && toast('Contract given up', c.title) });
     secs.push({
       title: `Active: ${c.title}`,
-      lines: [describe(c), { text: `${cs.daysLeft(c, today)} days left · paid as soon as a car that fits is finished`, color: C.actionDark }],
-      columns: 1,
-      buttons: car
-        ? [{ id: `deliver_${c.id}`, label: 'Deliver now', sub: `${car.name} · Quality ${car.result.quality}`, accent: C.good, onTap: () => toast(m.deliverFromGarage(c.id).ok ? 'Contract delivered and paid' : 'That car does not fit') }]
-        : [],
+      lines: [describe(c), { text: `${cs.daysLeft(c, today)} days left · ${prog ? `progress ${prog} · paid when it's done` : 'paid as soon as a car that fits is finished'}`, color: C.actionDark }],
+      bars: prog ? [{ label: 'Progress', value: Math.min(c.progress ?? 0, c.need), max: c.need, text: prog }] : [],
+      columns: car ? 2 : 1,
+      buttons,
     });
   }
   for (const c of cs.offers) {
     secs.push({
       title: `Offer: ${c.title}`,
-      lines: [describe(c), { text: `Deadline ${c.deadlineDays} days after accepting · the offer ends next month · a missed deadline just ends it`, color: C.textMuted }],
+      lines: [describe(c), { text: `Deadline ${c.deadlineDays} days after accepting · the offer ends next month`, color: C.textMuted }],
       columns: 1,
       buttons: [{ id: `accept_${c.id}`, label: 'Accept', sub: cs.canAccept ? 'Take this contract' : `Only ${cs.maxActive} at a time`, disabled: !cs.canAccept, accent: C.progress, onTap: () => toast(m.accept(c.id).ok ? 'Contract accepted' : 'Could not accept') }],
     });
   }
-  if (!secs.length) secs.push({ lines: ['No offers right now — a new one arrives on day 1 of next month.'] });
+  if (!cs.active.length && !cs.offers.length) secs.push({ lines: ['No offers right now — a new one arrives on day 1 of next month.'] });
   const done = cs.done.slice(-4).reverse();
   if (done.length) {
     secs.push({
       title: 'Past contracts',
-      lines: done.map((c) => ({ text: `${c.title} (${c.client}): ${c.status === 'success' ? `paid ${fmt(c.credits)} Credits` : 'deadline missed'}`, color: c.status === 'success' ? C.good : C.textMuted })),
+      lines: done.map((c) => ({ text: `${c.title} (${c.client}): ${c.status === 'success' ? `paid ${fmt(c.credits)} Credits` : c.result?.reason === 'cancelled' ? 'given up' : 'deadline missed'}`, color: c.status === 'success' ? C.good : C.textMuted })),
     });
   }
   return secs;

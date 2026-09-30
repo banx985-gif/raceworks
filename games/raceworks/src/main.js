@@ -180,7 +180,7 @@ bus.on('clock:speed', ({ speed }) => debug.log(speed ? `speed ${speed}×` : 'gam
 // Autosave (core/Autosave): every game day and after any change, plus when the app goes to the background.
 const autosave = new Autosave({
   bus,
-  triggers: ['race:created', 'race:progress', 'race:finished', 'clock:day', 'team:changed', 'project:start', 'project:phase', 'project:complete', 'car:fault', 'car:fix', 'car:breakthrough', 'contract:accepted', 'contract:success', 'car:repaired', 'economy:debt', 'facility:layout', 'research:start', 'research:stop', 'research:complete', 'staff:hired', 'staff:letGo', 'recruit:refresh', 'training:start', 'training:complete'],
+  triggers: ['race:created', 'race:progress', 'race:finished', 'clock:day', 'team:changed', 'project:start', 'project:phase', 'project:complete', 'car:fault', 'car:fix', 'car:breakthrough', 'contract:accepted', 'contract:success', 'contract:failed', 'contract:progress', 'sponsor:signed', 'sponsor:met', 'sponsor:ended', 'sponsor:progress', 'car:repaired', 'economy:debt', 'facility:layout', 'research:start', 'research:stop', 'research:complete', 'staff:hired', 'staff:letGo', 'recruit:refresh', 'training:start', 'training:complete'],
   save: () => {
     if (router.currentName === 'race') raceScreen.exit(); // the race's exact state goes in the save too
     return team.save();
@@ -459,10 +459,16 @@ function toast(title, body = '') {
   if (toasts.length > 3) toasts.shift();
 }
 const fmtCr = (n) => Math.round(n).toLocaleString('en-US');
-bus.on('clock:month', () => teamReady && toast(`Month ${clock.month}: salaries paid`, `−${fmtCr(team.money.salaryBill())} Credits${team.money.upkeepBill() ? ` · car upkeep −${fmtCr(team.money.upkeepBill())}` : ''}`));
+// (Milestone 21: with today's sponsor stipends — paid just before, on the same day 1)
+const stipendsToday = () => team.money.economy.ledger.filter((l) => l.day === clock.totalDays && l.category === 'sponsor' && l.reason.startsWith('Sponsor stipend')).reduce((t, l) => t + l.amount, 0);
+bus.on('clock:month', () => teamReady && toast(`Month ${clock.month}: salaries paid`, `−${fmtCr(team.money.salaryBill())} Credits${team.money.upkeepBill() ? ` · car upkeep −${fmtCr(team.money.upkeepBill())}` : ''}${stipendsToday() ? ` · sponsors +${fmtCr(stipendsToday())}` : ''}`));
 bus.on('economy:debt', ({ inDebt }) => teamReady && (inDebt ? toast('Emergency Credit is on', 'Cash is below 0: no new cars, interest monthly. See Money.') : toast('Out of Emergency Credit', 'Cash is back above 0.')));
 bus.on('contract:success', ({ contract }) => teamReady && toast('Contract paid', `+${fmtCr(contract.credits)} Credits · +${contract.rp} RP`));
-bus.on('contract:failed', ({ contract }) => teamReady && toast('Contract ended', `${contract.title}: the deadline passed`));
+bus.on('contract:failed', ({ contract, reason }) => teamReady && toast('Contract ended', `${contract.title}: ${reason === 'cancelled' ? 'given up' : 'the deadline passed'}`));
+// Milestone 21: sponsors — an obligation met, a deal ended (with its renewal / retry offer), a race bonus arrives in the ledger
+bus.on('sponsor:met', ({ deal, def }) => teamReady && toast(`${def.name}: obligation met!`, `+${fmtCr(deal.completion)} Credits bonus`));
+bus.on('sponsor:ended', ({ record, def }) => teamReady && toast(`${def.name}: the 6-month deal ended`, record.met ? 'They offer to renew on better terms (Money → Sponsors)' : 'Obligation missed: they offer again on worse terms'));
+bus.on('contract:progress', ({ contract }) => teamReady && contract.progress < contract.need && toast(`${contract.title}: ${contract.progress} / ${contract.need}`, 'Contract progress'));
 bus.on('reputation:rankUp', ({ rank }) => teamReady && toast(`Rank ${rank.id}!`, 'Your team has moved up a rank.'));
 bus.on('facility:expansion', ({ zone }) => teamReady && toast(`${zone.name} open!`, 'The garage is bigger: more floor to build on.')); // Milestone 10
 // Milestone 12: a course finished.

@@ -28,6 +28,12 @@
 //   runs in the start's weather. races.forecastFor(race, x) / forecastLine(race, x) → the crew's forecast (its uncertainty is
 //   race.forecast's). Entries carry the pit service in parts (pitParts: the Lead Mechanic, pit traits, pit facilities),
 //   the crew's weather / repair traits, and rivals every compound (RIVAL_TYRES).
+// Milestone 21: the sponsors on the car when the race is made are fixed into it (race.sponsors, for the decals), with their
+//   perks through the same effect queries — raceEFF (+ EFF on your car in a race weekend), pitServicePct (pit service time),
+//   prizePct (race.prizePct: + prize money when it finishes); tyre prep and Setup Knowledge were already read — and
+//   race.telemetry (the car carries a telemetry part — data/cars.js telemetry: the Telemetry Suite — or the garage's effect
+//   query says telemetry: the Telemetry Room). The history entry
+//   keeps them with your car's EFF and start fuel / energy target (the sponsor and contract facts, src/systems/sponsorFacts.js).
 import { Rng } from '../../../../core/Rng.js';
 import { raceCrew, crewPeople, effectSum } from './staffTraits.js';
 import { createRaceSim, runQualifying, pitServiceTime, mechanicSecs } from '../race/raceSim.js';
@@ -38,7 +44,7 @@ import { TEST_RACE } from '../../data/rivals.js';
 import { CHAMP_BANDS } from '../../data/championships.js';
 import { RACE_TYPES, DRIVE_STINT, WEATHER_NAMES, RACE, WEEKEND, SETUP_AXES, TYRES, TYRE_ORDER, PRIZES, AUTO, FUEL, REPAIR, REPAIR_ORDER, DRIVE_LAP, STRATEGY, SWING } from '../../data/race.js';
 import { COSTS } from '../../data/economy.js';
-import { CLASSES } from '../../data/cars.js';
+import { CLASSES, PARTS } from '../../data/cars.js';
 import { courseFromTrack } from '../race/lapCourse.js';
 import { strategyProfile, rivalProfile, forecastOf } from './raceStrategy.js';
 
@@ -74,8 +80,11 @@ export function createRaces({ bus, team }) {
     // Milestone 17: the pit service in parts (bible §24.2): the Lead Mechanic's MEC (the race crew's; else the team's best
     // MEC), the crew's pit traits, the pit facilities (pitBasePct) through the garage's effect query
     const mec = raceCrew(team).mechanic?.stats.MEC ?? best('MEC');
-    const pitParts = { mech: mechanicSecs(mec), traitPct: trait('pitServicePct'), basePct: team.facilities?.bonus('pitBasePct') ?? 0, mec };
+    const pitParts = { mech: mechanicSecs(mec), traitPct: trait('pitServicePct') + (team.facilities?.bonus('pitServicePct') ?? 0), basePct: team.facilities?.bonus('pitBasePct') ?? 0, mec }; // (Milestone 21: + IronPeak)
     const player = { ...playerEntry(team, rec), pitParts, tyre: 'medium', auto: true };
+    const sponsors = kind === 'weekend' ? team.sponsors?.decals() ?? [] : []; // Milestone 21: on the car this weekend
+    const effPlus = kind === 'weekend' ? team.facilities?.bonus('raceEFF') ?? 0 : 0;
+    if (effPlus) player.car.EFF = (player.car.EFF ?? 0) + effPlus;
     player.pitService = pitServiceTime(player);
     // Milestone 17: the crew's weather and repair traits (Rain Sense, Storm Queen, Fixer)
     for (const key of ['wetSpinPct', 'stormPacePct', 'raceRepairPct']) if (trait(key)) player[key] = trait(key);
@@ -104,7 +113,7 @@ export function createRaces({ bus, team }) {
     // Race stays dry.
     const weather = kind === 'weekend' ? makeWeather(seed, laps, track.rainChance ?? 0, track.weatherProfile ?? null) : dryWeather(); // Milestone 19: the track's own odds
     // (crewKnowledge, Milestone 19: + Street Package on street circuits, + Balance Artist on technical tracks)
-    return { n, kind, seed, trackId: track.id, laps, entries, grid, carNumber: rec.number, createdDay: team.clock.totalDays, state: null, status: 'ready', crew: crew.map((s) => s.id), crewKnowledge: trait('setupKnowledge') + (track.walls ? trait('setupKnowledgeStreet') : 0) + (WEEKEND.technicalProfiles.includes(track.profile) ? trait('setupKnowledgeTechnical') : 0), forecast, weather, raceType: config.raceType ?? 'standard', stints: [] }; // Milestone 18: the race type (stint length and cap) and the stints driven
+    return { n, kind, seed, trackId: track.id, laps, entries, grid, carNumber: rec.number, createdDay: team.clock.totalDays, state: null, status: 'ready', crew: crew.map((s) => s.id), crewKnowledge: trait('setupKnowledge') + (track.walls ? trait('setupKnowledgeStreet') : 0) + (WEEKEND.technicalProfiles.includes(track.profile) ? trait('setupKnowledgeTechnical') : 0), forecast, weather, raceType: config.raceType ?? 'standard', stints: [], sponsors, prizePct: kind === 'weekend' ? team.facilities?.bonus('prizePct') ?? 0 : 0, telemetry: (rec.result?.parts ?? []).some((id) => PARTS[id]?.telemetry) || (team.facilities?.bonus('telemetry') ?? 0) > 0 }; // Milestone 18: the race type (stint length and cap) and the stints driven
   }
 
   // Milestone 15: the setup locks (qualifying): the repair priority is paid through the ledger (Credits, and the Lead
@@ -466,14 +475,14 @@ export function createRaces({ bus, team }) {
       if (race.kind === 'weekend' && me && me.status !== 'retired') {
         // Milestone 20: a championship round pays its band's money (data/championships.js CHAMP_BANDS[id].money)
         const x = race.champ ? CHAMP_BANDS[race.champ.id]?.money ?? 1 : 1;
-        prize = Math.round(((PRIZES.credits[me.pos - 1] ?? 0) * x) / 50) * 50;
+        prize = Math.round(((PRIZES.credits[me.pos - 1] ?? 0) * x * (1 + (race.prizePct ?? 0) / 100)) / 50) * 50; // (Milestone 21: + Crown Finance)
         reputation = Math.round((PRIZES.reputation[me.pos - 1] ?? 0) * x);
         const where = race.champ ? `${TRACKS[race.trackId].name} (${race.champ.id} round ${race.champ.round + 1})` : TRACKS[race.trackId].name;
         if (prize) team.money.economy.add('credits', prize, `Prize money: P${me.pos} at ${where}`, 'prize');
         if (reputation) team.money.reputation.add(reputation, `Race result: P${me.pos} at ${where}`);
       }
       const swingWin = race.kind === 'weekend' ? api.strategySwing(me) : null;
-      const entry = { champ: race.champ ?? null, swingWin, wet: !!result.weather?.wet, n: race.n, kind: race.kind, trackId: race.trackId, laps: race.laps, day: team.clock.totalDays, carNumber: race.carNumber, seed: race.seed, result, wear, prize, reputation, grid: race.grid, quali: race.quali ?? null, setupScore: race.quali?.setupScore ?? null, crew: race.crew ?? [] };
+      const entry = { champ: race.champ ?? null, swingWin, wet: !!result.weather?.wet, n: race.n, kind: race.kind, trackId: race.trackId, laps: race.laps, day: team.clock.totalDays, carNumber: race.carNumber, seed: race.seed, result, wear, prize, reputation, grid: race.grid, quali: race.quali ?? null, setupScore: race.quali?.setupScore ?? null, crew: race.crew ?? [], sponsors: race.sponsors ?? [], telemetry: !!race.telemetry, eff: race.entries.find((e) => e.isPlayer)?.car?.EFF ?? null, fuelStart: race.entries.find((e) => e.isPlayer)?.fuel ?? null }; // (Milestone 21: sponsor / contract facts)
       api.history.push(entry);
       if (api.history.length > HISTORY_KEEP) api.history.shift();
       api.current = null;

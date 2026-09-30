@@ -21,6 +21,9 @@
 //   busyElsewhere(id) → why this person can't join a car's team now (Milestone 12: away on a course), or null.
 // Milestone 13: work traits (src/systems/staffTraits.js) — workerModifier × (1 + that person's phasePct for the phase);
 //   the team's testFixPct raises Testing's daily fix chance (faultPct / breakthroughPct were already read).
+// Milestone 21: each phase's development gain is kept (job.data.devByPhase: its points and its breakthroughs' extra), and
+//   the finished car carries devByPhase and aeroShare — the Chassis & Aero phase's share of the project's development gain
+//   (AeroForge's obligation, bible §29). The facilities' flat devBonus at the end is not a phase's gain and isn't counted.
 import { ProjectSystem } from '../../../../core/ProjectSystem.js';
 import { AssignmentSystem } from '../../../../core/AssignmentSystem.js';
 import { JobHistory } from '../../../../core/JobHistory.js';
@@ -39,6 +42,13 @@ export const partsOf = (classId) => SLOTS.map((sl) => CLASSES[classId].starterPa
 export { partsCost, tierFor };
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+// Milestone 21: the Chassis & Aero phase's share (0–1, 4 decimals) of a project's development gain by phase.
+export const AERO_PHASE = 'chassisAero';
+export function aeroShareOf(devByPhase = {}) {
+  const total = Object.values(devByPhase ?? {}).reduce((t, v) => t + v, 0);
+  return total > 0 ? Math.round(((devByPhase[AERO_PHASE] ?? 0) / total) * 10000) / 10000 : 0;
+}
 
 // The finished car's numbers from its class, parts and project record (also used by tests).
 export function finalCar({ classId, parts, dev = {}, faults = [], innovation = 0, avgScore = 0 }) {
@@ -144,6 +154,8 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
         faultsTotal: job.data.faults.length,
         faultList: job.data.faults,
         breakthroughs: job.data.breakthroughs,
+        devByPhase: { ...(job.data.devByPhase ?? {}) }, // Milestone 21
+        aeroShare: aeroShareOf(job.data.devByPhase),
         budgets: job.data.budgets,
         partsCost: partsCost(job.data.parts),
         baseCost: CLASSES[job.data.classId].baseCost,
@@ -162,6 +174,8 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
   }
 
   function addDevelopment(job, def, points) {
+    const by = (job.data.devByPhase ??= {});
+    by[def.id] = (by[def.id] ?? 0) + points; // Milestone 21
     const shares = Object.entries(def.develops);
     const total = shares.reduce((t, [, w]) => t + w, 0);
     for (const [k, w] of shares) job.data.dev[k] = (job.data.dev[k] ?? 0) + (points * w) / total;

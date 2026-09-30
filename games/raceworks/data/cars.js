@@ -114,7 +114,7 @@ export const PARTS = {
   EL01: P('EL', 'Basic ECU', 200, 1, { ACC: 5, REL: 4 }, START),
   EL02: P('EL', 'Data Logger', 500, 2, { REL: 8, EFF: 6 }, { research: 'ELE1' }),
   EL03: P('EL', 'Performance ECU', 1000, 3, { ACC: 16, SPD: 8, REL: 4 }, { research: 'ELE2' }),
-  EL04: P('EL', 'Telemetry Suite', 1900, 4, { COR: 8, BRK: 8, REL: 14 }, { research: 'ELE3' }),
+  EL04: P('EL', 'Telemetry Suite', 1900, 4, { COR: 8, BRK: 8, REL: 14 }, { research: 'ELE3' }, { telemetry: true }), // (telemetry: Milestone 21, HexaCom)
   EL05: P('EL', 'Launch Control', 3200, 5, { ACC: 28, TYR: -4 }, { research: 'ELE4' }),
   EL06: P('EL', 'Energy Recovery', 4800, 6, { EFF: 34, ACC: 10, REL: 12 }, { research: 'ELE5' }),
   EL07: P('EL', 'Active Differential', 6500, 7, { COR: 30, ACC: 16, TYR: 14 }, { research: 'ELE6' }),

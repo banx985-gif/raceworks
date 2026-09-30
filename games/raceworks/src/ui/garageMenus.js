@@ -14,6 +14,8 @@
 //   (goResearch). A research station's sheet also shows its effect and Build Mode.
 // Milestone 12: the Staff sheet's Hire (goRecruit) and Train (goTrain); the Driver Simulator's Training; the Sponsor Wall
 //   (front desk) leads to Recruitment; a worker's sheet has Train (or their course and days left).
+// Milestone 21: the Sponsor Wall's sheet also has Sponsors — the 'sponsors' sheet (src/ui/sponsorMenu.js, the same as the
+//   Money sheet's Sponsors tab): slots, deals, obligation progress and the offers.
 import { MenuRegistry } from '../../../../core/ui/BottomSheet.js';
 import { THEME } from '../../../../core/Theme.js';
 import { STATIONS } from '../../data/garage.js';
@@ -25,6 +27,7 @@ import { leadRole } from '../systems/carProject.js';
 import { FOUNDER_FLAG } from '../../data/setup.js';
 import { COSTS } from '../../data/economy.js';
 import { moneyMenu, fmt } from './moneyMenu.js';
+import { sponsorSections } from './sponsorMenu.js'; // Milestone 21
 import { BUILD_TEXT } from '../../data/facilities.js';
 import { liveryKey, teamColourId } from './livery.js';
 import { RESEARCH_ICONS } from '../../data/research.js';
@@ -81,7 +84,13 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
     const busy = tr.active.length;
     return { id: 'train', label: 'Train', sub: !tr.open() ? tr.lockedText : busy ? `${busy} on a course now` : 'Seven courses · Credits and days', icon: 'race_ui_02', accent: C.progress, onTap: () => goTrain(id) };
   };
-  const extraFor = { F12: () => [trainButton()], F15: () => [hireButton()] };
+  // Milestone 21: the Sponsor Wall leads to the sponsors too
+  const sponsorsButton = () => {
+    const sp = team.sponsors;
+    return { id: 'sponsors', label: 'Sponsors', sub: `${sp.deals.length} of ${sp.slots()} slots · ${sp.offers.length} offer${sp.offers.length === 1 ? '' : 's'}`, icon: 'race_ui_02', accent: C.progress, onTap: () => open('sponsors') };
+  };
+  const extraFor = { F12: () => [trainButton()], F15: () => [sponsorsButton(), hireButton()] };
+  menus.register('sponsors', () => ({ title: 'Sponsors', subtitle: `${team.sponsors.deals.length} of ${team.sponsors.slots()} slots · Rank ${team.money.rank}`, art: 'race_ui_02', accent: C.progress, sections: sponsorSections(team, toast) }));
 
   for (const def of STATIONS) {
     if (def.id === 'F02') continue; // the Pit Bay's sheet is the car project's (below)

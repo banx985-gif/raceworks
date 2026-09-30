@@ -27,6 +27,10 @@
 //   counts as on duty; someone on a course can't join the car's team.
 // Milestone 13: team.careers (src/systems/careers.js) — every person's career record (races, wins, podiums, cars built,
 //   days employed) and the team facts staff eligibility reads; the founder's history is written from the same records.
+// Milestone 21: team.sponsors (src/systems/sponsors.js) — 1–3 sponsor slots by rank, 6-month deals, stipends with the
+//   salaries, race bonuses, perks (added into team.facilities.bonus(key)) and obligations; the development contracts are
+//   the eight §29 types (src/systems/contracts.js: three offers a month, only what the team can meet now, at most 2 active)
+//   and team.contractRecords keeps what they pay beyond money: part-event progress and secret facts (flags only).
 import { Clock } from '../../../../core/Clock.js';
 import { Rng } from '../../../../core/Rng.js';
 import { StaffSystem } from '../../../../core/StaffSystem.js';
@@ -49,6 +53,8 @@ import { createRecruitment } from '../systems/recruitment.js';
 import { createTraining } from '../systems/training.js';
 import { createCareers } from '../systems/careers.js';
 import { createChampionships } from '../systems/championships.js';
+import { createSponsors } from '../systems/sponsors.js';
+import { contractTerms, attachContractProgress } from '../systems/contracts.js';
 import { ENDURANCE } from '../../data/training.js';
 
 // A new game's setup when none is given (tests, and saves from before Milestone 4b).
@@ -107,7 +113,13 @@ export const SAVE_MIGRATIONS = {
   //   the title facts). Nothing to change here — championships.load() gives an old save no championship entered, and the
   //   Pine Ridge weekend stays as the practice race.
   13: (record) => record,
+  //   14 → 15 (Milestone 21): sponsors and the complete development contracts. Nothing to change here — Team.load() gives
+  //   a save without sponsors empty slots and a fresh Sponsor board, and three fresh contract offers (an active Club Hatch
+  //   contract carries on); careers and races read the new facts as 0 / absent.
+  14: (record) => record,
 };
+
+const blankContractRecords = () => ({ partEvents: {}, facts: {} });
 
 export class Team {
   constructor({ bus, seed = 'raceworks' }) {
@@ -144,14 +156,18 @@ export class Team {
       facilities: () => this.facilities,
       busyElsewhere: (id) => (this.training?.trainingOf(id) ? 'Away on a training course' : null),
     });
-    this.money = createTeamMoney({ bus, seed, clock: this.clock, staff: this.staff, cars: this.cars, revealBonus: () => this.facilities.bonus('revealReputation') });
-    this.facilities = createGarageFacilities({ bus, money: this.money, research: () => new Set(this.unlocks.research), extraBonus: (key) => this.research.bonus(key), extraKeys: () => this.research.bonusKeys() }); // Milestone 10
+    this.money = createTeamMoney({ bus, seed, clock: this.clock, staff: this.staff, cars: this.cars, revealBonus: () => this.facilities.bonus('revealReputation'), generateOffer: (rng, taken) => contractTerms(this, rng, taken), onPaid: (c) => this.contractPaid(c) }); // (Milestone 21: the §29 contracts)
+    // (Milestone 21: the sponsors' perks join the research bonuses in the one effect query)
+    this.facilities = createGarageFacilities({ bus, money: this.money, research: () => new Set(this.unlocks.research), extraBonus: (key) => this.research.bonus(key) + (this.sponsors?.bonus(key) ?? 0), extraKeys: () => [...this.research.bonusKeys(), ...(this.sponsors?.bonusKeys() ?? [])] }); // Milestone 10
     this.research = createResearch({ bus, team: this }); // Milestone 11
     this.races = createRaces({ bus, team: this }); // Milestone 6: the race being run (fixed seed) and the results
     this.recruitment = createRecruitment({ bus, team: this, seed }); // Milestone 12
     this.training = createTraining({ bus, team: this, seed }); // Milestone 12
     this.careers = createCareers({ bus, team: this }); // Milestone 13
     this.championships = createChampionships({ bus, team: this }); // Milestone 20: the ladder, one season at a time
+    this.sponsors = createSponsors({ bus, team: this, seed }); // Milestone 21 (after the championships: a round is scored first)
+    this.contractRecords = blankContractRecords(); // Milestone 21
+    attachContractProgress({ bus, team: this }); // Milestone 21: race weekends and drills count for their contracts
     this.recruitment.extraBusy = (id) => {
       const t = this.training.trainingOf(id);
       return t ? `Away on a course (${t.days - t.daysDone} day${t.days - t.daysDone === 1 ? '' : 's'} left)` : null;
@@ -209,6 +225,18 @@ export class Team {
     this.careers.newGame(); // Milestone 13
     this.championships.newGame(); // Milestone 20
     this.recruitment.newGame(); // Milestone 12: a board for Local Contacts (after the team and rank are set)
+    this.sponsors.newGame(); // Milestone 21: empty slots and the first Sponsor board
+    this.contractRecords = blankContractRecords();
+    this.money.firstOffers(); // Milestone 21: three contract offers the team can meet (the garage and research are set now)
+  }
+
+  // Milestone 21: a development contract paid — its rewards beyond Credits / RP / Reputation (bible §29): sponsor
+  // reputation, part-event progress for its part, a secret fact (a flag only).
+  contractPaid(c) {
+    this.sponsors?.addReputation(c.sponsorRep ?? 0, `Contract: ${c.title}`);
+    const r = this.contractRecords;
+    if (c.partEvent && c.partId) r.partEvents[c.partId] = (r.partEvents[c.partId] ?? 0) + c.partEvent;
+    if (c.fact) r.facts[c.fact] = (r.facts[c.fact] ?? 0) + 1;
   }
 
   // Start a car project, paying for its class and parts (Milestones 5 and 9). car = { classId, parts } (parts default:
@@ -353,6 +381,8 @@ export class Team {
       training: this.training.serialize(), // Milestone 12
       careers: this.careers.serialize(), // Milestone 13
       championships: this.championships.serialize(), // Milestone 20
+      sponsors: this.sponsors.serialize(), // Milestone 21
+      contractRecords: JSON.parse(JSON.stringify(this.contractRecords)), // Milestone 21
     };
   }
 
@@ -378,6 +408,9 @@ export class Team {
     this.careers.load(data.careers ?? null); // none before Milestone 13: rebuilt from the save (before recruitment)
     this.championships.load(data.championships ?? null); // none before Milestone 20: no championship entered
     this.recruitment.load(data.recruitment); // none before Milestone 12: fresh boards for the open channels
+    this.sponsors.load(data.sponsors ?? null); // none before Milestone 21: empty slots, a fresh Sponsor board
+    this.contractRecords = { ...blankContractRecords(), ...JSON.parse(JSON.stringify(data.contractRecords ?? {})) };
+    if (!data.sponsors) this.money.firstOffers(); // before Milestone 21: three fresh contract offers
   }
 
   // A team saved before Milestone 5 had no money: it gets the §30.2 starting state today, and each car it already

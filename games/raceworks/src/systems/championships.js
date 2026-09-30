@@ -114,7 +114,7 @@ export function createChampionships({ bus, team }) {
     raceConfig() {
       const k = api.current;
       const c = champById(k.id);
-      return { trackId: c.tracks[k.round], rivalPool: api.rivalPool(k.id), band: k.id, fieldSize: CHAMP_BANDS[k.id].fieldSize, champ: { id: k.id, round: k.round } };
+      return { trackId: c.tracks[k.round], rivalPool: api.rivalPool(k.id), band: k.id, fieldSize: CHAMP_BANDS[k.id].fieldSize, champ: { id: k.id, round: k.round, season: k.entered } }; // (season: Milestone 21's sponsor round counts)
     },
     // Race the next round: its weekend (practice → setup → qualifying → race) on its track.
     startRound() {
@@ -204,7 +204,7 @@ export function createChampionships({ bus, team }) {
   // the day a round comes due: say so (the garage shows it as a toast)
   bus?.on('clock:day', () => {
     const n = api.nextRound();
-    if (n && n.daysAway === 0 && team.clock.totalDays === n.due) bus.emit('championship:due', { id: api.current.id, round: n.index, trackId: n.trackId });
+    if (n && n.daysAway === 0 && team.clock.totalDays === n.due) bus.emit('championship:due', { id: api.current.id, round: n.index, trackId: n.trackId, season: api.current.entered });
   });
   return api;
 }
