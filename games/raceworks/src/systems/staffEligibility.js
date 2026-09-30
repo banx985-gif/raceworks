@@ -4,8 +4,9 @@
 //   Wired now: rank, finished research, facilities standing in the garage, and the team's race / car records
 //   (src/systems/careers.js TEAM_FACTS: race starts, wins, poles, setup scores, places gained, clean finishes, cars
 //   built, class wins).
-//   Dormant (a condition with `waits`): facts the game doesn't track yet — weather, race repairs, neutralisations,
-//   strategy swings, the Pit Training Rig / Strategy Room, the other 11 tracks. They say which milestone they wait for.
+//   Dormant (a condition with `waits`): facts the game doesn't track yet — the Pit Training Rig, the other 11 tracks.
+//   They say what they wait for. (Milestone 16 wired strategy swings; Milestone 17 the Strategy Room, wet wins, weather
+//   tyre changes, race repairs and cautions.)
 //   Legendary / Secret (a `secret` condition): special arrival only — never an ordinary pool (Milestones 24–25).
 // Once every condition of a row has held, the team remembers it (careers.unlocked) and the person stays findable, even
 // if a facility is later sold.

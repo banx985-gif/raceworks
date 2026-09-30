@@ -141,7 +141,7 @@ export class BottomSheet {
   rect() {
     const sr = this.layout.safeRect;
     const h = Math.min(sr.h * this.maxFrac, HEAD_H + this._tabsH() + this.contentH + PAD * 2);
-    const slide = 1 - Math.min(1, this.t / 0.22);
+    const slide = this.instant ? 0 : 1 - Math.min(1, this.t / 0.22); // instant: Reduced Motion (DEVWORKS M38) — the sheet snaps
     return { x: sr.x, y: sr.y + sr.h - h + slide * slide * h * 0.6, w: sr.w, h: h + 40 };
   }
 

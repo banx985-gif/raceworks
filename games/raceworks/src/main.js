@@ -59,6 +59,7 @@ import { createRaceResultScreen } from './screens/RaceResultScreen.js';
 import { createWeekendScreen } from './screens/WeekendScreen.js';
 import { Settings } from '../../../core/Settings.js';
 import { TRACKS } from './race/tracks.js';
+import { WEATHER_NAMES } from '../data/race.js'; // Milestone 17 (the result's weather line)
 import { createResearchScreen } from './screens/ResearchScreen.js';
 import { drawResearchBanner, researchBannerHeight } from './ui/researchBanner.js';
 import { createRecruitScreen } from './screens/RecruitScreen.js';
@@ -610,6 +611,17 @@ const resultLines = (e) => {
     out.push({ text: me?.status === 'retired' ? 'No prize money for a retirement' : `Prize money +${e.prize.toLocaleString('en-US')} Credits · Reputation +${e.reputation}`, color: C_GOOD });
     if (e.swingWin) out.push({ text: `Strategy Swing win: ${e.swingWin.kind === 'undercut' ? 'the undercut' : 'the extended stint'} on lap ${e.swingWin.lap} (the crew planned lap ${e.swingWin.planLap})`, color: C_GOOD }); // Milestone 16
     if (e.quali) out.push({ text: `Qualified P${e.quali.rows.find((r) => r.isPlayer)?.pos} · setup score ${e.setupScore} / 100 · tyres ${me?.stints?.join(' → ') ?? ''}${me?.stops ? ` (${me.stops} stop${me.stops === 1 ? '' : 's'})` : ''}` });
+    // Milestone 17: the weather, cautions and your car's incidents
+    const wx = e.result.weather;
+    if (wx) {
+      const bits = [`Weather: ${wx.states.map((s) => WEATHER_NAMES[s]).join(' → ')}`];
+      const k = e.result.cautions?.length ?? 0;
+      if (k) bits.push(`${k} caution${k === 1 ? '' : 's'}${me?.neutralGains ? ` (you gained ${me.neutralGains} place${me.neutralGains === 1 ? '' : 's'})` : ''}`);
+      if (me?.spins) bits.push(`${me.spins} spin${me.spins === 1 ? '' : 's'}`);
+      if (me?.faultsFixed) bits.push(`${me.faultsFixed} fault${me.faultsFixed === 1 ? '' : 's'} fixed in the pits`);
+      if (me?.damage) bits.push(`damage ${me.damage}% at the flag`);
+      out.push({ text: bits.join(' · '), color: wx.wet ? COL.progress : COL.textMuted });
+    }
   } else out.push({ text: `Test race at ${TRACKS[e.trackId].name}: no prize money`, color: COL.textMuted });
   if (e.rp) out.push({ text: `Research +${e.rp} RP (${e.rpLines.map((l) => `${l.reason} +${l.amount}`).join(' · ')})`, color: COL.progress }); // Milestone 11
   return out;

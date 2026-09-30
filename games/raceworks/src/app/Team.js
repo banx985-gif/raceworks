@@ -90,6 +90,11 @@ export const SAVE_MIGRATIONS = {
   //   forecast; the career strategy records). Nothing to change here — a race saved mid-way gets each car's strategy
   //   state when it loads (src/race/raceSim.js), its player a starter strategist, and careers.load() zero records.
   9: (record) => record,
+  //   10 → 11 (Milestone 17): weather, incidents and the pit model (the weekend's weather timeline, each car's damage /
+  //   faults / spins, the caution, the new career facts). Nothing to change here — races.load() gives a race made before it
+  //   a dry timeline, a race saved mid-way gets each car's condition state when it loads (src/race/raceSim.js), and
+  //   careers.load() zero records for the new facts.
+  10: (record) => record,
 };
 
 export class Team {

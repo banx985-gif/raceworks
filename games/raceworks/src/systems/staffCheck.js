@@ -28,7 +28,7 @@ export function checkStaffData({ roster = ALL_STAFF, traits = TRAITS, portraitEx
   const ratingIds = new Set(DRIVER_RATINGS.map((r) => r.id));
   const ranks = new Set(RANKS.map((r) => r.id));
   const nodes = new Set(RESEARCH.map((n) => n.id));
-  // bible §19 ids the shop doesn't sell yet (F23 Strategy Room, F25 Pit Training Rig) are allowed with a waits note
+  // bible §19 ids the shop doesn't sell yet (F25 Pit Training Rig) are allowed with a waits note
   const facilities = new Set(FACILITIES.map((f) => f.id));
 
   for (const role of Object.keys(ROLES)) {

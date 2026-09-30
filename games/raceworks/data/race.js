@@ -29,7 +29,7 @@ export const RACE = {
   // Mechanical failure (bible §23.6), kept mild: a roll each lap.
   failure: { basePerLap: 0.004, relRef: 200, relSpan: 150, perOpenFault: 0.6, lowConditionBelow: 50, lowConditionX: 1.5, share: { paceLoss: 0.6, damage: 0.32, retire: 0.08 }, paceLossPct: 7, paceLossLaps: 1, damagePct: 2.5 },
   // What the race does to the player's car (Condition 0–100; repaired in the Car Garage, Milestone 5).
-  wear: { perLap: 1, failure: 10, contact: 5 },
+  wear: { perLap: 1, failure: 10, contact: 5, damagePer1: 1 }, // Milestone 17: + 1 Condition a 1% of race damage left at the flag
   tieBreak: 'finishTime',
 };
 
@@ -152,11 +152,12 @@ export const PRIZES = {
   reputation: [40, 30, 24, 18, 14, 10, 8, 6, 4, 2],
 };
 
-// Key Moments (bible §24.5): fast-forward stops for these (once each per race).
+// Key Moments (bible §24.5): fast-forward stops for these (once each per race). Milestone 17 adds a weather change, a caution
+// starting / ending and a big incident to your car (damage or worse) — each time they happen.
 export const KEY_MOMENTS = { pitWindowWear: 0.55, podiumLastLaps: 2, podiumGap: 1.2 };
 
 // Race HUD icons (assets/images/ui).
-export const RACE_ICONS = { setup: 'race_ui_06', pit: 'race_ui_07', tyres: 'race_ui_09', fuel: 'race_ui_10', qualifying: 'race_ui_11', practice: 'race_ui_12', overtake: 'race_ui_16', defend: 'race_ui_17', pace: 'race_ui_18', condition: 'race_ui_24', auto: 'race_ui_29', drive: 'race_ui_30' }; // Milestone 15: + fuel, condition, drive (Take the Wheel)
+export const RACE_ICONS = { setup: 'race_ui_06', pit: 'race_ui_07', weather: 'race_ui_08', tyres: 'race_ui_09', fuel: 'race_ui_10', qualifying: 'race_ui_11', practice: 'race_ui_12', overtake: 'race_ui_16', defend: 'race_ui_17', pace: 'race_ui_18', damage: 'race_ui_20', caution: 'race_ui_21', condition: 'race_ui_24', auto: 'race_ui_29', drive: 'race_ui_30' }; // Milestone 15: + fuel, condition, drive (Take the Wheel); Milestone 17: + weather, damage, caution
 
 // ---------------------------------------------------------------------------------------------------------------
 // Milestone 16: race strategy, complete (bible §23.6, §24.2–24.3; src/systems/raceStrategy.js plans it). PLACEHOLDERS.
@@ -238,6 +239,107 @@ export const SWING = { gainPlaces: 3 };
 // Weather Station +20); uncertainty = (100 − accuracy) × (1 + forecastUncertaintyPct, Strategy Room −15%).
 export const FORECAST = { base: 25, perStr: 0.18, max: 98 };
 
-// Milestone 16: the crew's tyre call for the weather (bible §24.2 "Weather: accept suggested tyre call or ignore"). The race
-// is always dry until Milestone 17, so the call only fires from the ?debug=1 test button. dry → the planner's own choice.
+// Milestone 16: the crew's tyre call for the weather (bible §24.2 "Weather: accept suggested tyre call or ignore"): the first
+// open compound on the weather's list. Milestone 17 fires it for real when the state changes. dry → the planner's own choice.
 export const WEATHER_TYRES = { dry: ['soft', 'medium', 'hard'], damp: ['inter', 'medium', 'hard'], wet: ['wet', 'inter'], storm: ['wet', 'inter'] };
+
+// ---------------------------------------------------------------------------------------------------------------
+// Milestone 17: weather, incidents and the complete pit model (bible §21, §23.5–23.7, §24.2). PLACEHOLDERS
+// (docs/DECISIONS.md). src/race/weather.js reads the weather rules, src/race/raceSim.js the rest.
+
+// Weather states (bible §23.7), in order: a change only ever moves one step (Dry → Damp → Wet → Storm and back).
+export const WEATHER_STATES = ['dry', 'damp', 'wet', 'storm'];
+export const WEATHER_NAMES = { dry: 'Dry', damp: 'Damp', wet: 'Wet', storm: 'Storm' };
+// The weekend's timeline, fixed when the weekend begins (seeded; saved; a reload never rerolls it). startWet: the share of
+// rain weekends that are already damp / wet at the start. At each lap line (at a seeded point inside the lap) the state may
+// step: from Dry it starts raining with the per-lap chance that makes the track's rainChance the chance of any rain over
+// the race; from the other states by these odds (the rest = no change). maxChanges caps a race's changes.
+export const WEATHER = {
+  startWet: 0.3,
+  odds: { damp: { up: 0.25, down: 0.2 }, wet: { up: 0.12, down: 0.22 }, storm: { down: 0.4 } },
+  maxChanges: 4,
+  // The forecast (bible §23.7): the true timeline blurred by the crew's uncertainty u (0–100: 100 − accuracy, less with the
+  // Strategy Room). An event's blur b = u/100 × (how far ahead it is ÷ horizonLaps, at least nearShare, at most 1), so it
+  // sharpens as it comes closer. Its lap is off by up to shiftLaps × b, shown as a range ± halfLaps × b; the state is one
+  // step off with chance stepX × b; a real change is missed (until it is seeLaps away) with chance missX × b; a false
+  // alarm (light rain that never comes) shows with chance falseX × u/100, up to falseMax. u = 0: exact.
+  forecast: { horizonLaps: 6, nearShare: 0.25, shiftLaps: 3, halfLaps: 2.5, stepX: 0.5, missX: 0.3, falseX: 0.45, falseMax: 1, seeLaps: 2 },
+};
+
+// Tyre × weather (bible §21: wrong tyres are never instant failure — pace, wear and spin-risk penalties). A tyre's lap time
+// = its own dry pace (TYRES.pace) × (1 + track[state]) × (1 + time), its wear × wear, its spin chance × spin. Inter is good in
+// Damp and light Wet, Wet is best in Storm, slicks are very poor in the wet; Inter / Wet overheat on a dry track.
+//   suitable: the tyres the crew counts as right for the state (a tyre call fires when yours isn't); best first.
+export const WEATHER_TYRE = {
+  track: { dry: 0, damp: 0.03, wet: 0.07, storm: 0.12 },
+  dry: { soft: {}, medium: {}, hard: {}, inter: { wear: 1.8 }, wet: { wear: 2.5 } },
+  damp: { soft: { time: 0.06, wear: 0.9, spin: 2.5 }, medium: { time: 0.06, wear: 0.9, spin: 2.5 }, hard: { time: 0.07, wear: 0.9, spin: 2.8 }, inter: { time: -0.03 }, wet: { time: -0.02, wear: 1.5, spin: 1.1 } },
+  wet: { soft: { time: 0.16, wear: 0.8, spin: 5 }, medium: { time: 0.16, wear: 0.8, spin: 5 }, hard: { time: 0.18, wear: 0.8, spin: 5.5 }, inter: { time: -0.02, wear: 1.2, spin: 1.4 }, wet: { time: -0.035 } },
+  storm: { soft: { time: 0.28, wear: 0.8, spin: 8 }, medium: { time: 0.28, wear: 0.8, spin: 8 }, hard: { time: 0.3, wear: 0.8, spin: 8.5 }, inter: { time: 0.04, wear: 1.3, spin: 2.5 }, wet: { time: -0.05, spin: 1.3 } },
+  suitable: { dry: ['soft', 'medium', 'hard'], damp: ['inter', 'wet'], wet: ['inter', 'wet'], storm: ['wet'] },
+};
+// Wet Skill (bible §10.3): off the dry, the driver part of the pace score uses the Wet Skill rating for this share (the
+// rest is the dry mix: Racecraft / Consistency). Dry: none, so Wet Skill can't matter there. Storm Queen's storm pace
+// (stormPacePct, race crew) comes on top in a Storm.
+export const WET_SKILL = { share: { dry: 0, damp: 0.5, wet: 1, storm: 1 } };
+
+// Spins and contact (bible §23.5), seeded and bounded. A car rolls once at every corner segment it enters (never under
+// caution): chance = basePerCorner × state × its tyre's spin × cold tyres (the first coldLaps after the start or a stop) ×
+// Push / Attack × Wet Skill (off the dry: wetRef ÷ Wet Skill, kept to wetMin–wetMax) × Consistency (consistencyRef ÷ it,
+// kept 0.7–1.4) × damage (1 + damage % × damageX) × the Rain Sense / Storm Queen traits (wetSpinPct, off the dry), never
+// above maxPerCorner. A spin costs spinSlowSecs at spinSlowPct, and with spinDamageShare also damage (spinDamagePct) — a
+// spin never retires a car by itself.
+// A failed pass's contact (Milestone 6: contactChance × Attack) is × contactState off the dry; it now also damages: with
+// contactDamageShare one car takes contactDamagePct, and with contactRetireShare (rare) the attacker retires.
+// The whole field has at most maxPerRace incidents (spins + contacts) a race: after that none roll.
+export const INCIDENTS = {
+  basePerCorner: 0.00025,
+  state: { dry: 1, damp: 3, wet: 6, storm: 10 },
+  coldLaps: 0.6,
+  coldX: 1.8,
+  pushX: 1.4,
+  attackX: 1.5,
+  wetRef: 150,
+  wetMin: 0.5,
+  wetMax: 2,
+  consistencyRef: 150,
+  damageX: 0.05,
+  maxPerCorner: 0.03,
+  spinSlowSecs: 4,
+  spinSlowPct: 55,
+  spinDamageShare: 0.25,
+  spinDamagePct: 2,
+  contactState: { dry: 1, damp: 1.5, wet: 2.5, storm: 3.5 },
+  contactDamageShare: 0.45,
+  contactDamagePct: 3,
+  contactRetireShare: 0.06,
+  maxPerRace: 8,
+};
+
+// Caution (bible §24.2 neutralisation): a serious incident (a car retired on track, a contact with damage, a spin with
+// damage off the dry) calls one with these chances. Under caution the field runs at cautionPace × each segment's reference
+// speed, a car more than bunchGap metres behind the next closes up at catchUpX, nobody overtakes or spins, and the pit
+// lane is open (a cheap stop: Auto takes a planned stop due within stopAheadLaps — any planned stop with Safety Car
+// Sense). It lasts minLaps–maxLaps of the leader's laps, then the race goes green. At most maxPerRace a race, none within
+// cooldownLaps of the last one's end or in the last lastLaps: a caution never calls itself again, and the race always
+// reaches the flag. Places you gain between a caution's start and its end count as neutralisation gains (Eli Moss).
+export const CAUTION = {
+  chance: { retire: 0.6, contact: 0.3, spin: 0.2 },
+  minLaps: 2,
+  maxLaps: 3,
+  maxPerRace: 2,
+  cooldownLaps: 2,
+  lastLaps: 1.5,
+  cautionPace: 0.62,
+  bunchGap: 28,
+  catchUpX: 1.3,
+  stopAheadLaps: { weak: 1, strong: 3 },
+};
+
+// The pit service, complete (bible §24.2): base (jacks up, car down) + a tyre change + fuel / energy to the target + the
+// repair − the Lead Mechanic's effect (mechRef MEC is none; perMech10 seconds a 10 MEC, kept to −mechBest … +mechWorst).
+// The race crew's pit traits (pitServicePct) scale the whole stop; the pit facilities (pitBasePct: F25 Pit Training Rig
+// −12% when it joins the shop) scale the base. A repair: PIT_REPAIR secs + perFault for each car-build fault it fixes
+// (PIT_FAULT_FIX: Critical one, Full all), × the Fixer trait (raceRepairPct). Never under min.
+export const PIT_SERVICE = { base: 3, tyres: 4, fuel: { lean: 0.8, normal: 1, rich: 1.3 }, mechRef: 77, perMech10: 0.4, mechBest: 2, mechWorst: 2.5, min: 4.5, perFault: 1.5 };
+export const PIT_FAULT_FIX = { none: 0, critical: 1, full: 99 };

@@ -31,10 +31,15 @@ export const TEAM_FACTS = {
   undercutWins: 'Strategy Swing wins by undercut',
   extendedStintWins: 'Strategy Swing wins by extending a stint',
   neutralisationBenefits: 'places gained under caution',
+  // Milestone 17 (bible §11 DRV04 / MEC04 / STR04 / STR06): weather, repairs and cautions
+  wetWins: 'wins in a wet race',
+  weatherTyreChanges: 'weather tyre changes made right',
+  raceFaultRepairs: 'race faults repaired',
+  cautionBenefits: 'cautions you gained places in',
 };
 
 const blank = () => Object.fromEntries(CAREER_KEYS.map((k) => [k, 0]));
-const blankFacts = () => ({ raceStarts: 0, wins: 0, podiums: 0, poles: 0, setup80: 0, gained5: 0, cleanFinishes: 0, carsBuilt: 0, classWins: [], trackWins: {}, strategySwingWins: 0, undercutWins: 0, extendedStintWins: 0, neutralisationBenefits: 0 });
+const blankFacts = () => ({ raceStarts: 0, wins: 0, podiums: 0, poles: 0, setup80: 0, gained5: 0, cleanFinishes: 0, carsBuilt: 0, classWins: [], trackWins: {}, strategySwingWins: 0, undercutWins: 0, extendedStintWins: 0, neutralisationBenefits: 0, wetWins: 0, weatherTyreChanges: 0, raceFaultRepairs: 0, cautionBenefits: 0 });
 
 export function createCareers({ bus, team }) {
   const api = {
@@ -71,7 +76,7 @@ export function createCareers({ bus, team }) {
       if (entry.quali?.rows?.[0]?.id === 'PLAYER') f.poles++;
       if ((entry.setupScore ?? 0) >= 80) f.setup80++;
       if (finished && me.grid - me.pos >= 5) f.gained5++;
-      if (finished) f.cleanFinishes++; // every retirement so far is a mechanical failure (bible §23; crashes arrive in M17)
+      if (finished) f.cleanFinishes++; // (Milestone 17: a crash retirement isn't a finish either)
       // Milestone 16: a Strategy Swing win (src/systems/races.js strategySwing) and places gained under caution (M17)
       if (entry.swingWin) {
         f.strategySwingWins++;
@@ -79,6 +84,11 @@ export function createCareers({ bus, team }) {
         else f.extendedStintWins++;
       }
       f.neutralisationBenefits += me.neutralGains ?? 0;
+      // Milestone 17: a win in a race that saw rain, weather tyre changes made right, faults a pit repair fixed, cautions gained in
+      if (win && entry.wet) f.wetWins++;
+      f.weatherTyreChanges += me.weatherChanges ?? 0;
+      f.raceFaultRepairs += me.faultsFixed ?? 0;
+      f.cautionBenefits += me.neutralBenefits ?? 0;
       if (win) {
         const classId = team.cars.cars.get(entry.carNumber)?.result?.classId;
         if (classId && CLASSES[classId] && !f.classWins.includes(classId)) f.classWins.push(classId);

@@ -14,7 +14,16 @@
 // same sound never restarted within minGapMs. Repeated workshop / UI sounds vary ±4% in pitch and ±5% in volume.
 // Phones only allow sound after the first tap: until then plays are counted and logged but silent, with no errors.
 // Emits 'audio:play' ({ name, silent, dropped }).
+//
+// In the background (Fixes queue, 30 Sept 2026) — every game gets this through installUnlock(): while the page is
+// hidden or the phone app is away (home button, app switcher, screen lock, a call over the game), the sound engine is
+// suspended, so music and tool loops stop exactly where they are and carry on from there when the game is back.
+// Sound effects asked for meanwhile are counted but silent (otherwise they would all go off at once on return).
+// Nothing is switched on that the player had off: muted stays muted, and no engine is made before the first tap.
+// If the phone will not restart sound on its own, the next tap does it.
+//   installUnlock(target, { bridge }) → also installBackground({ win, doc, bridge }) (bridge: a core/NativeBridge; made if missing) · setAway(reason, bool) · away → true while away
 import { renderSound, renderMusic } from './SoundSynth.js';
+import { NativeBridge } from './NativeBridge.js';
 
 const IMPORTANT = new Set(['progression', 'competition', 'economy']);
 
@@ -46,16 +55,74 @@ export class AudioManager {
     this._last = {};
     this._ui = [];
     this.wantedMusic = null;
+    this._away = new Set(); // why the game is out of sight: 'page' (hidden tab / WebView), 'app' (Android app paused)
+    this.awayCounts = { suspend: 0, resume: 0, tapResume: 0 }; // for checks
   }
 
   // --- start-up ------------------------------------------------------------------------------------------------------
-  installUnlock(target = globalThis.window) {
+  installUnlock(target = globalThis.window, { bridge = null } = {}) {
     if (!target?.addEventListener) return;
     const go = () => {
       this.unlock();
       for (const e of ['pointerdown', 'touchend', 'keydown']) target.removeEventListener(e, go, true);
     };
     for (const e of ['pointerdown', 'touchend', 'keydown']) target.addEventListener(e, go, true);
+    this.installBackground({ win: target, bridge });
+  }
+
+  // --- in the background -------------------------------------------------------------------------------------------
+  installBackground({ win = globalThis.window, doc = win?.document, bridge = null } = {}) {
+    if (this._bgInstalled || !win?.addEventListener) return;
+    this._bgInstalled = true;
+    const page = () => this.setAway('page', !!doc?.hidden || doc?.visibilityState === 'hidden');
+    doc?.addEventListener?.('visibilitychange', page);
+    win.addEventListener('pagehide', () => this.setAway('page', true));
+    win.addEventListener('pageshow', page);
+    // Capacitor's own pause / resume page events, and its App plugin's state (the Android app left / came back).
+    doc?.addEventListener?.('pause', () => this.setAway('app', true));
+    doc?.addEventListener?.('resume', () => this.setAway('app', false));
+    bridge ??= win.Capacitor ? new NativeBridge({ win }) : null;
+    if (bridge?.isNative) bridge.onAppState?.((active) => this.setAway('app', !active));
+    // A tap means the game is in front: clear anything left over, and restart sound if the phone held it back.
+    const tap = () => {
+      if (this._away.size) this._away.clear();
+      if (this.ctx && this.ctx.state !== 'running' && this.ctx.state !== 'closed') {
+        this.awayCounts.tapResume++;
+        this._wake();
+      }
+    };
+    for (const e of ['pointerdown', 'touchend', 'keydown']) win.addEventListener(e, tap, true);
+  }
+
+  get away() {
+    return this._away.size > 0;
+  }
+
+  setAway(reason, on) {
+    const was = this.away;
+    if (on) this._away.add(reason);
+    else this._away.delete(reason);
+    if (this.away === was) return;
+    if (this.away) this._sleep();
+    else this._wake();
+  }
+
+  _sleep() {
+    if (!this.ctx) return;
+    this.awayCounts.suspend++;
+    try {
+      this.ctx.suspend?.()?.catch?.(() => {});
+    } catch {}
+  }
+
+  _wake() {
+    // Always ask (even if it still reads 'running'): a quick hide + show can land before the suspend has finished, and
+    // the engine carries out suspend / resume in the order asked.
+    if (!this.ctx || this.away || this.ctx.state === 'closed') return;
+    this.awayCounts.resume++;
+    try {
+      this.ctx.resume?.()?.catch?.(() => {}); // refused (phone wants a tap first): the next tap tries again
+    } catch {}
   }
 
   unlock() {
@@ -72,7 +139,7 @@ export class AudioManager {
         this._loadFiles();
         this.warmUp();
       }
-      if (this.ctx.state === 'suspended') this.ctx.resume?.().catch?.(() => {});
+      if (this.ctx.state === 'suspended' && !this.away) this.ctx.resume?.().catch?.(() => {});
       if (this.wantedMusic && !this.track) this.playMusic(this.wantedMusic, { force: true });
     } catch (err) {
       this.ctx = null; // no sound on this device: the game carries on silently
@@ -171,7 +238,7 @@ export class AudioManager {
     }
     this._last[name] = now;
     this.counts[name] = (this.counts[name] ?? 0) + 1;
-    const silent = !this.ctx || this.muted || !this.volume;
+    const silent = !this.ctx || this.muted || !this.volume || this.away;
     this._log(name, silent);
     if (silent) return true;
     this._reap();

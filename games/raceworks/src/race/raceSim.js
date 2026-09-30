@@ -21,21 +21,36 @@
 //             tyre (start compound), openFaults, condition, pitService (seconds), tyreWearMult?, failureMult?,
 //             fuel? (Milestone 15: 'lean' | 'normal' | 'rich', data/race.js FUEL — race pace, tyre wear, failures) }] — a
 //             snapshot taken when the race is created, so nothing can change it later.
+// Milestone 17 (bible §21, §23.5–23.7, §24.2): weather — the weekend's seeded timeline (createRaceSim's `weather`, from
+//   src/race/weather.js; the state follows the leader's race distance), tyre × weather pace / wear / spin, Wet Skill off the
+//   dry, and the crew's tyre call when the state changes (yours as the Accept / Ignore prompt); seeded, bounded spins and
+//   contact (damage, rarely a retirement — never from a spin); cautions (the field slows and bunches, no overtaking, a
+//   cheap stop, a bounded number of laps); car damage and faults (the car build's, entry.openFaults) that a pit repair
+//   clears; and the complete pit service (base + tyres + fuel / energy + repair − the Lead Mechanic, entry.pitParts).
+//   Entries may also carry: wetSpinPct / stormPacePct / raceRepairPct (the race crew's weather and repair traits),
+//   openTyres (rivals: every compound).
+//   sim.weather → the state now · sim.caution → the running caution or null · sim.cautions → every caution this race ·
+//   sim.incidents → spins + contacts so far · sim.leaderX() → the leader's race distance in laps
 import { Rng } from '../../../../core/Rng.js';
-import { RACE, TYRES, TYRE_WEAR, PACE_MODES, ORDERS, PIT, AUTO, WEEKEND, FUEL, STRATEGY, PIT_REPAIR, FAILURE_RISK } from '../../data/race.js';
+import { RACE, TYRES, TYRE_WEAR, PACE_MODES, ORDERS, PIT, AUTO, WEEKEND, FUEL, STRATEGY, PIT_REPAIR, FAILURE_RISK, WET_SKILL, INCIDENTS, CAUTION, PIT_SERVICE, PIT_FAULT_FIX, WEATHER_NAMES } from '../../data/race.js';
 import { tyreFactor, planStrategy, rivalProfile, strategyProfile, suggestTyreFor } from '../systems/raceStrategy.js';
+import { dryWeather, stateAt, weatherPace, weatherWear, weatherSpin, suitable, bestTyreFor, stateIndex } from './weather.js';
 
-export { tyreFactor };
+export { tyreFactor, weatherPace };
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const SPIN_SECS = 1.2; // Milestone 17: how long a spin takes to draw
 
 // §23.4 paceScore for one entry through one segment. mode 'quali' uses the Qualifying rating (§22.3).
-export function paceScore(entry, seg, rules = RACE, mode = 'race') {
+// Milestone 17: off the dry the driver part uses Wet Skill for WET_SKILL.share of it (bible §10.3, §23.7).
+export function paceScore(entry, seg, rules = RACE, mode = 'race', state = 'dry') {
   const p = rules.pace;
   const carFit = Object.entries(seg.demand).reduce((t, [k, w]) => t + w * (entry.car[k] ?? 0), 0) / p.carNorm;
   const r = entry.ratings;
   const q = WEEKEND.quali;
-  const driverRating = mode === 'quali' ? r.qualifying * q.driverQualifying + r.consistency * q.driverConsistency : r.racecraft * 0.7 + r.consistency * 0.3;
+  const dryRating = mode === 'quali' ? r.qualifying * q.driverQualifying + r.consistency * q.driverConsistency : r.racecraft * 0.7 + r.consistency * 0.3;
+  const wetShare = WET_SKILL.share[state] ?? 0;
+  const driverRating = wetShare ? dryRating * (1 - wetShare) + (r.wet ?? dryRating) * wetShare : dryRating;
   const driver = driverRating / p.driverNorm;
   const crew = (entry.crew ?? 0) / p.crewNorm;
   const setup = entry.setup ?? p.setupDefault;
@@ -57,12 +72,20 @@ export function wearPerLap(entry, tyre) {
   return base * clamp(care, 0.6, 1.4) * clamp(stat, 0.6, 1.4) * (entry.tyreWearMult ?? 1); // Milestone 10: tyre prep (facilities)
 }
 
-// Milestone 15: the weather's effect on a tyre (§22.3 "weather"). Real weather arrives in Milestone 17; until then every
-// session is 'dry' and a tyre runs at its own dry pace (data/race.js TYRES), so this is 1.
-export function weatherPace(tyre, weather = 'dry') {
-  void tyre;
-  void weather;
-  return 1;
+// Milestone 17: a pit stop's service time (bible §24.2): base (× the pit facilities) + a tyre change + fuel / energy to the
+// target − the Lead Mechanic, all × the crew's pit traits; the repair and a stop outside the window come on top. An entry
+// from before Milestone 17 has only its total (pitService).
+export function pitServiceTime(e, fuel = 'normal') {
+  const P = e?.pitParts;
+  if (!P) return e?.pitService ?? PIT.service.base;
+  const S = PIT_SERVICE;
+  const t = (S.base * (1 + (P.basePct ?? 0) / 100) + S.tyres + (S.fuel[fuel] ?? S.fuel.normal) + P.mech) * (1 + (P.traitPct ?? 0) / 100);
+  return Math.round(Math.max(S.min, t) * 100) / 100;
+}
+// The Lead Mechanic's part of a stop: seconds added (+) or saved (−) against the reference Mechanic.
+export function mechanicSecs(mec) {
+  const S = PIT_SERVICE;
+  return Math.round(clamp(-((mec - S.mechRef) / 10) * S.perMech10, -S.mechBest, S.mechWorst) * 100) / 100;
 }
 
 // The chance of a mechanical failure on one lap (bible §23.6, mild): the car's REL, open faults, a Condition under
@@ -82,7 +105,7 @@ export function failureChance(e, paceId = 'normal', rules = RACE) {
 // × race length (the share of the race run), never above FAILURE_RISK.maxPerLap. car: { pace, fuel, heat, damagePct }.
 export function failureRisk(e, car = {}, share = 0, rules = RACE) {
   const F = FAILURE_RISK;
-  let p = failureChance({ ...e, fuel: car.fuel ?? e.fuel }, car.pace ?? 'normal', rules);
+  let p = failureChance({ ...e, fuel: car.fuel ?? e.fuel, openFaults: car.faults ?? e.openFaults }, car.pace ?? 'normal', rules); // Milestone 17: faults a pit repair fixed no longer count
   p *= 1 + (car.heat ?? 0) * F.heatX;
   p *= 1 + (car.damagePct ?? 0) * F.damagePer1;
   p *= 1 + clamp(share, 0, 1) * F.lengthX;
@@ -92,7 +115,7 @@ export function failureRisk(e, car = {}, share = 0, rules = RACE) {
 // severe end retires the car. → 'paceLoss' | 'forcedPit' | 'damage' | 'retire'
 export function failureOutcome(roll, e, car = {}) {
   const F = FAILURE_RISK;
-  const stress = ((car.heat ?? 0) + Math.min(1, (car.damagePct ?? 0) / F.damageFull) + Math.min(1, (e.openFaults ?? 0) / F.faultsFull)) / 3;
+  const stress = ((car.heat ?? 0) + Math.min(1, (car.damagePct ?? 0) / F.damageFull) + Math.min(1, (car.faults ?? e.openFaults ?? 0) / F.faultsFull)) / 3;
   const sev = roll + stress * F.severityShift;
   const t = F.thresholds;
   return sev < t.paceLoss ? 'paceLoss' : sev < t.forcedPit ? 'forcedPit' : sev < t.damage ? 'damage' : 'retire';
@@ -106,8 +129,8 @@ export function runQualifying({ geo, entries, seed, weather = 'dry', rules = RAC
   const rows = entries.map((e) => {
     const width = (v.maxPct / 100) * clamp(1 - e.ratings.consistency / v.consistencyFull, v.minShare, 1);
     let time = 0;
-    for (const sg of geo.segments) time += ((sg.toS - sg.fromS) / sg.refSpeed) * paceMultiplier(paceScore(e, sg, rules, 'quali'), rules) * (1 + rng.range(-1, 1) * width);
-    time *= tyreFactor(e.tyre ?? 'medium', 0) * weatherPace(e.tyre ?? 'medium', weather);
+    for (const sg of geo.segments) time += ((sg.toS - sg.fromS) / sg.refSpeed) * paceMultiplier(paceScore(e, sg, rules, 'quali', weather), rules) * (1 + rng.range(-1, 1) * width);
+    time *= tyreFactor(e.tyre ?? 'medium', 0) * weatherPace(e.tyre ?? 'medium', weather) * (weather === 'storm' ? 1 + (e.stormPacePct ?? 0) / 100 : 1);
     return { id: e.id, name: e.name, team: e.team, isPlayer: !!e.isPlayer, tyre: e.tyre ?? 'medium', setup: Math.round((e.setup ?? rules.pace.setupDefault) * 100), time: Math.round(time * 1000) / 1000 };
   });
   rows.sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
@@ -115,15 +138,21 @@ export function runQualifying({ geo, entries, seed, weather = 'dry', rules = RAC
   return rows;
 }
 
-export function createRaceSim({ track, geo, entries, laps, seed, grid = null, rules = RACE }) {
+// calm: true = no spins, no contact damage and no cautions (tests of the Milestone 7 / 16 strategy bounds only, where one
+// caution's luck would swamp the few seconds a plan is worth).
+export function createRaceSim({ track, geo, entries, laps, seed, grid = null, rules = RACE, weather = null, calm = false }) {
   const L = geo.length;
   const segs = geo.segments;
   const zones = (track.overtakeZones ?? []).map((z) => ({ ...z }));
   const order = grid ?? entries.map((e) => e.id);
   const byId = Object.fromEntries(entries.map((e) => [e.id, e]));
-  // Base time per entry per segment (without variance): segment length / reference speed × pace curve.
-  const base = {};
-  for (const e of entries) base[e.id] = segs.map((sg) => ((sg.toS - sg.fromS) / sg.refSpeed) * paceMultiplier(paceScore(e, sg, rules), rules));
+  const wx = weather ?? dryWeather(); // Milestone 17: the weekend's timeline (fixed; saved with the race)
+  // Base time per entry per segment (without variance): segment length / reference speed × pace curve. Milestone 17: one
+  // set per weather state (Wet Skill off the dry), made when first needed.
+  const baseBy = {};
+  const baseOf = (state) =>
+    (baseBy[state] ??= Object.fromEntries(entries.map((e) => [e.id, segs.map((sg) => ((sg.toS - sg.fromS) / sg.refSpeed) * paceMultiplier(paceScore(e, sg, rules, 'race', state), rules))])));
+  const base = baseOf('dry');
   const baseLap = {};
   for (const e of entries) baseLap[e.id] = base[e.id].reduce((t, x) => t + x, 0);
   const maxLat = (s) => geo.at(s).width / 2 - rules.carHalfWidth - rules.edgeMargin;
@@ -138,12 +167,12 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
   for (const e of entries) {
     profile[e.id] = e.strategy ?? (e.isPlayer ? strategyProfile({ str: 86 }) : rivalProfile(e));
     estErr[e.id] = new Rng(`strategy:${seed}:${e.id}`).range(-1, 1);
-    pitLoss[e.id] = pit ? pit.length / PIT.laneSpeed - pitSpan / (L / baseLap[e.id]) + (e.pitService ?? PIT.service.base) + 3 : 0;
+    pitLoss[e.id] = pit ? pit.length / PIT.laneSpeed - pitSpan / (L / baseLap[e.id]) + pitServiceTime(e, e.fuel) + 3 : 0;
   }
   const entryFrac = pit ? geo.wrap(pit.entryS) / L : 1;
 
   let rng;
-  const sim = { track, geo, entries, laps, seed, t: 0, done: false, leaderFinished: false, cars: [], events: [], commands: [], stepCount: 0 };
+  const sim = { track, geo, entries, laps, seed, t: 0, done: false, leaderFinished: false, cars: [], events: [], commands: [], stepCount: 0, weatherTimeline: wx };
 
   function fresh() {
     rng = new Rng(`race:${seed}`);
@@ -153,6 +182,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     sim.events = [];
     sim.commands = [];
     sim.stepCount = 0;
+    Object.assign(sim, m17Race());
     const g = track.grid;
     sim.cars = order.map((id, i) => {
       const s = -(g.firstGap + i * g.rowGap);
@@ -199,8 +229,22 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
         stops: 0,
         pitLat: 0,
         ...m16Car(e),
+        ...m17Car(e),
       };
     });
+  }
+  // Milestone 17: a car's condition and incident state (also filled in for a race saved before it).
+  //   faults (the car build's open faults still unfixed; a pit repair fixes them) · faultsFixed (faults a repair fixed,
+  //   running ones included) · spins · spinT (when the last spin began — drawing only) · coldTo (race distance until which
+  //   the tyres are cold) · weatherChanges (stops that swapped a wrong tyre for a right one) · neutralBenefits (cautions
+  //   you gained places in)
+  function m17Car(e) {
+    return { faults: e?.openFaults ?? 0, faultsFixed: 0, spins: 0, spinT: null, coldTo: INCIDENTS.coldLaps * L, weatherChanges: 0, neutralBenefits: 0 };
+  }
+  // Milestone 17: the race's weather and incident state. weather (the state now) · wetSeen (any rain so far) · weatherInit
+  // (the start's tyre calls made) · caution (the running one) · cautions [{ n, fromLap, toLap, laps, reason }] · incidents
+  function m17Race() {
+    return { weather: stateAt(wx, 0), wetSeen: stateIndex(stateAt(wx, 0)) > 0, weatherInit: false, caution: null, cautions: [], incidents: 0 };
   }
   // Milestone 16: a car's strategy state (also filled in for a race saved before it).
   //   fuel (the target now) · heat 0–1 · nextTyre / repairReq (your Manual choices for the next stop; null = the plan's) ·
@@ -212,12 +256,27 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     return { fuel: e?.fuel ?? 'normal', heat: 0, nextTyre: null, repairReq: null, plan: null, win: null, missed: null, swings: [], neutralGains: 0, segU: 0, segKey: null, tyreCall: null, outsideSecs: 0 };
   }
 
-  const log = (kind, ids, text) => sim.events.push({ t: Math.round(sim.t * 100) / 100, kind, ids, text });
+  const log = (kind, ids, text, extra = null) => sim.events.push({ t: Math.round(sim.t * 100) / 100, kind, ids, text, ...extra });
   const nameOf = (id) => byId[id].name;
   const zoneAt = (s) => zones.find((z) => geo.inZone(s, z)) ?? null;
   const lapsLeft = (c) => laps - Math.max(0, c.s) / L; // race distance still to go, in laps
   const fuelNow = (c) => FUEL[c.fuel] ?? FUEL.normal;
-  const wearRate = (c) => wearPerLap(byId[c.id], c.tyre) * PACE_MODES[c.pace].wear * ORDERS[c.order].wear * fuelNow(c).wear;
+  const wearRate = (c) => wearPerLap(byId[c.id], c.tyre) * PACE_MODES[c.pace].wear * ORDERS[c.order].wear * fuelNow(c).wear * weatherWear(c.tyre, sim.weather);
+  // Milestone 17: the leader's race distance in laps (the weather timeline and cautions follow it).
+  const leaderX = () => {
+    let s = 0;
+    for (const c of sim.cars) if (!c.retired && c.s > s) s = c.s;
+    return Math.min(laps, s / L);
+  };
+  const leaderLaps = () => Math.max(0, ...sim.cars.filter((c) => !c.retired).map((c) => c.lapsDone));
+  // The tyres the crew may fit now: the right ones for the weather that the team has, else its dry list.
+  const openTyre = (id, t) => !!TYRES[t]?.unlocked || (byId[id].openTyres ?? []).includes(t);
+  const tyresFor = (c) => {
+    if (sim.weather === 'dry') return null;
+    if (c.tyreCall?.status === 'ignored' && c.tyreCall.weather === sim.weather) return null; // you said stay out: no weather tyres until it changes again
+    const ok = Object.keys(TYRES).filter((t) => suitable(t, sim.weather) && openTyre(c.id, t));
+    return ok.length ? ok : null;
+  };
 
   // Variance width for this driver (bible §23.4: Consistency narrows it, never to zero).
   const varWidth = (e) => {
@@ -235,11 +294,143 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     if (!again) {
       c.segU = rng.range(-1, 1) * varWidth(e);
       c.segKey = key;
+      // Milestone 17: one spin roll at every corner (none under caution; the field's incident cap stops them)
+      if (segs[k].kind === 'corner' && !sim.caution && c.s > 0 && !calm) {
+        const u = rng.next();
+        if (sim.incidents < INCIDENTS.maxPerRace && u < spinChance(c)) spin(c);
+      }
     }
-    let time = base[c.id][k] * (1 + c.segU) * (1 + c.damagePct / 100);
+    const w = sim.weather;
+    let time = baseOf(w)[c.id][k] * (1 + c.segU) * (1 + c.damagePct / 100);
     if (c.failLapsLeft > 0) time *= 1 + c.failPct / 100;
     time *= tyreFactor(c.tyre, c.wear) * (1 + PACE_MODES[c.pace].time) * (1 + ORDERS[c.order].time) * (1 + fuelNow(c).time);
+    time *= weatherPace(c.tyre, w) * (w === 'storm' ? 1 + (e.stormPacePct ?? 0) / 100 : 1); // Milestone 17
     c.segSpeed = (segs[k].toS - segs[k].fromS) / time;
+  }
+
+  // --- Milestone 17: spins (bible §23.5), bounded and seeded ---------------------------------------------------------
+  function spinChance(c) {
+    const I = INCIDENTS;
+    const e = byId[c.id];
+    const w = sim.weather;
+    let p = I.basePerCorner * (I.state[w] ?? 1) * weatherSpin(c.tyre, w);
+    if (c.s < c.coldTo) p *= I.coldX;
+    if (c.pace === 'push') p *= I.pushX;
+    if (c.order === 'attack') p *= I.attackX;
+    if (w !== 'dry') {
+      p *= clamp(I.wetRef / Math.max(1, e.ratings.wet ?? I.wetRef), I.wetMin, I.wetMax);
+      p *= Math.max(0, 1 + (e.wetSpinPct ?? 0) / 100);
+    }
+    p *= clamp(I.consistencyRef / Math.max(1, e.ratings.consistency ?? I.consistencyRef), 0.7, 1.4);
+    p *= 1 + c.damagePct * I.damageX;
+    return Math.min(I.maxPerCorner, p);
+  }
+  // A spin: time lost, sometimes damage — never a retirement. Off the dry, a damaging spin may call a caution.
+  function spin(c) {
+    const I = INCIDENTS;
+    sim.incidents++;
+    c.spins++;
+    c.spinT = sim.t;
+    c.slowUntil = sim.t + I.spinSlowSecs;
+    c.slowPct = I.spinSlowPct;
+    const damage = rng.next() < I.spinDamageShare;
+    if (damage) c.damagePct += I.spinDamagePct;
+    log('spin', [c.id], `${nameOf(c.id)} spins${damage ? ' — damage' : ''}`, { damage });
+    if (damage && sim.weather !== 'dry') maybeCaution('spin', `${nameOf(c.id)} spun off`);
+  }
+
+  // --- Milestone 17: weather ------------------------------------------------------------------------------------------
+  // The state follows the leader along the timeline. A change re-plans every car, and each car on a wrong tyre gets the
+  // crew's tyre call: yours as the Accept / Ignore prompt (on Auto the crew also calls the stop — Ignore cancels it),
+  // rivals' straight away.
+  function weatherTick() {
+    const now = stateAt(wx, leaderX());
+    if (now !== sim.weather) {
+      const from = sim.weather;
+      sim.weather = now;
+      if (stateIndex(now) > 0) sim.wetSeen = true;
+      log('weather', [], `Weather: ${WEATHER_NAMES[from]} → ${WEATHER_NAMES[now]}`, { from, to: now });
+      for (const c of sim.cars) {
+        if (c.finished || c.retired) continue;
+        c.win = null; // the dry stint's window no longer fits
+        c.missed = null;
+        c.seg = -1;
+        replan(c);
+        weatherCall(c);
+      }
+    }
+    if (!sim.weatherInit && sim.t >= rules.startLights) {
+      // the start: a car on the wrong tyre for the weather gets its call now
+      sim.weatherInit = true;
+      if (sim.weather !== 'dry') for (const c of sim.cars) weatherCall(c);
+    }
+  }
+  function weatherCall(c) {
+    if (c.finished || c.retired) return;
+    const w = sim.weather;
+    const e = byId[c.id];
+    const openAll = Object.keys(TYRES).filter((t) => openTyre(c.id, t));
+    if (suitable(c.tyre, w)) {
+      // already right: an open call for another tyre lapses, and a stop only the call wanted is off
+      if (c.tyreCall?.status === 'open') c.tyreCall.status = 'lapsed';
+      if (c.pitReq?.by === 'call' && !c.pit) c.pitReq = null;
+      return;
+    }
+    let tyre = bestTyreFor(w, openAll);
+    if (w === 'dry') {
+      const dryOpen = (profile[c.id]?.tyres ?? ['soft', 'medium']).filter((t) => openAll.includes(t));
+      tyre = dryOpen.includes(c.plan?.nextTyre) ? c.plan.nextTyre : dryOpen[0] ?? null;
+    }
+    if (!tyre) return; // nothing better in the truck
+    if (e.isPlayer) c.tyreCall = { weather: w, tyre, lap: sim.lapOf(c), status: 'open' };
+    if ((c.auto || !e.isPlayer) && !c.pit && c.pitReq?.by !== 'forced' && lapsLeft(c) > 0.5) c.pitReq = { tyre, by: 'call', repair: c.plan?.repair ?? 'none' };
+  }
+
+  // --- Milestone 17: cautions (bible §24.2 neutralisation) ------------------------------------------------------------
+  function maybeCaution(kind, reason) {
+    const K = CAUTION;
+    if (calm || sim.caution || sim.cautions.length >= K.maxPerRace || sim.leaderFinished) return;
+    const x = leaderX();
+    const last = sim.cautions[sim.cautions.length - 1];
+    if (last && x < last.endX + K.cooldownLaps) return;
+    if (laps - x < K.lastLaps) return;
+    if (!rng.chance(K.chance[kind] ?? 0)) return;
+    startCaution(reason, K.minLaps + Math.floor(rng.next() * (K.maxLaps - K.minLaps + 1)));
+  }
+  function startCaution(reason, len) {
+    const from = leaderLaps();
+    const ord = sim.order();
+    sim.caution = { n: sim.cautions.length + 1, fromLap: from, toLap: from + len, len, reason, startPos: Object.fromEntries(ord.map((c, i) => [c.id, i + 1])) };
+    log('caution', [], `Caution: ${reason} — no overtaking, pit lane open`, { n: sim.caution.n });
+    for (const c of sim.cars) {
+      c.ot = null;
+      cautionStop(c);
+    }
+  }
+  // Auto takes a cheap stop under caution when its planned stop is close enough (Safety Car Sense: any planned stop).
+  function cautionStop(c) {
+    if (!c.auto || c.finished || c.retired || c.pit || c.pitReq || lapsLeft(c) < STRATEGY.minLapsLeftToPit) return;
+    const p = c.plan;
+    if (!p?.stops || !p.pitLap) return;
+    const prof = profile[c.id];
+    const K = CAUTION.stopAheadLaps;
+    const ahead = (prof?.traits ?? []).includes('safetyCarSense') ? Infinity : (prof?.q ?? 0) >= STRATEGY.undercutQ ? K.strong : K.weak;
+    if (p.pitLap - nextStopLap(c) <= ahead) c.pitReq = { tyre: p.nextTyre, by: 'caution', repair: p.repair };
+  }
+  function endCaution() {
+    const k = sim.caution;
+    if (!k) return;
+    const ord = sim.order();
+    ord.forEach((c, i) => {
+      const gain = (k.startPos[c.id] ?? i + 1) - (i + 1);
+      if (gain > 0 && !c.retired) {
+        c.neutralGains += gain;
+        c.neutralBenefits++;
+      }
+    });
+    sim.cautions.push({ n: k.n, fromLap: k.fromLap, toLap: leaderLaps(), laps: leaderLaps() - k.fromLap, len: k.len, reason: k.reason, endX: leaderX() });
+    sim.caution = null;
+    log('cautionEnd', [], 'Green flag: racing again', { n: k.n });
   }
 
   // --- Milestone 16: the plan (src/systems/raceStrategy.js), for every car whatever its mode ------------------------
@@ -263,7 +454,10 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
       tyre: c.tyre,
       wear: c.wear,
       fuel: c.fuel,
-      rate: (t, f) => wearPerLap(e, t) * (FUEL[f] ?? FUEL.normal).wear,
+      rate: (t, f) => wearPerLap(e, t) * (FUEL[f] ?? FUEL.normal).wear * weatherWear(t, sim.weather),
+      // Milestone 17: the weather now — the tyres that suit it, and what each tyre's pace is in it
+      tyres: tyresFor(c),
+      weatherX: sim.weather === 'dry' ? null : (t) => weatherPace(t, sim.weather),
       baseLap: baseLap[c.id],
       pitLoss: pitLoss[c.id],
       damagePct: c.damagePct,
@@ -282,7 +476,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     const p = c.plan;
     if (!p) return;
     c.fuel = p.fuel;
-    if (!c.pit && c.pitReq?.by !== 'forced' && c.pitReq?.by !== 'call') {
+    if (!c.pit && c.pitReq?.by !== 'forced' && c.pitReq?.by !== 'call' && c.pitReq?.by !== 'caution') {
       c.pitReq = p.pitLap && p.pitLap === nextStopLap(c) ? { tyre: p.nextTyre, by: 'auto', repair: p.repair } : null;
     }
   }
@@ -347,13 +541,43 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     }
     c.slowUntil = sim.t + r.failSlowSecs;
     c.slowPct = r.failSlowPct;
-    if (rng.chance(r.contactChance * ORDERS[c.order].contactX)) {
+    // Milestone 17: contact is likelier off the dry (and cold tyres), can damage a car and, rarely, retire the attacker;
+    // the field's incident cap stops it
+    const I = INCIDENTS;
+    const cx = (I.contactState[sim.weather] ?? 1) * (c.s < c.coldTo ? I.coldX : 1);
+    // (on the grid, before the line, a touch only costs time: as in Milestone 7)
+    const soft = calm || c.s <= 0 || o.s <= 0;
+    if (rng.chance(r.contactChance * ORDERS[c.order].contactX * (soft ? 1 : cx)) && (soft || sim.incidents < I.maxPerRace)) {
+      if (soft) {
+        for (const x of [c, o]) {
+          x.slowUntil = sim.t + r.contactSlowSecs;
+          x.slowPct = r.failSlowPct * 2;
+          x.contacts++;
+        }
+        log('contact', [c.id, o.id], `Contact: ${nameOf(c.id)} and ${nameOf(o.id)}`);
+        return false;
+      }
+      sim.incidents++;
       for (const x of [c, o]) {
         x.slowUntil = sim.t + r.contactSlowSecs;
         x.slowPct = r.failSlowPct * 2;
         x.contacts++;
       }
-      log('contact', [c.id, o.id], `Contact: ${nameOf(c.id)} and ${nameOf(o.id)}`);
+      const roll = rng.next();
+      if (roll < I.contactRetireShare) {
+        log('contact', [c.id, o.id], `Contact: ${nameOf(c.id)} and ${nameOf(o.id)}`, { damage: true });
+        c.retired = true;
+        c.retireT = sim.t;
+        c.pit = null;
+        c.fails.push('crash');
+        log('retire', [c.id], `${nameOf(c.id)} retires: crash damage`, { crash: true });
+        maybeCaution('retire', `${nameOf(c.id)} stopped on track`);
+      } else if (roll < I.contactRetireShare + I.contactDamageShare) {
+        const hit = rng.next() < 0.5 ? c : o;
+        hit.damagePct += I.contactDamagePct;
+        log('contact', [c.id, o.id], `Contact: ${nameOf(c.id)} and ${nameOf(o.id)} — ${nameOf(hit.id)} damaged`, { damage: true, hit: hit.id });
+        maybeCaution('contact', `contact between ${nameOf(c.id)} and ${nameOf(o.id)}`);
+      } else log('contact', [c.id, o.id], `Contact: ${nameOf(c.id)} and ${nameOf(o.id)}`);
     }
     return false;
   }
@@ -371,23 +595,24 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
       c.failLapsLeft = f.paceLossLaps;
       c.failPct = f.paceLossPct;
       c.fails.push('paceLoss');
-      log('failure', [c.id], `${nameOf(c.id)}: engine hiccup, losing pace`);
+      log('failure', [c.id], `${nameOf(c.id)}: engine hiccup, losing pace`, { outcome: 'paceLoss' });
     } else if (kind === 'forcedPit') {
       c.failLapsLeft = laps; // until it's fixed in the pits
       c.failPct = f.paceLossPct;
       c.fails.push('forcedPit');
       c.pitReq = { tyre: c.pitReq?.tyre ?? c.nextTyre ?? c.plan?.nextTyre ?? c.tyre, by: 'forced', repair: 'critical' };
-      log('failure', [c.id], `${nameOf(c.id)}: a fault — must pit now`);
+      log('failure', [c.id], `${nameOf(c.id)}: a fault — must pit now`, { outcome: 'forcedPit' });
     } else if (kind === 'damage') {
       c.damagePct += f.damagePct;
       c.fails.push('damage');
-      log('failure', [c.id], `${nameOf(c.id)}: component damage`);
+      log('failure', [c.id], `${nameOf(c.id)}: component damage`, { outcome: 'damage' });
     } else {
       c.retired = true;
       c.retireT = sim.t;
       c.pit = null;
       c.fails.push('retire');
       log('retire', [c.id], `${nameOf(c.id)} retires: mechanical failure`);
+      maybeCaution('retire', `${nameOf(c.id)} stopped on track`); // Milestone 17
     }
   }
 
@@ -402,6 +627,8 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     if (c.best === null || lt < c.best) c.best = lt;
     c.lapStartT = crossT;
     if (c.failLapsLeft > 0) c.failLapsLeft--;
+    // Milestone 17: the caution ends when the leader completes its last lap (or at the flag)
+    if (sim.caution && (k >= sim.caution.toLap || k >= laps)) endCaution();
     if (k >= laps || sim.leaderFinished) {
       c.finished = true;
       c.finishT = crossT;
@@ -428,9 +655,8 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     log('swing', [c.id], kind === 'undercut' ? `${nameOf(c.id)}: undercut — stopping before the crew's lap ${planLap}` : `${nameOf(c.id)}: extending the stint past the crew's lap ${planLap}`);
   }
 
-  function serviceTime(c) {
-    return byId[c.id].pitService ?? PIT.service.base;
-  }
+  // Milestone 17: base + tyres + fuel / energy to the car's target − the Lead Mechanic, × pit traits (pitServiceTime).
+  const serviceTime = (c) => pitServiceTime(byId[c.id], c.fuel);
 
   // Milestone 16: what this stop is (taken as the car enters the pit lane): who called it, the repair, the time a stop
   // outside the stint's window costs (your Pit Now only — the crew's own stops are inside it, a forced stop is a fault),
@@ -445,22 +671,28 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
       const W = STRATEGY.window;
       const w = c.win;
       const away = !w ? 1 : lap < w.from ? w.from - lap : lap > w.to ? lap - w.to : 0;
-      if (away) outside = Math.min(W.outsideMax, W.outsideSecs + W.outsidePerLap * (away - 1));
+      if (away && !sim.caution) outside = Math.min(W.outsideMax, W.outsideSecs + W.outsidePerLap * (away - 1)); // Milestone 17: under caution the crew has time to get ready
       if (c.missed !== null) swing(c, 'extended', c.missed);
       else if (c.plan?.stops && c.plan.pitLap && lap < c.plan.pitLap) swing(c, 'undercut', c.plan.pitLap);
     }
-    return { by, repair: by === 'forced' && repair === 'none' ? 'critical' : repair, outside, lap };
+    return { by, repair: by === 'forced' && repair === 'none' ? 'critical' : repair, outside, lap, caution: !!sim.caution };
   }
-  // The repair done at the box (PIT_REPAIR): only takes time when there is damage or a fault to fix. → extra seconds
+  // The repair done at the box (PIT_REPAIR): only takes time when there is damage or a fault to fix. Milestone 17: it also
+  // fixes the car build's faults (Critical one, Full all: PIT_FAULT_FIX, perFault seconds each), and the Fixer trait
+  // (raceRepairPct) makes it quicker. → extra seconds
   function doRepair(c, id) {
     const r = PIT_REPAIR[id] ?? PIT_REPAIR.none;
-    const broken = c.damagePct > 0 || c.failLapsLeft > 0;
+    const broken = c.damagePct > 0 || c.failLapsLeft > 0 || c.faults > 0;
     if (!broken || !r.share) return 0;
+    const running = c.failLapsLeft > 0 && r.clearsFault ? 1 : 0;
+    const fixed = Math.min(c.faults, PIT_FAULT_FIX[id] ?? 0);
     c.damagePct = Math.round(c.damagePct * (1 - r.share) * 100) / 100;
     if (r.clearsFault) c.failLapsLeft = 0;
+    c.faults -= fixed;
+    c.faultsFixed += fixed + running;
     c.heat *= r.heat;
-    log('repair', [c.id], `${nameOf(c.id)}: ${r.name.toLowerCase()} repair`);
-    return r.secs;
+    log('repair', [c.id], `${nameOf(c.id)}: ${r.name.toLowerCase()} repair${fixed + running ? ` (${fixed + running} fault${fixed + running === 1 ? '' : 's'} fixed)` : ''}`);
+    return Math.round((r.secs + fixed * PIT_SERVICE.perFault) * Math.max(0.2, 1 + (byId[c.id].raceRepairPct ?? 0) / 100) * 100) / 100;
   }
 
   // One step for a car in the pit lane: limit speed, stop at the box, new tyres, rejoin at the exit.
@@ -472,8 +704,11 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
       const extra = doRepair(c, P.repair) + (P.outside ?? 0);
       c.outsideSecs += P.outside ?? 0;
       P.stopUntil = sim.t + serviceTime(c) + extra;
+      P.secs = Math.round((serviceTime(c) + extra) * 100) / 100;
       c.v = 0;
+      if (!suitable(c.tyre, sim.weather) && suitable(P.next, sim.weather)) c.weatherChanges++; // Milestone 17: the right tyre for the weather
       c.tyre = P.next;
+      c.coldTo = P.exitAbs + INCIDENTS.coldLaps * L; // new tyres start cold
       c.wear = 0;
       c.stops++;
       // the next stint plans afresh (a new window); your Manual next-tyre choice is used up
@@ -482,9 +717,9 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
       c.plan = null;
       c.nextTyre = null;
       c.repairReq = null;
-      if (c.tyreCall?.status === 'accepted') c.tyreCall.status = 'done';
+      if (c.tyreCall?.status === 'accepted' || (c.tyreCall?.status === 'open' && P.by === 'call')) c.tyreCall.status = 'done';
       c.stints.push({ tyre: P.next, fromLap: Math.min(laps, c.lapsDone + 1) });
-      log('pit', [c.id], `${nameOf(c.id)} pits: ${TYRES[P.next].name} tyres`);
+      log('pit', [c.id], `${nameOf(c.id)} pits: ${TYRES[P.next].name} tyres${P.caution ? ' (under caution)' : ''}`, { secs: P.secs, caution: P.caution });
     }
     if (sim.t < P.stopUntil) {
       c.v = 0;
@@ -511,6 +746,8 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     sim.t += dt;
     sim.stepCount++;
     if (sim.t >= rules.startLights && sim.t - dt < rules.startLights) log('start', [], 'Lights out');
+    weatherTick(); // Milestone 17
+    const caution = sim.caution;
     for (const c of sim.cars) {
       c.prevS = c.s;
       c.prevLat = c.lat;
@@ -530,6 +767,13 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
         let desired = c.segSpeed;
         if (c.finished) desired *= 0.6; // slowing-down lap
         if (sim.t < c.slowUntil) desired *= 1 - c.slowPct / 100;
+        // Milestone 17: under caution the field runs slowly and bunches up behind the car ahead
+        if (caution && !c.finished) {
+          const lim = segs[k].refSpeed * CAUTION.cautionPace;
+          const a = ahead(c);
+          // close up only on a car really ahead in the race (not a backmarker round the lap)
+          desired = Math.min(desired, a && a.gap > CAUTION.bunchGap && a.car.s > c.s ? lim * CAUTION.catchUpX : lim);
+        }
         // traffic
         let blocker = null; // the car ahead this one may not pass right now
         if (!c.finished) {
@@ -537,11 +781,11 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
           const a = ahead(c, c.ot?.target);
           if (a) {
             const tr = rules.traffic;
-            const passing = c.s - a.car.s > L / 2; // the car ahead is a lap down: it lets us by
+            const passing = !caution && c.s - a.car.s > L / 2; // the car ahead is a lap down: it lets us by (not under caution)
             const sg = segs[k];
-            if (a.gap >= tr.draftRange[0] && a.gap <= tr.draftRange[1] && sg.kind === 'straight') desired *= 1 + tr.draftPct / 100;
+            if (a.gap >= tr.draftRange[0] && a.gap <= tr.draftRange[1] && sg.kind === 'straight' && !caution) desired *= 1 + tr.draftPct / 100;
             if (!passing && a.gap < tr.attemptGap + ORDERS[c.order].attemptGapPlus) {
-              const zone = zoneAt(c.s);
+              const zone = caution ? null : zoneAt(c.s); // no overtaking under caution
               if (zone && tryOvertake(c, a.car, zone)) {
                 // passing now: not blocked by it
               } else {
@@ -607,9 +851,6 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     }
   };
 
-  // A tyre this car's team may fit (Milestone 11 research: races.js puts the team's open compounds in entry.openTyres).
-  const openTyre = (id, t) => !!TYRES[t]?.unlocked || (byId[id].openTyres ?? []).includes(t);
-
   // --- the player's commands (bible §24.2), recorded with their step so a replay is exact ---------------------------
   sim.command = function command(id, type, value) {
     const c = sim.car(id);
@@ -651,6 +892,10 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
       if (value === 'accept') {
         c.pitReq = { tyre: call.tyre, by: 'call', repair: c.plan?.repair ?? 'none' };
         c.nextTyre = c.auto ? null : call.tyre;
+      } else {
+        // Milestone 17: on Auto the crew had called the stop — stay out, and the crew re-plans on these tyres
+        if (c.pitReq?.by === 'call') c.pitReq = null;
+        if (c.plan) replan(c);
       }
       sim.commands.push({ step: sim.stepCount, id, type, value });
       return true;
@@ -726,7 +971,11 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     if (c.prevS > c.s + 1) a = 1; // just rejoined from the pit lane
     const s = c.prevS + (c.s - c.prevS) * a;
     const lat = c.prevLat + (c.lat - c.prevLat) * a;
-    return geo.pointAt(s, lat * latScale);
+    const pose = geo.pointAt(s, lat * latScale);
+    // Milestone 17: a spinning car turns once round over SPIN_SECS (drawing only)
+    const since = c.spinT === null || c.spinT === undefined ? Infinity : sim.t - c.spinT;
+    if (since < SPIN_SECS) pose.heading += Math.PI * 2 * Math.sin((since / SPIN_SECS) * (Math.PI / 2));
+    return pose;
   };
 
   // Running order now: finished cars by laps then finish time, then the rest by distance, retired last.
@@ -800,12 +1049,35 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
           neutralGains: c.neutralGains,
           fuel: c.fuel,
           outsideSecs: Math.round(c.outsideSecs * 100) / 100,
+          // Milestone 17: condition at the flag and the weather / incident record
+          damage: Math.round(c.damagePct * 100) / 100,
+          faults: c.faults,
+          faultsFixed: c.faultsFixed,
+          spins: c.spins,
+          weatherChanges: c.weatherChanges,
+          neutralBenefits: c.neutralBenefits,
         };
       }),
+      // Milestone 17: the weather the race saw (start, every state, any rain), its cautions and incidents
+      weather: { start: wx.start, states: [...new Set([wx.start, ...sim.events.filter((x) => x.kind === 'weather').map((x) => x.to)])], wet: sim.wetSeen },
+      cautions: sim.cautions.map((k) => ({ ...k })),
+      incidents: sim.incidents,
     };
   };
 
-  sim.serialize = () => ({ t: sim.t, done: sim.done, leaderFinished: sim.leaderFinished, rng: rng.getState(), stepCount: sim.stepCount, carry, cars: JSON.parse(JSON.stringify(sim.cars)), events: sim.events.slice(), commands: sim.commands.map((x) => ({ ...x })) });
+  sim.serialize = () => ({
+    t: sim.t,
+    done: sim.done,
+    leaderFinished: sim.leaderFinished,
+    rng: rng.getState(),
+    stepCount: sim.stepCount,
+    carry,
+    cars: JSON.parse(JSON.stringify(sim.cars)),
+    events: sim.events.slice(),
+    commands: sim.commands.map((x) => ({ ...x })),
+    // Milestone 17: the weather now, the caution, the incidents
+    m17: JSON.parse(JSON.stringify({ weather: sim.weather, wetSeen: sim.wetSeen, weatherInit: sim.weatherInit, caution: sim.caution, cautions: sim.cautions, incidents: sim.incidents })),
+  });
   sim.load = (s) => {
     fresh();
     if (!s) return sim;
@@ -821,9 +1093,15 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
       const add = m16Car(byId[c.id]);
       for (const k of Object.keys(add)) if (c[k] === undefined) c[k] = add[k];
       if (c.segKey === null) c.segKey = `${c.seg}:${Math.floor(c.s / L)}`;
+      // Milestone 17: a race saved before it — the car's faults from its entry, tyres already warm
+      const add17 = m17Car(byId[c.id]);
+      if (c.faults === undefined) add17.coldTo = 0;
+      for (const k of Object.keys(add17)) if (c[k] === undefined) c[k] = add17[k];
     }
     sim.events = s.events.slice();
     sim.commands = (s.commands ?? []).map((x) => ({ ...x }));
+    if (s.m17) Object.assign(sim, JSON.parse(JSON.stringify(s.m17)));
+    else sim.weatherInit = sim.t >= rules.startLights; // (its timeline is the dry one races.js gives it)
     return sim;
   };
   sim.byId = byId;
@@ -836,6 +1114,17 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
   sim.nextStopLap = nextStopLap;
   sim.replan = (c) => replan(c);
   sim.failureRisk = (c) => failureRisk(byId[c.id], c, xOf(c) / laps, rules);
+  // Milestone 17 (the HUD and tests)
+  sim.leaderX = leaderX;
+  sim.spinChance = (c) => spinChance(c);
+  sim.serviceTime = (c) => serviceTime(c);
+  sim.tyresFor = (c) => tyresFor(c);
+  // ?debug=1 (the browser run): a caution now, as a serious incident would call it (no roll). → true if one started
+  sim.debugCaution = (reason = 'debug caution') => {
+    if (sim.caution || sim.done || sim.leaderFinished) return false;
+    startCaution(reason, CAUTION.minLaps);
+    return true;
+  };
   fresh();
   return sim;
 }

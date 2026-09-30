@@ -3,7 +3,8 @@
 //   Driver-rating traits (ratings) → src/systems/driverRatings.js (bible §10.3).
 //   Work traits (effects):
 //     car project (the car's team): phasePct (that person's own work in a phase), faultPct, breakthroughPct, testFixPct
-//     race crew (bible §10.8): pitServicePct, setupKnowledge, crewPct, tyreWearPct, failurePct
+//     race crew (bible §10.8): pitServicePct, setupKnowledge, crewPct, tyreWearPct, failurePct; Milestone 17: wetSpinPct,
+//       stormPacePct, raceRepairPct, forecastPts
 //     core/StaffSystem (that person): xpGainPct, energyLossPct, moraleFloor
 //   later: the part whose system isn't built yet (shown on the trait card with the milestone it waits for).
 // raceCrew(team) — bible §10.8: the Driver (the one who races), and the best Lead Mechanic, Race Engineer, Aero Designer
@@ -28,6 +29,11 @@ export const TRAIT_EFFECTS = {
   crewPct: { scope: 'raceCrew', words: (v) => [`Race crew ${pct(v)}`] },
   tyreWearPct: { scope: 'raceCrew', words: (v) => [`Tyre wear ${pct(v)}`] },
   failurePct: { scope: 'raceCrew', words: (v) => [`Race failures ${pct(v)}`] },
+  // Milestone 17: weather, forecasts and race repairs
+  wetSpinPct: { scope: 'raceCrew', words: (v) => [`Spins in the wet ${pct(v)}`] },
+  stormPacePct: { scope: 'raceCrew', words: (v) => [`Lap time in a storm ${pct(v)}`] },
+  raceRepairPct: { scope: 'raceCrew', words: (v) => [`Race repair time ${pct(v)}`] },
+  forecastPts: { scope: 'raceCrew', words: (v) => [`Forecast accuracy ${pts(v)}`] },
   xpGainPct: { scope: 'self', words: (v) => [`XP ${pct(v)}`] },
   energyLossPct: { scope: 'self', words: (v) => [`Energy use ${pct(v)}`] },
   moraleFloor: { scope: 'self', words: (v) => [`Morale never below ${v}`] },

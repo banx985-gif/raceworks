@@ -36,6 +36,8 @@ export const ASSETS = {
   // sparks are code; the Underbody Sparks, Breakdown Smoke and Pit-Service Burst art) and the main menu's key art.
   ...Object.fromEntries([...Object.values(RIVAL_TEAMS), ...PRIVATEERS].map((t) => art('cars', CAR_FAMILIES[t.family].showcase))),
   ...Object.fromEntries(['race_vfx_03', 'race_vfx_05', 'race_vfx_10'].map((k) => art('vfx', k))),
+  // Milestone 17: Tyre Smoke (spins), Track Dust (off the road in the dry) and Rain Spray (behind cars in the wet).
+  ...Object.fromEntries(['race_vfx_01', 'race_vfx_02', 'race_vfx_06'].map((k) => art('vfx', k))),
   race_brand_02: 'assets/images/brand/race_brand_02.png',
   // Race weekends (Milestone 7): the tyre icons and the race HUD icons.
   ...Object.fromEntries(Object.values(TYRES).map((t) => art('tyres', t.icon))),

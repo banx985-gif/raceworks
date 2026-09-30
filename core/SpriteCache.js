@@ -5,12 +5,17 @@
 // changes (window resize, rotate) every copy is thrown away and remade on demand.
 // Milestone 27 (memory): prune(ageSec) drops the copies of any image not drawn for ageSec seconds (a screen you have
 // left), so memory stays flat over a long session; the next draw simply makes them again. stats.pruned counts them.
+// DEVWORKS Milestone 39 (optional): maxPixels caps the whole cache — past it, the images drawn longest ago lose their
+// copies first (stats.evicted); totalPixels is what it holds now. Default: no cap (as before).
 export class SpriteCache {
-  constructor({ maxSizesPerImage = 16 } = {}) {
+  constructor({ maxSizesPerImage = 16, maxPixels = Infinity } = {}) {
     this.pixelScale = 1; // real screen pixels per logical unit
     this.maxSizesPerImage = maxSizesPerImage;
+    this.maxPixels = maxPixels;
+    this.totalPixels = 0;
+    this.peakPixels = 0;
     this.byKey = new Map(); // key → Map(sizeCode → canvas)
-    this.stats = { made: 0, hits: 0, cleared: 0, pruned: 0 };
+    this.stats = { made: 0, hits: 0, cleared: 0, pruned: 0, evicted: 0 };
     this.used = new Map(); // key → the prune clock when it was last drawn
     this.clock = 0;
   }
@@ -25,6 +30,7 @@ export class SpriteCache {
   clear() {
     this.byKey.clear();
     this.used.clear();
+    this.totalPixels = 0;
     this.stats.cleared++;
   }
 
@@ -38,6 +44,7 @@ export class SpriteCache {
     const pw = Math.max(1, Math.round(w * this.pixelScale));
     const ph = Math.max(1, Math.round(h * this.pixelScale));
     const code = pw * 65536 + ph; // number key: no string built per frame
+    this.used.delete(key); // re-inserted last: the map's order is least- to most-recently drawn
     this.used.set(key, this.clock);
     let sizes = this.byKey.get(key);
     if (!sizes) {
@@ -50,10 +57,34 @@ export class SpriteCache {
       return hit;
     }
     const copy = SpriteCache.resample(img, pw, ph);
-    if (sizes.size >= this.maxSizesPerImage) sizes.delete(sizes.keys().next().value); // oldest size goes
+    if (sizes.size >= this.maxSizesPerImage) {
+      const old = sizes.keys().next().value; // oldest size goes
+      this.totalPixels -= SpriteCache.area(sizes.get(old));
+      sizes.delete(old);
+    }
     sizes.set(code, copy);
+    this.totalPixels += pw * ph;
     this.stats.made++;
+    if (this.totalPixels > this.maxPixels) this._evict(key);
+    this.peakPixels = Math.max(this.peakPixels, this.totalPixels);
     return copy;
+  }
+
+  static area(c) {
+    return c ? c.width * c.height : 0;
+  }
+
+  // Over the cap: drop whole images, least recently drawn first (never the one just drawn).
+  _evict(keep) {
+    for (const key of this.used.keys()) {
+      if (this.totalPixels <= this.maxPixels) break;
+      if (key === keep) continue;
+      const sizes = this.byKey.get(key);
+      for (const c of sizes?.values() ?? []) this.totalPixels -= SpriteCache.area(c);
+      this.stats.evicted += sizes?.size ?? 0;
+      this.byKey.delete(key);
+      this.used.delete(key);
+    }
   }
 
   // Call now and then (e.g. every few seconds) with the seconds since the last call.
@@ -64,6 +95,7 @@ export class SpriteCache {
       if (this.clock - t < ageSec) continue;
       const sizes = this.byKey.get(key);
       n += sizes?.size ?? 0;
+      for (const c of sizes?.values() ?? []) this.totalPixels -= SpriteCache.area(c);
       this.byKey.delete(key);
       this.used.delete(key);
     }

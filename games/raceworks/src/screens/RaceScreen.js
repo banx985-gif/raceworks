@@ -16,19 +16,24 @@
 //   next tyre kept in the race (saved), and the weather tyre-call prompt (Accept / Ignore) in the plan line — it only fires
 //   from the ?debug=1 "Test call" button until Milestone 17 brings weather. All inside the bottom panel: nothing covers the
 //   track.
+// Milestone 17 (bible §21, §23.5–23.7): a third top row — the weather now and the crew's forecast (race_ui_08; it sharpens as
+//   the race goes on) and your car's condition (race_ui_20: damage, a running fault, the build's faults left). The tyre call
+//   fires for real when the weather changes. A caution shows in the title and as a chip on the track (race_ui_21). Rain,
+//   spray, spin smoke, sparks and failure smoke come from raceFx (Reduced motion tones them down). Key Moments add a weather
+//   change, a caution starting / ending and a big incident to your car.
 //   enter() takes the team's current race; onFinished(sim) when it ends; onLeave() for ‹ Garage.
 import { THEME, font } from '../../../../core/Theme.js';
 import { CachedLayer } from '../../../../core/CachedLayer.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { text, para, panel as drawPanel } from '../../../../core/ui/Kit.js';
 import { fitView, drawCircuit, drawCar, drawMinimap, toScreen } from '../race/trackDraw.js';
-import { RACE, TYRES, TYRE_ORDER, PACE_MODES, ORDERS, KEY_MOMENTS, RACE_ICONS, FUEL, FUEL_ORDER, PIT_REPAIR, PIT_REPAIR_ORDER } from '../../data/race.js';
+import { RACE, TYRES, TYRE_ORDER, PACE_MODES, ORDERS, KEY_MOMENTS, RACE_ICONS, FUEL, FUEL_ORDER, PIT_REPAIR, PIT_REPAIR_ORDER, WEATHER_NAMES } from '../../data/race.js';
 import { createRaceFx } from '../race/raceFx.js';
 import { liveryKey, teamColourId } from '../ui/livery.js';
 
 const C = THEME.color;
 const S = THEME.size;
-const TOP_H = 150;
+const TOP_H = 206; // Milestone 17: + the weather / condition row
 const ROW_H = 50;
 const HUD = S.body; // Milestone 8: the race numbers (order, gaps, wear) at body size so they read on a 360-wide phone
 const CTRL_H = 104;
@@ -44,6 +49,7 @@ export const raceClock = (secs) => {
   return `${m}:${(s - m * 60).toFixed(1).padStart(4, '0')}`;
 };
 const surname = (name) => name.split(' ').slice(-1)[0];
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 
 export function createRaceScreen({ renderer, layout, assets, team, bus, settings = null, onFinished, onLeave, toast = () => {}, debug = false }) {
   let sim = null;
@@ -73,6 +79,9 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     if (!c) return '';
     if (c.finished || c.retired) return c.finished ? 'Finished' : 'Retired';
     if (c.pit) return `In the pits: ${TYRES[c.pit.next].name} tyres${c.pit.repair && c.pit.repair !== 'none' ? ` · ${PIT_REPAIR[c.pit.repair].name.toLowerCase()} repair` : ''}`;
+    // Milestone 17: the crew's weather / caution stops
+    if (c.pitReq?.by === 'caution') return `${c.auto ? 'Plan' : 'Crew suggests'}: a cheap stop under caution · ${TYRES[c.pitReq.tyre].name} tyres`;
+    if (c.pitReq?.by === 'call') return `${c.auto ? 'Plan' : 'Your call'}: pitting for ${TYRES[c.pitReq.tyre].name} tyres (${WEATHER_NAMES[sim.weather].toLowerCase()})`;
     const p = c.plan;
     if (!p) return c.auto ? 'Plan: the crew is working it out' : 'Crew suggestion: coming';
     const head = c.auto ? 'Plan' : 'Crew suggests';
@@ -85,13 +94,25 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     } else bits.push(`no stop: ${TYRES[c.tyre].name} to the flag`);
     if (p.fuel !== c.fuel || !c.auto) bits.push(`${energyWord()} ${FUEL[p.fuel].name}`);
     if (p.repair !== 'none') bits.push(`repair ${PIT_REPAIR[p.repair].name}`);
+    if (sim.caution) bits.push('caution: pit lane open');
     return `${head}: ${bits.join(' · ')}`;
   }
+  // Milestone 17: the car's condition readout (damage, a running fault, the build's faults still unfixed)
+  function conditionText(c) {
+    if (!c) return '';
+    if (c.retired) return 'Out of the race';
+    const bits = [];
+    if (c.damagePct > 0) bits.push(`Damage ${Math.round(c.damagePct * 10) / 10}%`);
+    if (c.failLapsLeft > 0) bits.push('Fault');
+    if (c.faults > 0) bits.push(`${c.faults} build fault${c.faults === 1 ? '' : 's'}`);
+    return bits.length ? bits.join(' · ') : 'Car OK';
+  }
+  const forecastLine = () => (race ? team.races.forecastLine(race, sim.leaderX()) : '');
   const energyWord = () => (team.races?.current ? team.races.energyWord : 'Fuel');
   let camera = settings?.get('raceCamera') ?? 'overview';
   const layer = new CachedLayer({ width: 1, height: 1, draw: (g) => drawTrackLayer(g) });
   const ws = () => sim.geo.def.display?.widthScale ?? 1;
-  const fx = createRaceFx({ assets });
+  const fx = createRaceFx({ assets, reduced: () => !!settings?.get('reducedMotion') }); // Milestone 17: Reduced motion (Milestone 14 setting)
 
   function rects() {
     const sr = layout.safeRect;
@@ -155,9 +176,31 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
   }
 
   // --- Key Moments (§24.5): only while fast-forwarding ------------------------------------------------------------
+  // Milestone 17: the race's new events that are Key Moments (each time they happen): a weather change, a caution starting /
+  // ending, a big incident to your car. race.momentEv = how many events have been looked at (at 1× they just go by).
+  function eventMoment() {
+    const evs = sim.events;
+    race.momentEv ??= evs.length;
+    while (race.momentEv < evs.length) {
+      const ev = evs[race.momentEv++];
+      const mine = ev.ids?.includes(PLAYER);
+      if (ev.kind === 'weather') {
+        const call = me()?.tyreCall?.status === 'open' ? me().tyreCall : null;
+        return { id: `ev${race.momentEv}`, title: `Key moment: ${WEATHER_NAMES[ev.to].toLowerCase()} now`, body: `${ev.text}. ${call ? `The crew calls ${TYRES[call.tyre].name} tyres — Accept or Ignore on the plan line.` : 'Your tyres suit it: no call.'}` };
+      }
+      if (ev.kind === 'caution') return { id: `ev${race.momentEv}`, title: 'Key moment: caution', body: `${cap(ev.text.replace(/^Caution: /, ''))}. The field slows and bunches up — a stop now is cheap.` };
+      if (ev.kind === 'cautionEnd') return { id: `ev${race.momentEv}`, title: 'Key moment: green flag', body: 'The caution is over: racing again.' };
+      const big = (ev.kind === 'spin' && ev.damage) || (ev.kind === 'contact' && ev.hit === PLAYER) || ev.kind === 'retire' || (ev.kind === 'failure' && ev.outcome !== 'paceLoss');
+      if (mine && big) return { id: `ev${race.momentEv}`, title: 'Key moment: trouble', body: `${ev.text}. ${ev.kind === 'retire' ? 'Your race is over.' : 'Repair priority decides what the next stop fixes.'}` };
+    }
+    return null;
+  }
   function momentNow() {
     const c = me();
-    if (!c || c.finished || c.retired || !race) return null;
+    if (!c || !race) return null;
+    const em = eventMoment();
+    if (em) return em;
+    if (c.finished || c.retired) return null;
     const m = (race.moments ??= {});
     if (!m.pit && !c.pit && c.wear >= KEY_MOMENTS.pitWindowWear && lapsLeft(c) >= 2) return { id: 'pit', title: 'Key moment: pit window', body: `Your ${TYRES[c.tyre].name} tyres are ${Math.round(c.wear * 100)}% worn. ${c.auto ? 'The crew will call the stop — or take over and choose.' : 'Pit Now, or push on?'}` };
     if (!m.podium && lapsLeft(c) <= KEY_MOMENTS.podiumLastLaps) {
@@ -172,7 +215,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     return null;
   }
   function fireMoment(mo) {
-    race.moments[mo.id] = true;
+    (race.moments ??= {})[mo.id] = true;
     paused = true;
     banner = { kind: 'moment', title: mo.title, body: mo.body, id: mo.id };
     team.races.keep(sim);
@@ -278,7 +321,21 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     const c = me();
     const lead = sim.order()[0];
     const cx = top.x + top.w / 2 + 2;
-    text(ctx, sim.t < RACE.startLights ? 'Grid' : sim.done ? 'Finished' : `Lap ${sim.lapOf(lead)} / ${sim.laps}`, cx, top.y + 16, { size: S.title, bold: true, align: 'center' });
+    text(ctx, sim.t < RACE.startLights ? 'Grid' : sim.done ? 'Finished' : `${sim.caution ? 'CAUTION · ' : ''}Lap ${sim.lapOf(lead)} / ${sim.laps}`, cx, top.y + 16, { size: S.title, bold: true, align: 'center', color: sim.caution ? C.warn : C.text, maxWidth: top.w - 420 });
+    // Milestone 17: the weather and the crew's forecast (left), your car's condition (right)
+    {
+      const ry = top.y + 146;
+      const half = top.w / 2;
+      assets.drawContained(ctx, RACE_ICONS.weather, { x: top.x + 16, y: ry - 4, w: 46, h: 46 });
+      text(ctx, forecastLine(), top.x + 70, ry, { size: S.small, bold: sim.weather !== 'dry', color: sim.weather === 'dry' ? C.textMuted : C.progress, maxWidth: half + 60 });
+      const c = me();
+      const cond = conditionText(c);
+      const ok = cond === 'Car OK';
+      ctx.font = font(S.small, !ok);
+      const cw = Math.min(half - 150, ctx.measureText(cond).width);
+      assets.drawContained(ctx, RACE_ICONS.damage, { x: top.x + top.w - 16 - cw - 54, y: ry - 4, w: 46, h: 46 });
+      text(ctx, cond, top.x + top.w - 16, ry, { size: S.small, bold: !ok, color: ok ? C.textMuted : C.bad, align: 'right', maxWidth: half - 150 });
+    }
     if (c) {
       const ahead = sim.gapAhead(c);
       const behind = sim.gapBehind(c);
@@ -420,6 +477,12 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     get planLine() {
       return planText(me()); // (tests)
     },
+    get forecastLine() {
+      return sim ? forecastLine() : ''; // Milestone 17 (tests)
+    },
+    get conditionLine() {
+      return conditionText(me()); // Milestone 17 (tests)
+    },
     layoutRects: () => rects(), // (tests)
     fx, // (tests)
     buttonRect(id) {
@@ -459,6 +522,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
         let fired = null;
         sim.advance(dt * RACE.watchTimeScale * speed, speed > 1 ? { stopAt: () => (fired = momentNow()) !== null } : undefined);
         if (fired) fireMoment(fired);
+        else if (speed === 1 && race) race.momentEv = sim.events.length; // Milestone 17: at 1× you see it happen
       }
       fx.step(sim, running ? dt * RACE.watchTimeScale * speed : 0, dt);
       keepT += dt;
@@ -504,7 +568,17 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
         layer.render(ctx, trackRect.x, trackRect.y);
         drawCars(ctx, view, CAR_LEN);
       }
+      fx.drawWeather(ctx, trackRect, sim.weather); // Milestone 17: rain over the track
       drawLights(ctx);
+      // Milestone 17: the caution chip on the track (below the camera button)
+      if (sim.caution && !sim.done) {
+        const k = sim.caution;
+        const chip = { x: trackRect.x + 20, y: trackRect.y + 124, w: Math.min(trackRect.w - 40, 620), h: 84 };
+        drawPanel(ctx, chip, { fill: '#FFD23F', stroke: '#2A241F', lineWidth: 3, radius: 18 });
+        assets.drawContained(ctx, RACE_ICONS.caution, { x: chip.x + 10, y: chip.y + 8, w: 68, h: 68 });
+        const left = Math.max(0, k.toLap - Math.max(0, ...sim.cars.filter((x) => !x.retired).map((x) => x.lapsDone)));
+        text(ctx, `Caution · no overtaking · ${left} lap${left === 1 ? '' : 's'} left`, chip.x + 90, chip.y + 20, { size: S.small, bold: true, color: '#2A241F', maxWidth: chip.w - 110 });
+      }
       // camera switch (top-left of the track)
       const cam = { x: trackRect.x + 20, y: trackRect.y + 14, w: 250, h: 96 };
       drawButton(ctx, cam, camera === 'follow' ? 'Overview' : 'Follow', { accent: C.outline, font: font(S.small, true) });

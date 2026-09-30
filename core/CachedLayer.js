@@ -17,6 +17,16 @@ export class CachedLayer {
     this.dirty = true;
   }
 
+  // DEVWORKS Milestone 39: give the offscreen canvas back (leaving the screen); the next render draws it again.
+  release() {
+    if (this.canvas) {
+      this.canvas.width = 0;
+      this.canvas.height = 0;
+    }
+    this.canvas = null;
+    this.dirty = true;
+  }
+
   resize(width, height) {
     if (width === this.width && height === this.height) return;
     this.width = width;

@@ -88,6 +88,17 @@ export function createWeekendScreen({ layout, assets, team, topBar, onStartRace,
     y += 76;
     y += para(ctx, `${(geo.length / 1000).toFixed(2)} km · ${track.turns.length} turns · ${wk.laps} laps · ${me.carName} (Condition ${me.condition}) · driver ${me.name}`, 8, y, w - 16, { size: S.body }) + 24;
 
+    // --- Milestone 17: the forecast (the weekend's weather, as the crew sees it) ---
+    {
+      const fc = wk.forecast ?? { accuracy: 0 };
+      const h = 250;
+      card(h, 'normal');
+      heading(RACE_ICONS.weather, 'Forecast', `Crew accuracy ${Math.round(fc.accuracy)}% · Strategist, Strategy Desk / Room, Weather Station`, y);
+      if (ctx) text(ctx, R.forecastLine(), 24, y + 140, { size: S.body, bold: true, color: R.weather() === 'dry' ? C.actionDark : C.progress, maxWidth: w - 48 });
+      note('Qualifying runs in the start’s weather; the race follows the real weather (the forecast can be wrong)', y + 196);
+      y += h + 20;
+    }
+
     // --- practice ---
     const stage = wk.stage;
     const pr = wk.practice;

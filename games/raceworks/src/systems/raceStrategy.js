@@ -76,6 +76,8 @@ export function suggestTyreFor(weather = 'dry', open = ['soft', 'medium'], dryCh
 //   x (race distance done, in laps), total (race laps), entryFrac (where the pit entry is along a lap, 0–1)
 //   tyre, wear, fuel (now), rate(tyre, fuel) → true wear a lap at Normal / Neutral, baseLap, pitLoss (seconds)
 //   damagePct, faultRunning, gapAhead (s or null), aheadNeedsStop, window (the stint's fixed window, or null)
+//   Milestone 17: tyres (the tyres that suit the weather now; null = the strategist's dry list) and weatherX(tyre) (that
+//   tyre's lap-time multiplier in the weather now; null = dry)
 export function planStrategy(ctx) {
   const S = STRATEGY;
   const p = ctx.profile ?? strategyProfile();
@@ -84,7 +86,8 @@ export function planStrategy(ctx) {
   const exact = traits.has('fuelCounter');
   const errF = exact ? 0 : (ctx.err ?? 0) * (1 - q) * S.estimateErr;
   const safe = clamp(S.safeWear.min + (S.safeWear.max - S.safeWear.min) * q + (traits.has('longGame') ? S.safeWear.longGame : 0) + (traits.has('safeCall') ? S.safeWear.safeCall : 0), 0.4, S.hardWear);
-  const tyres = p.tyres?.length ? p.tyres : ['soft', 'medium'];
+  const tyres = ctx.tyres?.length ? ctx.tyres : p.tyres?.length ? p.tyres : ['soft', 'medium'];
+  const wx = ctx.weatherX ?? (() => 1);
   const fuels = q >= S.fuelQ || traits.has('fuelCounter') ? [...new Set([ctx.fuel, 'lean', 'normal'])] : [ctx.fuel];
   const { x, total, entryFrac, baseLap, pitLoss } = ctx;
   const rate = (t, f) => ctx.rate(t, f) * (1 + errF);
@@ -92,7 +95,7 @@ export function planStrategy(ctx) {
   const stint = (t, w0, laps, f) => {
     const r = rate(t, f);
     const w1 = w0 + r * laps;
-    let c = stintTime(baseLap, t, w0, r, laps, FUEL[f].time);
+    let c = stintTime(baseLap, t, w0, r, laps, FUEL[f].time) * wx(t);
     if (w1 > S.hardWear) c += INFEASIBLE;
     else if (w1 > safe) c += (w1 - safe) * S.marginSecs;
     return c;

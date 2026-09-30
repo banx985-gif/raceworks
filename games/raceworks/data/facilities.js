@@ -188,6 +188,15 @@ export const FACILITIES = [
     art: 'facility_f22', size: { w: 3, h: 3 }, draw: { width: 1.02, drop: 0.3 },
     purpose: 'Every lap on screens: practice teaches the crew much more about the setup.',
   },
+  // Milestone 17 build-shop pass: the Strategy Room (bible §19 'Strategy milestone + Rank B'; the strategy milestone, M16,
+  // is done, so it opens at Rank B). Its effects were already read by the M16 planner and forecast.
+  {
+    id: 'F23', name: 'Strategy Room', role: 'Thinker', unlock: { rank: 'B' }, cost: 8200,
+    effectText: 'Forecast uncertainty -15%; Auto Strategy +8%',
+    effects: [{ key: 'forecastUncertaintyPct', value: -15 }, { key: 'autoStrategyPct', value: 8 }],
+    art: 'facility_f23', size: { w: 3, h: 3 }, draw: { width: 1.02, drop: 0.3 },
+    purpose: 'Screens, maps and a big table: sharper race forecasts and a better Auto Strategy.',
+  },
   {
     id: 'F24', name: 'Tyre Lab', role: 'Specialist', unlock: { research: 'HAN4' }, cost: 7600,
     effectText: 'Tyre compounds gain +8% life',

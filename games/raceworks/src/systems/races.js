@@ -23,13 +23,19 @@
 //   their placeholder strategists), the team's open compounds as entry.openTyres, and the forecast quality (STR, the
 //   Strategist work %, bonus('forecast'), bonus('forecastUncertaintyPct')) as race.forecast for Milestone 17's weather.
 //   races.strategySwing(entry) → the Strategy Swing win a finished race earned ({ kind, lap, planLap, pos } or null).
+// Milestone 17: the weekend's weather timeline (src/race/weather.js makeWeather, from the seed and the track's rainChance)
+//   is fixed into the race when it's created (race.weather; the debug Test Race stays dry) and goes to the sim; qualifying
+//   runs in the start's weather. races.forecastFor(race, x) / forecastLine(race, x) → the crew's forecast (its uncertainty is
+//   race.forecast's). Entries carry the pit service in parts (pitParts: the Lead Mechanic, pit traits, pit facilities),
+//   the crew's weather / repair traits, and rivals every compound (RIVAL_TYRES).
 import { Rng } from '../../../../core/Rng.js';
 import { raceCrew, crewPeople, effectSum } from './staffTraits.js';
-import { createRaceSim, runQualifying } from '../race/raceSim.js';
+import { createRaceSim, runQualifying, pitServiceTime, mechanicSecs } from '../race/raceSim.js';
+import { makeWeather, dryWeather, stateAt, forecast, forecastText, bestTyreFor, suitable } from '../race/weather.js';
 import { buildField, playerEntry } from '../race/field.js';
 import { TRACKS, geoOf } from '../race/tracks.js';
 import { TEST_RACE } from '../../data/rivals.js';
-import { RACE, WEEKEND, SETUP_AXES, TYRES, TYRE_ORDER, PIT, PRIZES, AUTO, FUEL, REPAIR, REPAIR_ORDER, DRIVE_LAP, STRATEGY, SWING } from '../../data/race.js';
+import { WEATHER_NAMES, RACE, WEEKEND, SETUP_AXES, TYRES, TYRE_ORDER, PRIZES, AUTO, FUEL, REPAIR, REPAIR_ORDER, DRIVE_LAP, STRATEGY, SWING } from '../../data/race.js';
 import { COSTS } from '../../data/economy.js';
 import { CLASSES } from '../../data/cars.js';
 import { courseFromTrack } from '../race/lapCourse.js';
@@ -39,6 +45,7 @@ const HISTORY_KEEP = 30;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const TYRE_WEAR_LIMIT = AUTO.pitWear; // "laps before a stop": when the crew would pit
+const RIVAL_TYRES = ['soft', 'medium', 'inter', 'wet']; // Milestone 17 (PLACEHOLDER): what the rival teams race on
 
 // Milestone 15: what a Qualifying Drive lap does to the simulated qualifying time (bible §25.5). The lap is compared
 // with the controller's perfect lap × parSlack; off-road seconds and wall hits cost extra; the change is capped at
@@ -53,11 +60,6 @@ export function driveLapDelta(drive, simTime, D = DRIVE_LAP) {
 export function createRaces({ bus, team }) {
   const cur = () => api.current;
   const best = (stat) => Math.max(0, ...team.roster.map((s) => s.stats[stat] ?? 0));
-  // A pit crew's service time from the best Mechanic (a rival's from its crew factor).
-  const serviceFor = (mec) => {
-    const s = PIT.service;
-    return Math.round(clamp(s.base + ((mec - s.mechRef) / 10) * s.perMech10, s.min, s.max) * 100) / 100;
-  };
 
   // Setup Knowledge added on top of practice: the facilities' bonus and the race crew's traits (fixed at creation).
   const facilityKnowledge = () => (team.facilities?.bonus('setupKnowledge') ?? 0) + (api.current?.crewKnowledge ?? 0);
@@ -68,8 +70,14 @@ export function createRaces({ bus, team }) {
     const track = TRACKS[config.trackId];
     const crew = crewPeople(raceCrew(team));
     const trait = (key) => effectSum(crew, key);
-    const player = { ...playerEntry(team, rec), pitService: serviceFor(best('MEC')), tyre: 'medium', auto: true };
-    if (trait('pitServicePct')) player.pitService = Math.round(player.pitService * (1 + trait('pitServicePct') / 100) * 100) / 100;
+    // Milestone 17: the pit service in parts (bible §24.2): the Lead Mechanic's MEC (the race crew's; else the team's best
+    // MEC), the crew's pit traits, the pit facilities (pitBasePct) through the garage's effect query
+    const mec = raceCrew(team).mechanic?.stats.MEC ?? best('MEC');
+    const pitParts = { mech: mechanicSecs(mec), traitPct: trait('pitServicePct'), basePct: team.facilities?.bonus('pitBasePct') ?? 0, mec };
+    const player = { ...playerEntry(team, rec), pitParts, tyre: 'medium', auto: true };
+    player.pitService = pitServiceTime(player);
+    // Milestone 17: the crew's weather and repair traits (Rain Sense, Storm Queen, Fixer)
+    for (const key of ['wetSpinPct', 'stormPacePct', 'raceRepairPct']) if (trait(key)) player[key] = trait(key);
     if (trait('crewPct')) player.crew = Math.round(player.crew * (1 + trait('crewPct') / 100));
     const wearPct = (team.facilities?.bonus('tyreWearPct') ?? 0) + trait('tyreWearPct');
     if (wearPct) player.tyreWearMult = 1 + wearPct / 100;
@@ -82,13 +90,19 @@ export function createRaces({ bus, team }) {
     player.openTyres = TYRE_ORDER.filter((t) => team.research?.tyreOpen(t) ?? TYRES[t].unlocked);
     player.strategy = strategyProfile({ str, traits: strategist?.traits ?? [], workPct, autoPct: fx('autoStrategyPct'), tyres: player.openTyres });
     player.strategy.strategistId = strategist?.id ?? null;
-    const forecast = forecastOf({ str, workPct, forecastPts: fx('forecast'), uncertaintyPct: fx('forecastUncertaintyPct') });
+    const forecast = forecastOf({ str, workPct, forecastPts: fx('forecast') + trait('forecastPts'), uncertaintyPct: fx('forecastUncertaintyPct') }); // Milestone 17: + Weather Watch
     const { entries, grid } = buildField({ player, rivalPool: config.rivalPool, band: config.band, fieldSize: config.fieldSize, seed });
     for (const e of entries) if (!e.isPlayer) {
-      e.pitService = serviceFor(77 + ((e.crew ?? 80) - 80) / 2);
+      const rmec = 77 + ((e.crew ?? 80) - 80) / 2;
+      e.pitParts = { mech: mechanicSecs(rmec), traitPct: 0, basePct: 0, mec: rmec };
+      e.pitService = pitServiceTime(e);
       e.strategy = rivalProfile(e);
+      e.openTyres = [...RIVAL_TYRES]; // Milestone 17: the rival teams carry every compound they race on
     }
-    return { n, kind, seed, trackId: track.id, laps, entries, grid, carNumber: rec.number, createdDay: team.clock.totalDays, state: null, status: 'ready', crew: crew.map((s) => s.id), crewKnowledge: trait('setupKnowledge'), forecast };
+    // Milestone 17: the weekend's weather timeline, fixed now from the seed (a reload never rerolls it). The debug Test
+    // Race stays dry.
+    const weather = kind === 'weekend' ? makeWeather(seed, laps, track.rainChance ?? 0) : dryWeather();
+    return { n, kind, seed, trackId: track.id, laps, entries, grid, carNumber: rec.number, createdDay: team.clock.totalDays, state: null, status: 'ready', crew: crew.map((s) => s.id), crewKnowledge: trait('setupKnowledge'), forecast, weather };
   }
 
   // Milestone 15: the setup locks (qualifying): the repair priority is paid through the ledger (Credits, and the Lead
@@ -317,7 +331,11 @@ export function createRaces({ bus, team }) {
       if (kind === 'tyre') {
         const t = TYRES[w.setup.tyre];
         const laps = Math.round(TYRE_WEAR_LIMIT / (t.wearPerLap * FUEL[w.setup.fuel].wear));
-        return `${t.name}: ${t.pace < 0 ? `${pct(t.pace)} quicker` : t.pace > 0 ? `${pct(t.pace)} slower` : 'the baseline pace'} in the dry · about ${laps} laps before a stop`;
+        const line = `${t.name}: ${t.pace < 0 ? `${pct(t.pace)} quicker` : t.pace > 0 ? `${pct(t.pace)} slower` : 'the baseline pace'} in the dry · about ${laps} laps before a stop`;
+        // Milestone 17: whether it suits the start's weather
+        const start = api.weather();
+        if (start === 'dry' && !suitable(w.setup.tyre, 'dry')) return `${line} · wrong for a dry start`;
+        return start === 'dry' ? line : `${line} · ${WEATHER_NAMES[start]} at the start: ${suitable(w.setup.tyre, start) ? 'the right tyre' : 'the wrong tyre'}`;
       }
       if (kind === 'fuel') {
         const f = FUEL[w.setup.fuel];
@@ -341,8 +359,11 @@ export function createRaces({ bus, team }) {
       const fit = clamp(1 - miss / st.fitDiv, 0, 1);
       return Math.round(100 * fit * (st.base + st.knowledgeShare * (knowledge / 100)));
     },
-    // The weather for qualifying (Milestone 17 brings real weather; until then it is always dry — this is the one place).
-    weather: () => 'dry',
+    // The weather for qualifying and the start (Milestone 17: the weekend's timeline at race distance 0).
+    weather: () => stateAt(cur()?.weather, 0),
+    // Milestone 17: the crew's forecast at race distance x (0 = before the race) and its one line for the screens.
+    forecastFor: (race = cur(), x = 0) => forecast(race?.weather ?? dryWeather(), { u: race?.forecast?.uncertainty ?? 100, seed: race?.seed ?? '', x, laps: race?.laps ?? WEEKEND.laps }),
+    forecastLine: (race = cur(), x = 0) => forecastText(api.forecastFor(race, x)),
     // A rival car's setup score (0–1) from its own crew: the driver's Technical Feedback and the team's crew factor.
     rivalSetup(e, rng) {
       const rs = WEEKEND.rivalSetup;
@@ -366,6 +387,7 @@ export function createRaces({ bus, team }) {
         } else {
           e.setup = api.rivalSetup(e, rng);
           e.tyre = rng.chance(rs.softShare) ? 'soft' : 'medium';
+          e.tyre = bestTyreFor(api.weather(), e.openTyres ?? RIVAL_TYRES) ?? e.tyre; // Milestone 17: a wet start
         }
       }
       const rows = runQualifying({ geo: geoOf(w.trackId), entries: w.entries, seed: w.seed, weather: api.weather() });
@@ -417,7 +439,7 @@ export function createRaces({ bus, team }) {
 
     sim(race = api.current) {
       if (!race || !race.grid) return null;
-      const sim = createRaceSim({ track: TRACKS[race.trackId], geo: geoOf(race.trackId), entries: race.entries, laps: race.laps, seed: race.seed, grid: race.grid });
+      const sim = createRaceSim({ track: TRACKS[race.trackId], geo: geoOf(race.trackId), entries: race.entries, laps: race.laps, seed: race.seed, grid: race.grid, weather: race.weather ?? dryWeather(), calm: !!race.calm }); // (calm: tests only)
       if (race.state) sim.load(race.state);
       return sim;
     },
@@ -433,7 +455,7 @@ export function createRaces({ bus, team }) {
       const result = sim.result();
       const me = result.rows.find((r) => r.isPlayer);
       const w = RACE.wear;
-      const wear = Math.round(w.perLap * (me?.laps ?? 0) + w.failure * (me?.fails.filter((f) => f !== 'paceLoss').length ?? 0) + w.contact * (me?.contacts ?? 0));
+      const wear = Math.round(w.perLap * (me?.laps ?? 0) + w.failure * (me?.fails.filter((f) => f !== 'paceLoss').length ?? 0) + w.contact * (me?.contacts ?? 0) + w.damagePer1 * (me?.damage ?? 0)); // Milestone 17: + race damage left unrepaired
       const rec = team.cars.cars.get(race.carNumber);
       if (rec) rec.condition = Math.max(0, (rec.condition ?? 100) - wear);
       let prize = 0;
@@ -446,7 +468,7 @@ export function createRaces({ bus, team }) {
         if (reputation) team.money.reputation.add(reputation, `Race result: P${me.pos} at ${where}`);
       }
       const swingWin = race.kind === 'weekend' ? api.strategySwing(me) : null;
-      const entry = { swingWin, n: race.n, kind: race.kind, trackId: race.trackId, laps: race.laps, day: team.clock.totalDays, carNumber: race.carNumber, seed: race.seed, result, wear, prize, reputation, grid: race.grid, quali: race.quali ?? null, setupScore: race.quali?.setupScore ?? null, crew: race.crew ?? [] };
+      const entry = { swingWin, wet: !!result.weather?.wet, n: race.n, kind: race.kind, trackId: race.trackId, laps: race.laps, day: team.clock.totalDays, carNumber: race.carNumber, seed: race.seed, result, wear, prize, reputation, grid: race.grid, quali: race.quali ?? null, setupScore: race.quali?.setupScore ?? null, crew: race.crew ?? [] };
       api.history.push(entry);
       if (api.history.length > HISTORY_KEEP) api.history.shift();
       api.current = null;
@@ -465,6 +487,7 @@ export function createRaces({ bus, team }) {
     load(s) {
       api.current = s?.current ? JSON.parse(JSON.stringify(s.current)) : null;
       const w = api.current;
+      if (w) w.weather ??= dryWeather(); // Milestone 17: a race made before weather stays dry
       if (w?.kind === 'weekend') {
         // Milestone 15: a weekend saved before it — Normal fuel, Skip repair; an M7 practice was the full value (3 runs)
         w.setup.fuel ??= 'normal';

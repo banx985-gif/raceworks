@@ -129,7 +129,9 @@ export const T01 = {
     { turn: 'T10', at: 0.935, severity: 0.4 },
   ],
   surfaceGrip: [{ from: 0, to: 1, grip: 1 }], // one grip zone (weather arrives later)
-  weatherTable: { dry: 1 }, // M6: always dry
+  // Milestone 17: the chance a weekend here sees rain at all (PLACEHOLDER until per-track values in Milestones 18–19);
+  // src/race/weather.js turns it into the weekend's seeded timeline.
+  rainChance: 0.35,
   // Camera framing hints: overview = the whole circuit; the grid is on the start/finish straight.
   cameraHints: { overview: { pad: 40 }, grid: { at: 0.0 } },
   // How the circuit is drawn (looks only — never the physics): road widths are drawn this many times wider than the
