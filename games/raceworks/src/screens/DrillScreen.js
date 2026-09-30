@@ -28,14 +28,12 @@ import { drillById, MEDALS, MEDAL_NAMES, DRILL_BONUS, DRILL_SETTINGS, DRIVE } fr
 import { CLASSES } from '../../data/cars.js';
 import { RIVAL_TEAMS } from '../../data/rivals.js';
 import { medalFor, bonusPct } from '../systems/drills.js';
-import { drawCar } from '../race/trackDraw.js';
+import { drawDriveWorld, drawDriveControls, DRIVE_GRASS as GRASS } from '../race/driveDraw.js';
 import { drawMedal } from '../ui/medal.js';
 
 const C = THEME.color;
 const S = THEME.size;
 const PAD = 28;
-const PX = 13; // screen px per metre while driving
-const GRASS = '#7DB65A';
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 // The Qualifying Drive lap, dressed as a drill for this screen (Milestone 15).
@@ -131,130 +129,9 @@ export function createDrillScreen({ renderer, layout, assets, team, bus, setting
     onDone(params, result);
   }
 
-  // --- drawing the course ---------------------------------------------------------------------------------------------
-  function toScreen(x, y, cx, cy, ox, oy, rot) {
-    const dx = x - cx;
-    const dy = y - cy;
-    const c = Math.cos(rot);
-    const s = Math.sin(rot);
-    return { x: ox + (dx * c - dy * s) * PX, y: oy + (dx * s + dy * c) * PX };
-  }
+  // --- drawing the course (Milestone 18: shared with the Drive Stint, src/race/driveDraw.js) ---------------------------
   function drawWorld(ctx) {
-    const st = ctl.state;
-    const car = st.car;
-    const R = layout.safeRect;
-    const reduced = opt('reducedMotion');
-    // the camera follows the car; it turns with it (the car points up the screen) unless reduced motion is on
-    if (!reduced) camH += ((((car.h - camH + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) - Math.PI) * 0.12;
-    const rot = reduced ? 0 : -Math.PI / 2 - camH;
-    const ox = R.x + R.w / 2;
-    const oy = R.y + R.h * 0.62;
-    const T = (x, y) => toScreen(x, y, car.x, car.y, ox, oy, rot);
-    ctx.fillStyle = GRASS;
-    ctx.fillRect(0, 0, renderer.width, renderer.height);
-    const co = st.course;
-    const P = co.pts;
-    const i0 = Math.max(0, car.i - 70);
-    const i1 = Math.min(P.length - 1, car.i + 110);
-    const half = co.width / 2;
-    const edge = (p, side) => T(p.x - Math.sin(p.h) * side * half, p.y + Math.cos(p.h) * side * half);
-    // surface
-    ctx.beginPath();
-    for (let i = i0; i <= i1; i += 2) {
-      const q = edge(P[i], 1);
-      i === i0 ? ctx.moveTo(q.x, q.y) : ctx.lineTo(q.x, q.y);
-    }
-    for (let i = i1 - ((i1 - i0) % 2); i >= i0; i -= 2) {
-      const q = edge(P[i], -1);
-      ctx.lineTo(q.x, q.y);
-    }
-    ctx.closePath();
-    ctx.fillStyle = st.kind === 'wet' ? '#4E5A66' : '#6B6560';
-    ctx.fill();
-    // kerbs on the bends (red / white blocks at both edges)
-    for (let i = i0; i < i1; i += 2) {
-      if (Math.abs(P[i].k) < 1 / 160) continue; // a circuit's centreline is rarely exactly straight
-      for (const side of [-1, 1]) {
-        const a = edge(P[i], side);
-        const b = edge(P[i + 2], side);
-        ctx.strokeStyle = Math.floor(i / 2) % 2 ? '#D8352A' : '#F4F1EA';
-        ctx.lineWidth = 14;
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
-      }
-    }
-    // wet: puddle sheen along the middle
-    if (st.kind === 'wet') {
-      ctx.fillStyle = 'rgba(160,200,235,0.18)';
-      for (let i = i0; i < i1; i += 9) {
-        const q = T(P[i].x, P[i].y);
-        ctx.beginPath();
-        ctx.ellipse(q.x + ((i * 37) % 60) - 30, q.y, 70, 26, 0, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-    // the racing-line aid
-    if (st.aids.line && st.kind !== 'brake') {
-      const pts = ctl.racingLine(car.s - 20, car.s + 200, 4);
-      ctx.setLineDash([26, 20]);
-      ctx.strokeStyle = 'rgba(53,194,224,0.85)';
-      ctx.lineWidth = 8;
-      ctx.beginPath();
-      pts.forEach((p, n) => {
-        const q = T(p.x, p.y);
-        n ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y);
-      });
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-    // brake markers (the aid) / the Brake Zone boards and line
-    const bar = (m, colour, w) => {
-      const a = T(m.x - Math.sin(m.h) * half, m.y + Math.cos(m.h) * half);
-      const b = T(m.x + Math.sin(m.h) * half, m.y - Math.cos(m.h) * half);
-      ctx.strokeStyle = colour;
-      ctx.lineWidth = w;
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
-    };
-    if (st.kind === 'brake') {
-      for (const m of ctl.brakeMarkers()) if (m.line || st.aids.brake) bar(m, m.line ? '#F4F1EA' : 'rgba(242,134,43,0.9)', m.line ? 16 : 10);
-    } else if (st.aids.brake) {
-      for (const m of ctl.brakeMarkers()) if (m.s > car.s - 20 && m.s < car.s + 200) bar(m, 'rgba(242,134,43,0.75)', 8);
-    }
-    // gates: two posts, green when hit, red when missed
-    for (const g of st.gates) {
-      if (g.s < car.s - 40 || g.s > car.s + 220) continue;
-      const p = co.pts[Math.round(g.s / 2)];
-      const colour = g.hit === null ? '#F2B233' : g.hit ? '#2E8B57' : '#C8402F';
-      for (const side of [-1, 1]) {
-        const lat = g.lat + (side * g.w) / 2;
-        const q = T(p.x - Math.sin(p.h) * lat, p.y + Math.cos(p.h) * lat);
-        ctx.fillStyle = colour;
-        ctx.beginPath();
-        ctx.arc(q.x, q.y, 16, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#2A241F';
-        ctx.lineWidth = 4;
-        ctx.stroke();
-      }
-    }
-    // finish line
-    if (st.kind !== 'brake') {
-      const f = co.pts[Math.min(co.pts.length - 1, Math.round(co.finishAt / 2))];
-      if (f.s < car.s + 220) bar(f, '#F4F1EA', 18);
-    }
-    // cars (Aaron's sprites; nose down in the picture, turned by drawCar)
-    const L = DRIVE.car.lengthM * PX;
-    for (const a of st.ai ?? []) {
-      const q = T(a.x, a.y);
-      drawCar(ctx, assets, aiSprites[a.id % aiSprites.length], q.x, q.y, a.h + rot, L);
-    }
-    const q = T(car.x, car.y);
-    drawCar(ctx, assets, playerSprite(), q.x, q.y, car.h + rot, L, { ring: 'rgba(242,178,51,0.55)' });
+    camH = drawDriveWorld(ctx, { renderer, layout, assets, ctl, camH, reduced: opt('reducedMotion'), playerSprite: playerSprite(), aiSprite: (id) => aiSprites[id % aiSprites.length] });
   }
 
   function drawHud(ctx) {
@@ -274,22 +151,7 @@ export function createDrillScreen({ renderer, layout, assets, team, bus, setting
     drawButton(ctx, hb, 'Hand Back', { accent: C.bad });
     hits.push({ rect: hb, id: 'handBack', onTap: () => (handBack = true) });
     // controls: the steering zone (lower-left) and Brake above it
-    const z = steerZone();
-    ctx.fillStyle = 'rgba(42,36,31,0.35)';
-    ctx.beginPath();
-    ctx.roundRect(z.x, z.y, z.w, z.h, 40);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(244,241,234,0.8)';
-    ctx.lineWidth = 4;
-    ctx.stroke();
-    const kx = z.x + z.w / 2 + steer * (z.w / 2 - 70);
-    ctx.fillStyle = steerId !== null ? '#F2862B' : '#F4F1EA';
-    ctx.beginPath();
-    ctx.arc(kx, z.y + z.h / 2, 62, 0, Math.PI * 2);
-    ctx.fill();
-    text(ctx, '◀  steer  ▶', z.x + z.w / 2, z.y + z.h - 56, { size: S.small, bold: true, color: '#F4F1EA', align: 'center' });
-    const b = brakeRect();
-    drawButton(ctx, b, 'Brake', { accent: C.bad, active: brakeIds.size > 0 });
+    drawDriveControls(ctx, { zone: steerZone(), brake: brakeRect(), steer, steering: steerId !== null, braking: brakeIds.size > 0 });
   }
 
   function drawLights(ctx) {

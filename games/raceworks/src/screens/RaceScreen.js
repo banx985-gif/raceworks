@@ -21,6 +21,10 @@
 //   fires for real when the weather changes. A caution shows in the title and as a chip on the track (race_ui_21). Rain,
 //   spray, spin smoke, sparks and failure smoke come from raceFx (Reduced motion tones them down). Key Moments add a weather
 //   change, a caution starting / ending and a big incident to your car.
+// Milestone 18 (bible §8, §25): the Drive button (race_ui_30 Take the Wheel) starts the optional Drive Stint — the race
+//   screen hands its update, drawing and touches to src/screens/DriveStintView.js until you Hand Back (or the stint ends).
+//   Greyed with the reason when it can't start (used, under caution, in the pits, too close to the flag). System Back or
+//   ‹ Garage during a stint hands back first.
 //   enter() takes the team's current race; onFinished(sim) when it ends; onLeave() for ‹ Garage.
 import { THEME, font } from '../../../../core/Theme.js';
 import { CachedLayer } from '../../../../core/CachedLayer.js';
@@ -30,6 +34,7 @@ import { fitView, drawCircuit, drawCar, drawMinimap, toScreen } from '../race/tr
 import { RACE, TYRES, TYRE_ORDER, PACE_MODES, ORDERS, KEY_MOMENTS, RACE_ICONS, FUEL, FUEL_ORDER, PIT_REPAIR, PIT_REPAIR_ORDER, WEATHER_NAMES } from '../../data/race.js';
 import { createRaceFx } from '../race/raceFx.js';
 import { liveryKey, teamColourId } from '../ui/livery.js';
+import { createDriveStintView } from './DriveStintView.js';
 
 const C = THEME.color;
 const S = THEME.size;
@@ -113,6 +118,21 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
   const layer = new CachedLayer({ width: 1, height: 1, draw: (g) => drawTrackLayer(g) });
   const ws = () => sim.geo.def.display?.widthScale ?? 1;
   const fx = createRaceFx({ assets, reduced: () => !!settings?.get('reducedMotion') }); // Milestone 17: Reduced motion (Milestone 14 setting)
+  // Milestone 18: the Drive Stint view
+  const stintView = createDriveStintView({ renderer, layout, assets, team, bus, settings, debug, drawWeather: (ctx, r, w) => fx.drawWeather(ctx, r, w) });
+  stintView.onDone = (rec) => {
+    team.races.keep(sim);
+    fx.reset();
+    paused = false;
+    speed = 1;
+    toast(`Stint: ${rec.delta <= 0 ? '−' : '+'}${Math.abs(rec.delta).toFixed(2)} s against the crew`, `At most ±${rec.cap.toFixed(2)} s · ${rec.overtakes} passed${rec.penalty ? ` · ${rec.penalty} s track-limits penalty` : ''}${rec.damageAdd ? ` · damage +${rec.damageAdd}%` : ''} · the crew carries on from here`);
+  };
+  function drive() {
+    if (!sim || stintView.active) return;
+    const why = stintView.start(sim, race);
+    if (why) toast('No Drive Stint now', why);
+    else banner = null;
+  }
 
   function rects() {
     const sr = layout.safeRect;
@@ -387,7 +407,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
           assets.drawContained(ctx, it.icon, { x: r.x + 10, y: r.y + 14, w: 64, h: 64 });
           text(ctx, it.label, r.x + 84 + (r.w - 94) / 2, r.y + r.h / 2 - 24, { size: HUD, bold: true, color: it.disabled ? C.textFaint : it.selected ? C.textOnDark : C.textOnAction, align: 'center', maxWidth: r.w - 94 });
         } else drawButton(ctx, r, it.label, { selected: it.selected, disabled: it.disabled, accent: it.accent, font: f });
-        buttons.push({ id: it.id, rect: r, onTap: it.disabled ? () => {} : it.onTap });
+        buttons.push({ id: it.id, rect: r, onTap: it.disabled ? () => (it.why ? toast(it.label, it.why) : null) : it.onTap }); // (Milestone 18: a greyed button says why)
       }
     };
     let y = bot.y + 14 + rows * ROW_H + 12;
@@ -433,6 +453,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     row(y, [
       { id: 'nextTyre', label: TYRES[nextTyre].name, icon: TYRES[nextTyre].icon, w: 250, disabled: done || !!c?.pit, accent: C.progress, onTap: () => cmd('tyre', nextOpenTyre(nextTyre)) }, // Milestone 11: every compound research has opened
       { id: 'repair', label: `Repair ${PIT_REPAIR[repair].name}`, disabled: done, accent: auto ? C.textFaint : C.action, onTap: () => cmd('repair', cycle(PIT_REPAIR_ORDER, repair)) }, // Milestone 16
+      { id: 'drive', label: 'Drive', icon: RACE_ICONS.drive, w: 220, disabled: !!team.races.stintWhy(sim, race), why: team.races.stintWhy(sim, race), accent: C.purple, onTap: drive }, // Milestone 18
       { id: 'pit', label: pitLabel, icon: RACE_ICONS.pit, w: 250, disabled: done || !!c?.pit, selected: !!c?.pitReq, accent: C.bad, onTap: () => (c?.pitReq?.by === 'player' && !c.auto ? cmd('pitCancel') : cmd('pit', nextTyre)) }, // your own call cancels; the crew's becomes yours
     ]);
     y += CTRL_H + GAP;
@@ -508,8 +529,19 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
       relayout();
     },
     exit() {
+      if (stintView.active) stintView.handBack('quit'); // Milestone 18: leaving mid-stint counts as Hand Back
       if (sim && team.races.current) team.races.keep(sim);
     },
+    // Milestone 18: System Back during a stint hands back (true = handled)
+    onBack() {
+      if (!stintView.active) return false;
+      stintView.handBack('handBack');
+      return true;
+    },
+    stintView, // (tests)
+    drive: () => drive(), // (tests: as if Drive was tapped)
+    onDown: (p) => stintView.active && stintView.onDown(p),
+    onUp: (p) => stintView.active && stintView.onUp(p),
     resize() {
       if (sim) relayout();
     },
@@ -517,6 +549,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     command: (type, value) => cmd(type, value),
     update(dt) {
       if (!sim) return;
+      if (stintView.active) return stintView.update(dt); // Milestone 18: you're driving (the stint moves the race)
       const running = !paused && !sim.done;
       if (running) {
         let fired = null;
@@ -540,11 +573,13 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
       }
     },
     onTap(p) {
+      if (stintView.active) return stintView.onTap(p);
       const b = [...buttons].reverse().find((x) => hitRect(p, x.rect));
       if (b) b.onTap();
     },
     render(ctx) {
       if (!sim) return;
+      if (stintView.active) return stintView.render(ctx);
       const r = rects();
       if (r.track.w !== trackRect.w || r.track.h !== trackRect.h || r.track.y !== trackRect.y) relayout();
       layer.setPixelScale(renderer.pixelScale);

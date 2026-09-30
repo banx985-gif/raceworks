@@ -3,7 +3,8 @@
 // Pauses automatically when the tab/app is hidden, and resumes when it comes back.
 // Milestone 27 (optional): loop.governor = a core/FrameGovernor — draw only every renderEvery-th animation frame (a
 // steady 30 FPS on a slow phone); the fixed steps still follow real time, so the game never runs slower.
-// renderCount counts the frames actually drawn.
+// renderCount counts the frames actually drawn. DEVWORKS Milestone 39 (optional): a governor with capFps draws by time
+// at its targetFps (60, or 30 in low mode) whatever the screen refresh rate.
 export class FixedStepLoop {
   constructor({ update, render, stepHz = 60, maxStepsPerFrame = 5, autoPauseOnHide = true, bus = null } = {}) {
     this.update = update || (() => {});
@@ -22,6 +23,8 @@ export class FixedStepLoop {
     this.governor = null;
     this.renderCount = 0;
     this._frameN = 0;
+    this._nextDraw = 0; // Milestone 39 (governor.capFps): when the next frame is due
+    this._lastDraw = 0;
 
     // Timing stats (smoothed) for the debug overlay.
     this.stats = {
@@ -116,15 +119,30 @@ export class FixedStepLoop {
     }
     const tRender = performance.now();
     const alpha = this.paused ? 0 : this.accumulator / this.stepMs;
-    const every = this.governor?.renderEvery ?? 1;
-    this._frameN = (this._frameN + 1) % every;
-    const draw = this._frameN === 0;
+    const gov = this.governor;
+    const every = gov?.renderEvery ?? 1;
+    let draw;
+    let drawnMs = frameMs * every;
+    if (gov?.capFps) {
+      // DEVWORKS Milestone 39: draw by the clock, not by counting frames, so a 90 / 120 / 144 Hz screen still gets a
+      // steady 60 (or 30 in low mode) instead of every frame (or every 2nd).
+      const interval = 1000 / gov.targetFps;
+      draw = now >= this._nextDraw - 2;
+      if (draw) {
+        this._nextDraw = now - this._nextDraw > interval ? now + interval : this._nextDraw + interval;
+        drawnMs = this._lastDraw ? now - this._lastDraw : interval;
+        this._lastDraw = now;
+      }
+    } else {
+      this._frameN = (this._frameN + 1) % every;
+      draw = this._frameN === 0;
+    }
     if (draw) {
       this.render(alpha);
       this.renderCount++;
     }
     const tEnd = performance.now();
-    if (draw) this.governor?.frame(frameMs * every, tEnd - tUpdate);
+    if (draw) gov?.frame(drawnMs, tEnd - tUpdate);
 
     const s = this.stats;
     s.stepsLastFrame = steps;

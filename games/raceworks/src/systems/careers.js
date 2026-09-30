@@ -36,10 +36,14 @@ export const TEAM_FACTS = {
   weatherTyreChanges: 'weather tyre changes made right',
   raceFaultRepairs: 'race faults repaired',
   cautionBenefits: 'cautions you gained places in',
+  // Milestone 18 (bible §25): Drive Stints, for later secrets (counters only)
+  stintsDriven: 'Drive Stints driven',
+  stintOvertakes: 'overtakes made in Drive Stints',
+  stintGains: 'Drive Stints that gained time',
 };
 
 const blank = () => Object.fromEntries(CAREER_KEYS.map((k) => [k, 0]));
-const blankFacts = () => ({ raceStarts: 0, wins: 0, podiums: 0, poles: 0, setup80: 0, gained5: 0, cleanFinishes: 0, carsBuilt: 0, classWins: [], trackWins: {}, strategySwingWins: 0, undercutWins: 0, extendedStintWins: 0, neutralisationBenefits: 0, wetWins: 0, weatherTyreChanges: 0, raceFaultRepairs: 0, cautionBenefits: 0 });
+const blankFacts = () => ({ raceStarts: 0, wins: 0, podiums: 0, poles: 0, setup80: 0, gained5: 0, cleanFinishes: 0, carsBuilt: 0, classWins: [], trackWins: {}, strategySwingWins: 0, undercutWins: 0, extendedStintWins: 0, neutralisationBenefits: 0, wetWins: 0, weatherTyreChanges: 0, raceFaultRepairs: 0, cautionBenefits: 0, stintsDriven: 0, stintOvertakes: 0, stintGains: 0, bestStintDelta: null });
 
 export function createCareers({ bus, team }) {
   const api = {
@@ -142,5 +146,13 @@ export function createCareers({ bus, team }) {
     for (const m of record.team ?? []) api.credit(m.id, 'carsBuilt');
   });
   bus.on('race:finished', ({ race }) => api.raceFinished(race));
+  // Milestone 18: a Drive Stint handed back (weekends and the Test Race alike): driven, overtakes, the best delta (lowest)
+  bus.on('stint:done', ({ record }) => {
+    const f = api.facts;
+    f.stintsDriven++;
+    f.stintOvertakes += record.overtakes ?? 0;
+    if (record.delta < 0) f.stintGains++;
+    if (f.bestStintDelta === null || record.delta < f.bestStintDelta) f.bestStintDelta = record.delta;
+  });
   return api;
 }

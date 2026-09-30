@@ -9,7 +9,11 @@
 //                              src/race/lapCourse.js, instead of a seeded one), startSpeed (m/s), timeLimitX (the time
 //                              limit as a multiple of par). Kind 'lap' is scored like the Racing Line (gates at each
 //                              corner's apex + time against par) and its detail also has offTime and walls.
-//   c.tick(dt, input)          input: { steer: −1…1, brake: bool, handBack: bool } — runs whole fixed steps (1/60 s)
+//                              Milestone 18 (the race Drive Stint): carScale { top, accel, brake, grip } (the car's SPD / ACC /
+//                              BRK / COR), gripX (the weather's grip), push { speedX, accelX, loadX } (what the Push button
+//                              does), noPar (no par ghost: the stint makes its own), startS / startLat (where on the course the car starts).
+//                              None of them changes a drill.
+//   c.tick(dt, input)          input: { steer: −1…1, brake: bool, push: bool, handBack: bool } — runs whole fixed steps (1/60 s)
 //   c.result()                 → { score 0–100, finished, handedBack, detail } (score only counts when finished)
 //   c.state                    what the screen draws: car, course, gates, AI cars, aids, timers
 //   autopilot(c)               → the input a perfect driver would give now (tests, and the debug "watch" mode)
@@ -138,7 +142,8 @@ export class DrivingChallengeController {
     const kind = config.kind ?? 'free';
     const r = config.ratings ?? {};
     const course = config.course ?? buildCourse({ seed: config.seed, kind, length: config.length ?? 900, rules });
-    const grip = kind === 'wet' ? rules.wet.grip * (1 + (r.wet ?? 0) / 3000) : 1;
+    const grip = (kind === 'wet' ? rules.wet.grip * (1 + (r.wet ?? 0) / 3000) : 1) * (config.gripX ?? 1);
+    const carX = { top: 1, accel: 1, brake: 1, grip: 1, ...(config.carScale ?? {}) }; // Milestone 18
     // §25.4: better ratings give bounded help — steering-centre assist, a wider brake window, gentler tyre load.
     const assist = clamp(((r.feedback ?? 0) + (r.racecraft ?? 0)) / 2 / 4000, 0, rules.steerAssistMax);
     const gates = kind === 'line' || kind === 'wet' || kind === 'lap' ? course.bends.map((b) => ({ s: b.apex, lat: racingOffset(course, b.apex), w: rules.gate.width, hit: null })) : [];
@@ -148,7 +153,12 @@ export class DrivingChallengeController {
       rules,
       course,
       grip,
-      latMax: 28 * grip,
+      latMax: 28 * grip * carX.grip,
+      carX,
+      push: config.push ?? null, // Milestone 18: the Push button's multipliers (null = no Push)
+      pushTime: 0,
+      startS: config.startS ?? 0,
+      startLat: config.startLat ?? 0,
       assist,
       aids: { line: config.aids?.line ?? true, brake: config.aids?.brake ?? true },
       sensitivity: clamp(config.sensitivity ?? 1, 0.5, 1.5),
@@ -204,8 +214,10 @@ export class DrivingChallengeController {
 
   _placeCar(v) {
     const st = this.state;
-    const p = at(st.course, 0);
-    st.car = { x: p.x, y: p.y, h: p.h, dir: p.h, v, i: 0, s: 0, lat: 0, steer: 0, braking: false };
+    const s0 = st.startS ?? 0; // Milestone 18: a stint starts a little way along its course (road behind you too)
+    const lat = st.startLat ?? 0;
+    const p = pointAt(st.course, s0, lat);
+    st.car = { x: p.x, y: p.y, h: p.h, dir: p.h, v, i: Math.round(s0 / SAMPLE), s: s0, lat, steer: 0, braking: false };
   }
 
   // Run whole fixed steps for dt seconds of real time.
@@ -240,9 +252,15 @@ export class DrivingChallengeController {
     car.steer = steer;
     const braking = !!input.brake;
     car.braking = braking;
+    // Milestone 18: Push asks more of the car (a stint only); the car's stats scale what it can do
+    const push = !!(input.push && st.push && !braking);
+    car.pushing = push;
+    if (push) st.pushTime += dt;
+    const top = R.car.topSpeed * st.carX.top * (push ? st.push.speedX : 1);
+    const accel = R.car.accel * st.carX.accel * (push ? st.push.accelX : 1);
     // speed: auto throttle unless braking
-    if (braking) car.v = Math.max(st.kind === 'brake' ? 6 : 4, car.v - R.car.brake * dt);
-    else car.v += R.car.accel * dt * Math.max(0, 1 - car.v / R.car.topSpeed);
+    if (braking) car.v = Math.max(st.kind === 'brake' ? 6 : 4, car.v - R.car.brake * st.carX.brake * dt);
+    else car.v += accel * dt * Math.max(0, 1 - car.v / top);
     // turning, limited by grip (asking for more runs wide)
     const want = steer * R.car.turnRate * Math.min(1, car.v / 12);
     const cap = st.latMax / Math.max(car.v, 1);
@@ -274,7 +292,7 @@ export class DrivingChallengeController {
       st.events.push({ t: st.t, kind: 'wall' });
     }
     // tyre load: steering at speed and braking (Tyre Care)
-    st.load += (Math.abs(steer) * (car.v / R.car.topSpeed) * R.tyre.loadPerSteer + (braking ? R.tyre.loadPerBrake : 0)) * dt * st.tyreGentle;
+    st.load += (Math.abs(steer) * (car.v / R.car.topSpeed) * R.tyre.loadPerSteer + (braking ? R.tyre.loadPerBrake : 0)) * dt * st.tyreGentle * (push ? st.push.loadX : 1);
     // gates
     for (const g of st.gates) {
       if (g.hit !== null || prevS > g.s || car.s < g.s) continue;
@@ -423,6 +441,6 @@ export function autopilot(ctl) {
   const turn = err * (car.v / 4) + (st.kind === 'wet' ? wrapAngle(car.h - car.dir) * -0.8 : 0);
   const steer = clamp(turn / (R.car.turnRate * Math.min(1, car.v / 12) * st.sensitivity), -1, 1);
   const margin = st.kind === 'tyre' ? 0.7 : st.kind === 'wet' ? 0.6 : st.kind === 'overtake' ? 0.85 : 0.72; // spare grip to reach the apex
-  const vSafe = safeSpeed(c, car.s, st.latMax * margin, 70, R.car.brake * 0.8);
+  const vSafe = safeSpeed(c, car.s, st.latMax * margin, 70, R.car.brake * st.carX.brake * 0.8);
   return { steer, brake: car.v > vSafe };
 }

@@ -557,6 +557,15 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
         log('contact', [c.id, o.id], `Contact: ${nameOf(c.id)} and ${nameOf(o.id)}`);
         return false;
       }
+      contactHit(c, o);
+    }
+    return false;
+  }
+  // A contact (bible §23.5, Milestone 17's bounded rules): both slow; it may damage one car or, rarely, retire the attacker c.
+  function contactHit(c, o) {
+    const r = rules.overtake;
+    const I = INCIDENTS;
+    {
       sim.incidents++;
       for (const x of [c, o]) {
         x.slowUntil = sim.t + r.contactSlowSecs;
@@ -759,7 +768,17 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
       }
       if (sim.t < c.launchAt) continue;
       let before;
-      if (c.pit) {
+      if (c.manual) {
+        // Milestone 18: the player is driving (src/race/driveStint.js sets where the car is): it moves to that point this
+        // step, no faster than it drove there; no segment pace, pit entry or wear here (the stint writes those back).
+        const m = c.manual;
+        before = c.s;
+        const move = clamp(m.target - c.s, 0, Math.max(0, m.v) * dt * 1.5 + 0.01);
+        c.s += move;
+        c.v = move / dt;
+        c.segSpeed = c.v;
+        c.lat = m.lat;
+      } else if (c.pit) {
         before = stepPit(c, dt);
       } else {
         const k = geo.segmentAt(c.s);
@@ -1056,6 +1075,9 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
           spins: c.spins,
           weatherChanges: c.weatherChanges,
           neutralBenefits: c.neutralBenefits,
+          // Milestone 18: your Drive Stints (each one's record) and the extra fuel / energy Push used
+          drive: (c.driveLog ?? []).map((x) => ({ ...x })),
+          stintFuel: c.stintFuel ?? 0,
         };
       }),
       // Milestone 17: the weather the race saw (start, every state, any rain), its cautions and incidents
@@ -1097,6 +1119,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
       const add17 = m17Car(byId[c.id]);
       if (c.faults === undefined) add17.coldTo = 0;
       for (const k of Object.keys(add17)) if (c[k] === undefined) c[k] = add17[k];
+      delete c.manual; // Milestone 18: a stint never survives a reload (it counts as handed back — the save before it stands)
     }
     sim.events = s.events.slice();
     sim.commands = (s.commands ?? []).map((x) => ({ ...x }));
@@ -1120,6 +1143,60 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
   sim.serviceTime = (c) => serviceTime(c);
   sim.tyresFor = (c) => tyresFor(c);
   // ?debug=1 (the browser run): a caution now, as a serious incident would call it (no roll). → true if one started
+  // Milestone 18 (the Drive Stint, bible §25.5): the Auto model's time for this car to drive x metres on from where it is
+  // now, in its present state (tyre and wear, pace, order, fuel, weather, damage, a running fault), without variance or
+  // traffic. Snapshotted: → f(x) seconds.
+  sim.modelTimeFn = (c) => {
+    const e = byId[c.id];
+    const w = sim.weather;
+    const b = baseOf(w)[c.id];
+    const mult = (1 + c.damagePct / 100) * (c.failLapsLeft > 0 ? 1 + c.failPct / 100 : 1) * tyreFactor(c.tyre, c.wear) * (1 + PACE_MODES[c.pace].time) * (1 + ORDERS[c.order].time) * (1 + fuelNow(c).time) * weatherPace(c.tyre, w) * (w === 'storm' ? 1 + (e.stormPacePct ?? 0) / 100 : 1);
+    const s0 = c.s;
+    return (x) => {
+      let t = 0;
+      let s = s0;
+      const end = s0 + Math.max(0, x);
+      while (s < end - 1e-6) {
+        const k = geo.segmentAt(s);
+        const sg = segs[k];
+        const lapBase = Math.floor(s / L) * L;
+        const segEnd = Math.min(end, lapBase + sg.toS);
+        const d = Math.max(0.01, segEnd - s);
+        t += (b[k] / (sg.toS - sg.fromS)) * d;
+        s += d;
+      }
+      return t * mult;
+    };
+  };
+  // Milestone 18: the player's car touched rival o while driving (the M17 bounded contact rules; the incident cap and
+  // calm races only slow both). → true if it counted as an incident
+  sim.manualContact = (c, o) => {
+    if (!c || !o || o.retired || o.pit) return false;
+    if (calm || sim.incidents >= INCIDENTS.maxPerRace || sim.caution) {
+      for (const x of [c, o]) {
+        x.slowUntil = sim.t + rules.overtake.contactSlowSecs;
+        x.slowPct = rules.overtake.failSlowPct * 2;
+        x.contacts++;
+      }
+      log('contact', [c.id, o.id], `Contact: ${nameOf(c.id)} and ${nameOf(o.id)}`);
+      return false;
+    }
+    contactHit(c, o);
+    return true;
+  };
+  // Milestone 18: move a car along the road (the Drive Stint's capped delta). Forward, it counts every line it passes now
+  // (the lap is timed as it happens); backward, never behind the last line it crossed.
+  sim.moveCar = (c, ns) => {
+    const before = c.s;
+    const lapStart = Math.max(0, c.lapsDone) * L;
+    if (ns < before) ns = Math.max(ns, lapStart + 0.5);
+    c.s = ns;
+    c.prevS = ns;
+    const kB = before >= 0 ? Math.floor(before / L) : -1;
+    const kN = ns >= 0 ? Math.floor(ns / L) : -1;
+    for (let k = kB + 1; k <= kN && !c.finished && !c.retired; k++) crossLine(c, k, sim.t);
+    return c.s - before;
+  };
   sim.debugCaution = (reason = 'debug caution') => {
     if (sim.caution || sim.done || sim.leaderFinished) return false;
     startCaution(reason, CAUTION.minLaps);

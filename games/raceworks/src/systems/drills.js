@@ -22,7 +22,8 @@ export function bonusPct({ mode = 'auto', medal = null, mastered = false } = {})
 }
 
 const blankDrill = () => ({ best: 0, medals: { bronze: 0, silver: 0, gold: 0 }, goldEverEarned: false, mastered: false, attempts: 0 });
-export const blankRecords = () => ({ drills: Object.fromEntries(DRILLS.map((d) => [d.id, blankDrill()])), competitiveSecretInvalidated: false });
+const blankStints = () => ({ driven: 0, overtakes: 0, bestDelta: null }); // Milestone 18: Drive Stints (account-wide)
+export const blankRecords = () => ({ drills: Object.fromEntries(DRILLS.map((d) => [d.id, blankDrill()])), stints: blankStints(), competitiveSecretInvalidated: false });
 
 // load() → the stored block (or null); save(block) → Promise. Both optional (tests / no storage).
 export function createDrillRecords({ load = async () => null, save = async () => {}, bus = null } = {}) {
@@ -59,6 +60,17 @@ export function createDrillRecords({ load = async () => null, save = async () =>
       bus?.emit('drill:recorded', { drillId, medal, firstGold, newBest, score });
       return { medal, firstGold, newBest };
     },
+    // Milestone 18: a Drive Stint handed back. forced: a ?debug=1 autopilot stint (sets competitiveSecretInvalidated) —
+    // steering sensitivity, the line / brake aids and reduced motion never do (bible §25.7).
+    recordStint(rec, { forced = false } = {}) {
+      const s = (data.stints ??= blankStints());
+      s.driven++;
+      s.overtakes += rec?.overtakes ?? 0;
+      if (typeof rec?.delta === 'number' && (s.bestDelta === null || rec.delta < s.bestDelta)) s.bestDelta = rec.delta;
+      if (forced || rec?.forced) data.competitiveSecretInvalidated = true;
+      api.save();
+      return s;
+    },
     reset() {
       data = blankRecords();
       return api.save();
@@ -67,6 +79,7 @@ export function createDrillRecords({ load = async () => null, save = async () =>
       const got = await load().catch(() => null);
       data = blankRecords();
       if (got?.drills) for (const [id, r] of Object.entries(got.drills)) data.drills[id] = { ...blankDrill(), ...r, medals: { ...blankDrill().medals, ...(r.medals ?? {}) } };
+      data.stints = { ...blankStints(), ...(got?.stints ?? {}) };
       data.competitiveSecretInvalidated = !!got?.competitiveSecretInvalidated;
       return data;
     },

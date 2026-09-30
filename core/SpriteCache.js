@@ -7,17 +7,27 @@
 // left), so memory stays flat over a long session; the next draw simply makes them again. stats.pruned counts them.
 // DEVWORKS Milestone 39 (optional): maxPixels caps the whole cache — past it, the images drawn longest ago lose their
 // copies first (stats.evicted); totalPixels is what it holds now. Default: no cap (as before).
+// frameBudgetMs (optional, same milestone): once the copies made since beginFrame() took that long, a new size is not
+// made this frame — the source image is returned (drawn scaled, once) and the copy comes on a later frame, so many new
+// pictures at once never make one long frame (stats.deferred). Default: no budget.
 export class SpriteCache {
-  constructor({ maxSizesPerImage = 16, maxPixels = Infinity } = {}) {
+  constructor({ maxSizesPerImage = 16, maxPixels = Infinity, frameBudgetMs = Infinity } = {}) {
+    this.frameBudgetMs = frameBudgetMs;
+    this.spentMs = 0;
     this.pixelScale = 1; // real screen pixels per logical unit
     this.maxSizesPerImage = maxSizesPerImage;
     this.maxPixels = maxPixels;
     this.totalPixels = 0;
     this.peakPixels = 0;
     this.byKey = new Map(); // key → Map(sizeCode → canvas)
-    this.stats = { made: 0, hits: 0, cleared: 0, pruned: 0, evicted: 0 };
+    this.stats = { made: 0, hits: 0, cleared: 0, pruned: 0, evicted: 0, deferred: 0 };
     this.used = new Map(); // key → the prune clock when it was last drawn
     this.clock = 0;
+  }
+
+  // Call at the start of every drawn frame when frameBudgetMs is set.
+  beginFrame() {
+    this.spentMs = 0;
   }
 
   setPixelScale(scale) {
@@ -56,7 +66,13 @@ export class SpriteCache {
       this.stats.hits++;
       return hit;
     }
+    if (this.spentMs >= this.frameBudgetMs) {
+      this.stats.deferred++;
+      return img; // this frame: the source, scaled by drawImage; the copy is made on a later frame
+    }
+    const t0 = this.frameBudgetMs < Infinity ? globalThis.performance?.now() ?? 0 : 0;
     const copy = SpriteCache.resample(img, pw, ph);
+    if (this.frameBudgetMs < Infinity) this.spentMs += (globalThis.performance?.now() ?? 0) - t0;
     if (sizes.size >= this.maxSizesPerImage) {
       const old = sizes.keys().next().value; // oldest size goes
       this.totalPixels -= SpriteCache.area(sizes.get(old));
@@ -68,6 +84,12 @@ export class SpriteCache {
     if (this.totalPixels > this.maxPixels) this._evict(key);
     this.peakPixels = Math.max(this.peakPixels, this.totalPixels);
     return copy;
+  }
+
+  // A new cap applies at once (the images drawn longest ago go first).
+  setMaxPixels(px) {
+    this.maxPixels = px > 0 ? px : Infinity;
+    if (this.totalPixels > this.maxPixels) this._evict(null);
   }
 
   static area(c) {

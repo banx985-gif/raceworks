@@ -330,6 +330,7 @@ const drillRecords = createDrillRecords({
   },
 });
 team.training.setDrillRecords(drillRecords);
+bus.on('stint:done', ({ record }) => drillRecords.recordStint(record)); // Milestone 18: Drive Stints on the account records
 function goWeekend() {
   const r = team.races.createWeekend();
   if (!r.ok) return toast(r.reason);
@@ -506,7 +507,9 @@ function back() {
     if (!setupScreen.onBack()) router.go(setupFrom, setupFrom === 'slots' ? { mode: slotsScreen.mode } : {});
   } else if (router.currentName === 'slots') router.go('menu');
   else if (router.currentName === 'garage' && garage.buildMode) garage.setBuildMode(false);
-  else if (router.currentName === 'race') leaveRace();
+  else if (router.currentName === 'race') {
+    if (!raceScreen.onBack()) leaveRace(); // Milestone 18: during a Drive Stint, Back hands back first
+  }
   else if (router.currentName === 'raceResult') router.go('garage');
   else if (router.currentName === 'drill' && drillScreen.onBack()) {
     /* the drill handles it (hand back / done) */

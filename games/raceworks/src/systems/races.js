@@ -35,7 +35,7 @@ import { makeWeather, dryWeather, stateAt, forecast, forecastText, bestTyreFor, 
 import { buildField, playerEntry } from '../race/field.js';
 import { TRACKS, geoOf } from '../race/tracks.js';
 import { TEST_RACE } from '../../data/rivals.js';
-import { WEATHER_NAMES, RACE, WEEKEND, SETUP_AXES, TYRES, TYRE_ORDER, PRIZES, AUTO, FUEL, REPAIR, REPAIR_ORDER, DRIVE_LAP, STRATEGY, SWING } from '../../data/race.js';
+import { RACE_TYPES, DRIVE_STINT, WEATHER_NAMES, RACE, WEEKEND, SETUP_AXES, TYRES, TYRE_ORDER, PRIZES, AUTO, FUEL, REPAIR, REPAIR_ORDER, DRIVE_LAP, STRATEGY, SWING } from '../../data/race.js';
 import { COSTS } from '../../data/economy.js';
 import { CLASSES } from '../../data/cars.js';
 import { courseFromTrack } from '../race/lapCourse.js';
@@ -102,7 +102,7 @@ export function createRaces({ bus, team }) {
     // Milestone 17: the weekend's weather timeline, fixed now from the seed (a reload never rerolls it). The debug Test
     // Race stays dry.
     const weather = kind === 'weekend' ? makeWeather(seed, laps, track.rainChance ?? 0) : dryWeather();
-    return { n, kind, seed, trackId: track.id, laps, entries, grid, carNumber: rec.number, createdDay: team.clock.totalDays, state: null, status: 'ready', crew: crew.map((s) => s.id), crewKnowledge: trait('setupKnowledge'), forecast, weather };
+    return { n, kind, seed, trackId: track.id, laps, entries, grid, carNumber: rec.number, createdDay: team.clock.totalDays, state: null, status: 'ready', crew: crew.map((s) => s.id), crewKnowledge: trait('setupKnowledge'), forecast, weather, raceType: config.raceType ?? 'standard', stints: [] }; // Milestone 18: the race type (stint length and cap) and the stints driven
   }
 
   // Milestone 15: the setup locks (qualifying): the repair priority is paid through the ledger (Credits, and the Lead
@@ -483,11 +483,39 @@ export function createRaces({ bus, team }) {
       return row.pos === 1 || first.pos - row.pos >= SWING.gainPlaces ? { ...first } : null;
     },
     last: () => api.history[api.history.length - 1] ?? null,
+
+    // --- Milestone 18: the Drive Stint (bible §25.1): how long, how many, and whether one can start now -----------------
+    raceTypeOf: (race = cur()) => RACE_TYPES[race?.raceType] ?? RACE_TYPES.standard,
+    stintCap: (race = cur()) => api.raceTypeOf(race).stintCap,
+    stintsLeft: (race = cur()) => Math.max(0, api.stintCap(race) - (race?.stints?.length ?? 0)),
+    // → null (a stint can start) or the reason it can't
+    stintWhy(sim, race = cur()) {
+      const c = sim?.car('PLAYER');
+      if (!race || !c) return 'No race';
+      if (!api.stintsLeft(race)) return api.stintCap(race) > 1 ? 'Both stints used' : 'Stint used (1 a race)';
+      if (sim.done || c.finished || sim.leaderFinished) return 'The race is over';
+      if (c.retired) return 'Your car is out';
+      if (sim.t < RACE.startLights + 2) return 'After the start';
+      if (c.pit) return 'Not during a pit stop';
+      if (sim.caution) return 'Not under caution';
+      if (race.laps - Math.max(0, c.s) / sim.geo.length < DRIVE_STINT.minLapsLeft) return 'Too close to the flag';
+      return null;
+    },
+    // A stint is over: its record joins the race (saved) and the team's records.
+    stintDone(rec, race = cur()) {
+      if (!race || !rec) return;
+      race.stints.push({ ...rec });
+      bus.emit('stint:done', { record: rec, race });
+    },
     serialize: () => JSON.parse(JSON.stringify({ current: api.current, history: api.history, count: api.count })),
     load(s) {
       api.current = s?.current ? JSON.parse(JSON.stringify(s.current)) : null;
       const w = api.current;
       if (w) w.weather ??= dryWeather(); // Milestone 17: a race made before weather stays dry
+      if (w) {
+        w.raceType ??= 'standard'; // Milestone 18
+        w.stints ??= [];
+      }
       if (w?.kind === 'weekend') {
         // Milestone 15: a weekend saved before it — Normal fuel, Skip repair; an M7 practice was the full value (3 runs)
         w.setup.fuel ??= 'normal';

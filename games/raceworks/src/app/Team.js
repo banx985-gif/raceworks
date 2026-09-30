@@ -95,6 +95,10 @@ export const SAVE_MIGRATIONS = {
   //   a dry timeline, a race saved mid-way gets each car's condition state when it loads (src/race/raceSim.js), and
   //   careers.load() zero records for the new facts.
   10: (record) => record,
+  //   11 → 12 (Milestone 18): the Drive Stint (each race's type and the stints driven in it; the stint career facts; the
+  //   account's stint records). Nothing to change here — races.load() gives a race without them the standard type and no
+  //   stints, careers.load() zero records.
+  11: (record) => record,
 };
 
 export class Team {

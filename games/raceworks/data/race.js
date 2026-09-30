@@ -343,3 +343,49 @@ export const CAUTION = {
 // (PIT_FAULT_FIX: Critical one, Full all), × the Fixer trait (raceRepairPct). Never under min.
 export const PIT_SERVICE = { base: 3, tyres: 4, fuel: { lean: 0.8, normal: 1, rich: 1.3 }, mechRef: 77, perMech10: 0.4, mechBest: 2, mechWorst: 2.5, min: 4.5, perFault: 1.5 };
 export const PIT_FAULT_FIX = { none: 0, critical: 1, full: 99 };
+
+// ---------------------------------------------------------------------------------------------------------------
+// Milestone 18: the optional Drive Stint (bible §8, §25). PLACEHOLDERS (docs/DECISIONS.md). src/race/driveStint.js runs it.
+
+// Race types (bible §25.1–25.2): how long a stint lasts (seconds of real time) and how many a race allows. Every race so
+// far is standard (the 12-lap Pine Ridge weekend, and the debug Test Race); sprint / endurance arrive with later race types.
+export const RACE_TYPES = {
+  sprint: { name: 'Sprint', stintSecs: 45, stintCap: 1 },
+  standard: { name: 'Standard', stintSecs: 60, stintCap: 1 },
+  endurance: { name: 'Endurance', stintSecs: 90, stintCap: 2 },
+};
+// The stint (§25.3–25.5):
+//   parSlack: the crew's (Auto model's) pace equals the controller's perfect driver × parSlack (a good driver), as the
+//     M15 Drive lap; race time runs at (model time ÷ that pace) race seconds a real second while you drive.
+//   cap: influenceCap = clamp(capMin, capMax, expected × capShare); manualDelta = clamp(±cap, actual − expected).
+//   offTrack: every `every` seconds with a wheel past the corridor edge is a `secs` penalty (inside the delta); the car
+//     slows off the road and a barrier nudges it back (never a teleport). wallDamagePct: damage a barrier hit adds (at most
+//     damageMax a stint).
+//   push: the Push button — top speed × speedX, acceleration × accelX, tyre load × loadX; heat as the Push pace for the
+//     share of the stint it was held; fuel / energy × fuelX for that share.
+//   abuse: tyre wear for the section = the model's wear × your tyre load ÷ the perfect driver's (kept abuseMin–abuseMax;
+//     Tyre Care already lowers your load in the controller).
+//   grip: the road's grip by weather (× wrongTyre on a tyre that doesn't suit it); Wet Skill adds wetPer1000 a point.
+//   car: COR / BRK / ACC / SPD set the controller car: 1 + (stat − ref) / 1000 × per1000, kept min–max.
+//   contactM / contactLat: closer than this to a rival (along / across the road) is a touch; closing faster than hitClosing
+//     it is contact under the M17 rules, slower it just holds you up behind the car.
+export const DRIVE_STINT = {
+  parSlack: 1.03,
+  capShare: 0.02,
+  capMin: 0.75,
+  capMax: 2.25,
+  offTrack: { every: 3, secs: 1 },
+  wallDamagePct: 1,
+  damageMax: 4,
+  push: { speedX: 1.04, accelX: 1.12, loadX: 1.5, fuelX: 1.12 },
+  abuseMin: 0.7,
+  abuseMax: 1.6,
+  grip: { dry: 1, damp: 0.85, wet: 0.72, storm: 0.58 },
+  wrongTyre: 0.8,
+  wetPer1000: 0.3,
+  car: { ref: 100, per1000: 1, min: 0.85, max: 1.3 },
+  contactM: 3.6,
+  contactLat: 2.2,
+  hitClosing: 3, // m/s (race speed): closing faster than this on the car ahead is a hit; slower, it holds you up
+  minLapsLeft: 0.6, // no stint this close to the flag
+};
