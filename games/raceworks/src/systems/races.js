@@ -101,8 +101,9 @@ export function createRaces({ bus, team }) {
     }
     // Milestone 17: the weekend's weather timeline, fixed now from the seed (a reload never rerolls it). The debug Test
     // Race stays dry.
-    const weather = kind === 'weekend' ? makeWeather(seed, laps, track.rainChance ?? 0) : dryWeather();
-    return { n, kind, seed, trackId: track.id, laps, entries, grid, carNumber: rec.number, createdDay: team.clock.totalDays, state: null, status: 'ready', crew: crew.map((s) => s.id), crewKnowledge: trait('setupKnowledge'), forecast, weather, raceType: config.raceType ?? 'standard', stints: [] }; // Milestone 18: the race type (stint length and cap) and the stints driven
+    const weather = kind === 'weekend' ? makeWeather(seed, laps, track.rainChance ?? 0, track.weatherProfile ?? null) : dryWeather(); // Milestone 19: the track's own odds
+    // (crewKnowledge, Milestone 19: + Street Package on street circuits, + Balance Artist on technical tracks)
+    return { n, kind, seed, trackId: track.id, laps, entries, grid, carNumber: rec.number, createdDay: team.clock.totalDays, state: null, status: 'ready', crew: crew.map((s) => s.id), crewKnowledge: trait('setupKnowledge') + (track.walls ? trait('setupKnowledgeStreet') : 0) + (WEEKEND.technicalProfiles.includes(track.profile) ? trait('setupKnowledgeTechnical') : 0), forecast, weather, raceType: config.raceType ?? 'standard', stints: [] }; // Milestone 18: the race type (stint length and cap) and the stints driven
   }
 
   // Milestone 15: the setup locks (qualifying): the repair priority is paid through the ledger (Credits, and the Lead
@@ -151,7 +152,7 @@ export function createRaces({ bus, team }) {
       if (api.current) return { ok: true, race: api.current, existing: true };
       const rec = carNumber ? team.cars.cars.get(carNumber) : team.cars.cars.latest();
       if (!rec) return { ok: false, reason: 'Build a car first (Build → Pit Bay → New car)' };
-      const w = newRace('weekend', rec, config, WEEKEND.laps);
+      const w = newRace('weekend', rec, config, TRACKS[config.trackId]?.weekendLaps ?? WEEKEND.laps); // Milestone 19: the track's own race distance
       w.grid = null; // set by qualifying
       w.stage = 'practice';
       w.practice = null;
@@ -483,6 +484,24 @@ export function createRaces({ bus, team }) {
       return row.pos === 1 || first.pos - row.pos >= SWING.gainPlaces ? { ...first } : null;
     },
     last: () => api.history[api.history.length - 1] ?? null,
+    // Milestone 19 (?debug=1 and tests): a full field for `laps` laps on a track, never saved. → { trackId, laps, done, finished,
+    // retired, badPositions (NaN / off the lap), stuck (a car that stopped short of the flag), ms }
+    debugLongRace(trackId, laps = 100, seed = `long:${trackId}`) {
+      const rec = team.cars.cars.latest();
+      if (!rec || !TRACKS[trackId]) return null;
+      const count = api.count;
+      const race = newRace('test', rec, { ...TEST_RACE, trackId }, laps);
+      api.count = count;
+      const t0 = Date.now();
+      const sim = createRaceSim({ track: TRACKS[trackId], geo: geoOf(trackId), entries: race.entries, laps, seed, grid: race.grid, weather: makeWeather(seed, laps, TRACKS[trackId].rainChance ?? 0, TRACKS[trackId].weatherProfile ?? null) });
+      let bad = 0;
+      while (!sim.done) {
+        sim.step();
+        if (sim.stepCount % 200 === 0) for (const c of sim.cars) if (!Number.isFinite(c.s) || !Number.isFinite(c.lat) || Math.abs(c.lat) > geoOf(trackId).at(c.s).width) bad++;
+      }
+      const r = sim.result();
+      return { trackId, laps, done: r.done, finished: r.rows.filter((x) => x.status !== 'retired' && x.status !== 'running').length, retired: r.rows.filter((x) => x.status === 'retired').length, running: r.rows.filter((x) => x.status === 'running').length, badPositions: bad, ms: Date.now() - t0, winner: r.rows[0].name, result: r };
+    },
 
     // --- Milestone 18: the Drive Stint (bible §25.1): how long, how many, and whether one can start now -----------------
     raceTypeOf: (race = cur()) => RACE_TYPES[race?.raceType] ?? RACE_TYPES.standard,

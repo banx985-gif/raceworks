@@ -1,6 +1,6 @@
 // Weather (Milestone 17, bible §21, §23.7): the weekend's weather timeline, the crew's forecast of it, and what each state
 // does to each tyre. Pure: the same seed always gives the same timeline and the same forecast.
-//   makeWeather(seed, laps, rainChance) → { v, rainChance, start, changes: [{ at, to }] } — fixed when the weekend begins
+//   makeWeather(seed, laps, rainChance, profile) → { v, rainChance, start, changes: [{ at, to }] } — fixed when the weekend begins
 //     and saved with it (a reload never rerolls it). at = race distance in laps (the leader's).
 //   dryWeather() → a timeline that stays dry (the debug Test Race, and a race saved before Milestone 17)
 //   stateAt(weather, x) → 'dry' | 'damp' | 'wet' | 'storm' at race distance x
@@ -19,8 +19,9 @@ export const stateIndex = (s) => Math.max(0, WEATHER_STATES.indexOf(s));
 export const dryWeather = () => ({ v: 1, rainChance: 0, start: 'dry', changes: [] });
 
 // The seeded timeline (data/race.js WEATHER). One step at a time, at most one change a lap, none on the first lap.
-export function makeWeather(seed, laps, rainChance = 0) {
-  const W = WEATHER;
+// Milestone 19: profile = the track's own odds ({ startWet, odds: { damp: { up, down } … }, maxChanges }) over the defaults.
+export function makeWeather(seed, laps, rainChance = 0, profile = null) {
+  const W = profile ? { ...WEATHER, ...profile, odds: { ...WEATHER.odds, ...(profile.odds ?? {}) } } : WEATHER;
   const rng = new Rng(`weather:${seed}`);
   const perLap = rainChance > 0 ? 1 - Math.pow(1 - rainChance, 1 / Math.max(1, laps - 1)) : 0;
   const wetStart = rng.next() < rainChance * W.startWet;

@@ -213,14 +213,15 @@ export function drawMinimap(g, geo, rect, cars = []) {
 // White page, portrait. Shows the centreline (dashed), the drawn road edges, kerbs, the pit lane, the start line,
 // the safe scenery boundary (keep scenery OUTSIDE it), the turn names, the timing segments, the overtake zones and
 // the phone crops (9:16 and 9:19.5), with the track, geometry and art-guide versions.
+// Where the guide puts the track (Milestone 19: the overlay check maps the data onto painted art the same way).
+export const guideView = (geo, W, H) => fitView(geo, { x: 40, y: 190, w: W - 80, h: H - 330 }, 70);
 export function drawGuide(g, geo, W, H) {
   const def = geo.def;
   const d = D(geo);
   const ws = d.widthScale ?? 1;
   g.fillStyle = '#FFFFFF';
   g.fillRect(0, 0, W, H);
-  const area = { x: 40, y: 190, w: W - 80, h: H - 330 };
-  const view = fitView(geo, area, 70);
+  const view = guideView(geo, W, H);
   const S = geo.samples;
   // safe scenery boundary: the drawn road plus 12 m of runoff each side
   const safeExtra = 12;

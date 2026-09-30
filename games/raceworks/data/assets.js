@@ -8,6 +8,7 @@ import { DRILL_ART } from './drills.js';
 import { CLASSES, PARTS, START_PARTS, BUILD_ART, CAR_FAMILIES } from './cars.js';
 import { BOTTOM_SLOTS, TOP_BAR } from './home.js';
 import { T01 } from './tracks/T01.js';
+import { TRACKS } from '../src/race/tracks.js';
 import { RIVAL_TEAMS, PRIVATEERS } from './rivals.js';
 import { TYRES, RACE_ICONS } from './race.js';
 import { RESEARCH_ICONS } from './research.js';
@@ -64,6 +65,8 @@ export const STAFF_PORTRAITS = Object.fromEntries(ALL_STAFF.map((d) => d.art).fi
 // a few at a time behind the game (main.js), so the first screen never waits for them; a picture still on its way
 // draws nothing for a moment and pops in.
 export const LATER_ASSETS = {
+  // Milestone 19: the other eleven tracks' scenery pictures (the pre-race card backdrop only — never the racing surface)
+  ...Object.fromEntries(Object.values(TRACKS).filter((t) => t.artKey !== T01.artKey).map((t) => art('tracks', t.artKey))),
   ...Object.fromEntries(STATIONS.filter((s) => s.art && !START_IDS.has(s.id)).map((s) => art('facilities', s.art))), // Milestone 10
   ...Object.fromEntries(Object.values(CAR_FAMILIES).flatMap((f) => [art('cars', f.showcase), art('cars', f.top)])),
   ...Object.fromEntries(Object.values(PARTS).map((p) => art('parts', p.art))),

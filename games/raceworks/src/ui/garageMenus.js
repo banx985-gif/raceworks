@@ -29,6 +29,7 @@ import { BUILD_TEXT } from '../../data/facilities.js';
 import { liveryKey, teamColourId } from './livery.js';
 import { RESEARCH_ICONS } from '../../data/research.js';
 import { NODE, nodeLabel } from '../systems/research.js';
+import { TRACKS, TRACK_IDS, geoOf } from '../race/tracks.js'; // Milestone 19
 
 const C = THEME.color;
 
@@ -38,7 +39,7 @@ export function staffLine(s) {
   return [ROLES[s.role].name, `Level ${s.level}`, TIERS[s.tier].name, ...status].join(' · ');
 }
 
-export function createGarageMenus({ garage, team, assets = null, open, close = () => {}, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null, goResearch = () => {}, goRecruit = () => {}, goTrain = () => {} }) {
+export function createGarageMenus({ garage, team, assets = null, open, close = () => {}, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null, goResearch = () => {}, goRecruit = () => {}, goTrain = () => {}, debugTracks = null }) {
   const menus = new MenuRegistry();
   const fac = team.facilities;
   // What a facility does, for its sheets (bible §19): its effect, its role and what it cost.
@@ -297,11 +298,15 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
           {
             columns: 1,
             buttons: [
-              { id: 'weekend', label: cur ? 'Carry on: race weekend' : 'Race weekend', sub: cur ? `Pine Ridge · ${cur.kind !== 'weekend' ? 'test race' : cur.stage === 'race' ? (cur.state ? 'race under way' : 'on the grid') : cur.stage}` : team.races.canRace ? 'Pine Ridge Club Circuit · practice, qualifying, 12-lap race · prize money' : 'Build a car first (Build → Pit Bay)', icon: slot.icon, disabled: !cur && !team.races.canRace, onTap: goWeekend },
+              { id: 'weekend', label: cur ? 'Carry on: race weekend' : 'Race weekend', sub: cur ? `${TRACKS[cur.trackId]?.name ?? 'Pine Ridge'} · ${cur.kind !== 'weekend' ? 'test race' : cur.stage === 'race' ? (cur.state ? 'race under way' : 'on the grid') : cur.stage}` : team.races.canRace ? 'Pine Ridge Club Circuit · practice, qualifying, 12-lap race · prize money' : 'Build a car first (Build → Pit Bay)', icon: slot.icon, disabled: !cur && !team.races.canRace, onTap: goWeekend },
               ...(goTestRace && !cur && team.races.canRace ? [{ id: 'testRace', label: 'Test Race (debug)', sub: 'Straight to an 8-lap race, no prize', accent: C.purple, onTap: goTestRace }] : []),
-              ...(last ? [{ id: 'lastResult', label: 'Last result', sub: `${lastMe?.status === 'retired' ? 'DNF' : `P${lastMe?.pos}`} at Pine Ridge · ${team.races.history.length} race${team.races.history.length === 1 ? '' : 's'} so far`, accent: C.progress, onTap: () => goRaceResult(team.races.history.length - 1) }] : []),
+              ...(last ? [{ id: 'lastResult', label: 'Last result', sub: `${lastMe?.status === 'retired' ? 'DNF' : `P${lastMe?.pos}`} at ${TRACKS[last.trackId]?.name ?? 'Pine Ridge'} · ${team.races.history.length} race${team.races.history.length === 1 ? '' : 's'} so far`, accent: C.progress, onTap: () => goRaceResult(team.races.history.length - 1) }] : []),
             ],
           },
+          // Milestone 19 (?debug=1): a race weekend on any of the 12 tracks (T12 Zero Ring too), and the 100-lap check
+          ...(debugTracks && !cur && team.races.canRace
+            ? [{ title: 'Debug: tracks', columns: 2, buttons: [...TRACK_IDS.map((id) => ({ id: `dbgTrack_${id}`, label: `${id} ${TRACKS[id].name}`, sub: `${(geoOf(id).length / 1000).toFixed(1)} km · ${TRACKS[id].turns.length} turns · ${TRACKS[id].profile}${TRACKS[id].hidden ? ' · locked' : ''}`, accent: C.purple, onTap: () => debugTracks.weekend(id) })), { id: 'dbgTrack100', label: '100-lap test: all 12', sub: 'A full field, 100 laps on every track', accent: C.purple, onTap: () => debugTracks.hundred() }] }]
+            : []),
         ];
       }
       return menu;

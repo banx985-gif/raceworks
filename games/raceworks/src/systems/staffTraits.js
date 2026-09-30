@@ -34,6 +34,9 @@ export const TRAIT_EFFECTS = {
   stormPacePct: { scope: 'raceCrew', words: (v) => [`Lap time in a storm ${pct(v)}`] },
   raceRepairPct: { scope: 'raceCrew', words: (v) => [`Race repair time ${pct(v)}`] },
   forecastPts: { scope: 'raceCrew', words: (v) => [`Forecast accuracy ${pts(v)}`] },
+  // Milestone 19: Setup Knowledge on some tracks only
+  setupKnowledgeStreet: { scope: 'raceCrew', words: (v) => [`Setup Knowledge ${pts(v)} more on street circuits`] },
+  setupKnowledgeTechnical: { scope: 'raceCrew', words: (v) => [`Setup Knowledge ${pts(v)} more on technical tracks`] },
   xpGainPct: { scope: 'self', words: (v) => [`XP ${pct(v)}`] },
   energyLossPct: { scope: 'self', words: (v) => [`Energy use ${pct(v)}`] },
   moraleFloor: { scope: 'self', words: (v) => [`Morale never below ${v}`] },

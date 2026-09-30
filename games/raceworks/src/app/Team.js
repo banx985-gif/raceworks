@@ -99,6 +99,9 @@ export const SAVE_MIGRATIONS = {
   //   account's stint records). Nothing to change here — races.load() gives a race without them the standard type and no
   //   stints, careers.load() zero records.
   11: (record) => record,
+  //   12 → 13 (Milestone 19): all 12 tracks (a race keeps its track id as before; the new career fact technicalPodiums).
+  //   Nothing to change here — careers.load() gives it 0.
+  12: (record) => record,
 };
 
 export class Team {

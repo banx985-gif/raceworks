@@ -1,0 +1,173 @@
+// T10 Titan Oval (bible §26): top speed, ~2.5 km, 4 turns, hot — Banked oval; top speed, tyre heat and drafting.
+// Milestone 19. THE TRACK IS THIS DATA (bible §23.1), exactly as T01: cars drive on it, the circuit, minimap and art guide
+// are drawn from it in code; assets/images/tracks/track_t10.png is only the pre-race scenery picture. Original layout
+// (no real circuit copied), authored as straights and arcs and written out as spline points: 2454 m, 4 turns
+// (a banked oval: four equal left-handers of 120 m radius joining two long straights and two short chutes). Changing any geometry means raising geometryVersion AND artGuideVersion and re-exporting the guide
+// (node tests/raceworks/export-track-guide.mjs T10). PLACEHOLDER numbers: see docs/DECISIONS.md (M19).
+import { demandFor, segOf } from './shared.js';
+
+// Car-stat demand: the base mixes tilted by the profile (Top Speed).
+const DEMAND = demandFor({SPD: 0.35, ACC: 0.05, TYR: 0.05});
+const seg = segOf(DEMAND);
+
+export const T10 = {
+  id: 'T10',
+  name: 'Titan Oval',
+  profile: 'Top Speed',
+  condition: 'Hot',
+  identity: 'Banked oval; top speed, tyre heat and drafting.',
+  geometryVersion: 1,
+  artGuideVersion: 1, // must match assets/_source/track_guides/T10_guide.json (a test checks it)
+  artKey: 'track_t10', // scenery picture for the pre-race card only (never the racing surface)
+  laps: 6, // a debug Test Race here
+  weekendLaps: 12, // a race weekend here (about the distance of Pine Ridge's 12 laps)
+  // The hidden ideal setup (bible §22.2), each axis −1 … +1. PLACEHOLDER.
+  setupIdeal: {aero: -0.8, gearing: 0.8, suspension: 0.55},
+  sampleStep: 2,
+  width: 16,
+  minWidth: 14,
+  widthBlend: 30,
+  widthZones: [{ from: 0.97, to: 0.03, width: 18 }], // the grid
+  centre: [
+    { x: 470, y: 599 },
+    { x: 470, y: 499 },
+    { x: 470, y: 399 },
+    { x: 470, y: 299 },
+    { x: 470, y: 199 },
+    { x: 467, y: 176 },
+    { x: 461, y: 154 },
+    { x: 449, y: 132 },
+    { x: 434, y: 115 },
+    { x: 416, y: 100 },
+    { x: 395, y: 89 },
+    { x: 372, y: 82 },
+    { x: 349, y: 80 },
+    { x: 274, y: 80 },
+    { x: 199, y: 80 },
+    { x: 176, y: 83 },
+    { x: 153, y: 90 },
+    { x: 132, y: 101 },
+    { x: 114, y: 116 },
+    { x: 100, y: 134 },
+    { x: 89, y: 155 },
+    { x: 82, y: 178 },
+    { x: 80, y: 202 },
+    { x: 80, y: 319 },
+    { x: 80, y: 435 },
+    { x: 80, y: 552 },
+    { x: 80, y: 669 },
+    { x: 80, y: 785 },
+    { x: 80, y: 902 },
+    { x: 83, y: 925 },
+    { x: 90, y: 947 },
+    { x: 101, y: 968 },
+    { x: 116, y: 986 },
+    { x: 135, y: 1001 },
+    { x: 155, y: 1011 },
+    { x: 179, y: 1018 },
+    { x: 202, y: 1020 },
+    { x: 277, y: 1020 },
+    { x: 352, y: 1020 },
+    { x: 375, y: 1017 },
+    { x: 398, y: 1010 },
+    { x: 418, y: 999 },
+    { x: 437, y: 983 },
+    { x: 451, y: 965 },
+    { x: 462, y: 944 },
+    { x: 468, y: 921 },
+    { x: 470, y: 897 },
+    { x: 470, y: 797 },
+    { x: 470, y: 697 },
+  ],
+  turns: [
+    { id: 'T1', name: 'Turn One', at: 0.2014 },
+    { id: 'T2', name: 'Turn Two', at: 0.3393 },
+    { id: 'T3', name: 'Turn Three', at: 0.7014 },
+    { id: 'T4', name: 'Turn Four', at: 0.8393 },
+  ],
+  // Pit lane: along the outside of the start / finish straight, leaving it after the last corner and rejoining before T1.
+  pit: {
+    width: 8,
+    entry: 0.8879,
+    exit: 0.1487,
+    points: [
+      { x: 472, y: 872 },
+      { x: 474, y: 856 },
+      { x: 479, y: 840 },
+      { x: 486, y: 824 },
+      { x: 493, y: 808 },
+      { x: 498, y: 792 },
+      { x: 499, y: 776 },
+      { x: 499, y: 760 },
+      { x: 499, y: 744 },
+      { x: 499, y: 728 },
+      { x: 499, y: 712 },
+      { x: 499, y: 696 },
+      { x: 499, y: 680 },
+      { x: 499, y: 664 },
+      { x: 499, y: 648 },
+      { x: 499, y: 632 },
+      { x: 499, y: 616 },
+      { x: 499, y: 600 },
+      { x: 499, y: 586 },
+      { x: 499, y: 570 },
+      { x: 499, y: 554 },
+      { x: 499, y: 538 },
+      { x: 499, y: 522 },
+      { x: 499, y: 506 },
+      { x: 499, y: 490 },
+      { x: 499, y: 474 },
+      { x: 499, y: 458 },
+      { x: 499, y: 442 },
+      { x: 499, y: 426 },
+      { x: 499, y: 410 },
+      { x: 499, y: 394 },
+      { x: 499, y: 378 },
+      { x: 499, y: 362 },
+      { x: 499, y: 346 },
+      { x: 499, y: 330 },
+      { x: 498, y: 314 },
+      { x: 493, y: 298 },
+      { x: 486, y: 282 },
+      { x: 479, y: 266 },
+      { x: 474, y: 250 },
+      { x: 472, y: 234 },
+    ],
+    mergeLength: 110,
+    boxes: { from: 0.3, to: 0.7 },
+  },
+  segments: [
+    seg('S1', 0, 0.163, 'straight', { refSpeed: 48 }),
+    seg('S2', 0.163, 0.2398, 'corner', { refSpeed: 41 }),
+    seg('S3', 0.2398, 0.3009, 'exit', { refSpeed: 43 }),
+    seg('S4', 0.3009, 0.3777, 'corner', { refSpeed: 41 }),
+    seg('S5', 0.3777, 0.5122, 'straight', { refSpeed: 48 }),
+    seg('S6', 0.5122, 0.6467, 'straight', { refSpeed: 48 }),
+    seg('S7', 0.6467, 0.663, 'braking', { refSpeed: 43, braking: 0.2 }),
+    seg('S8', 0.663, 0.7398, 'corner', { refSpeed: 41 }),
+    seg('S9', 0.7398, 0.8009, 'exit', { refSpeed: 43 }),
+    seg('S10', 0.8009, 0.8777, 'corner', { refSpeed: 41 }),
+    seg('S11', 0.8777, 0.9772, 'straight', { refSpeed: 48 }),
+    seg('S12', 0.9772, 1, 'braking', { refSpeed: 37, braking: 0.56 }),
+  ],
+  overtakeZones: [
+    { id: 'OZ1', from: 0.9083, to: 0.1712, difficulty: 0.15 },
+    { id: 'OZ2', from: 0.4633, to: 0.6712, difficulty: 0.3 },
+  ],
+  brakingMarkers: [
+    { turn: 'T1', at: 0.1508, severity: 0.2 },
+    { turn: 'T2', at: 0.2887, severity: 0.2 },
+    { turn: 'T3', at: 0.6508, severity: 0.2 },
+    { turn: 'T4', at: 0.7887, severity: 0.2 },
+  ],
+  // Surface grip zones (1 = normal): lower grip is slower and spins more (src/race/raceSim.js). PLACEHOLDER.
+  surfaceGrip: [{from: 0, to: 1, grip: 1}],
+  // The weekend's weather (src/race/weather.js): the chance of any rain, and the profile's own odds. PLACEHOLDER.
+  rainChance: 0.06,
+  banked: true, // banked turns: corners taken much faster (their reference speeds)
+  draftX: 2.2, // drafting: the slipstream is worth this many times the usual (src/race/raceSim.js)
+  engineHeat: 0.05, // hot: every car’s engine heat builds faster (src/race/raceSim.js)
+  cameraHints: { overview: { pad: 40 }, grid: { at: 0.0 } },
+  display: { widthScale: 2.2, kerbMinCurv: 1 / 120, kerbDepth: 2.2, grass: '#9CB86A', grassDark: '#5E9A4C', road: '#55565C', roadEdge: '#EDEDED', kerbA: '#D8352A', kerbB: '#F4F1EA', pitRoad: '#6A6B72', runoff: '#D8C8A0' },
+  grid: { firstGap: 10, rowGap: 9, lateral: 3.6 },
+};

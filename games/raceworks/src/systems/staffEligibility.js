@@ -4,7 +4,8 @@
 //   Wired now: rank, finished research, facilities standing in the garage, and the team's race / car records
 //   (src/systems/careers.js TEAM_FACTS: race starts, wins, poles, setup scores, places gained, clean finishes, cars
 //   built, class wins).
-//   Dormant (a condition with `waits`): facts the game doesn't track yet — the Pit Training Rig, the other 11 tracks.
+//   Dormant (a condition with `waits`): facts the game doesn't track yet — the Pit Training Rig. (Milestone 19 wired the
+//   track conditions: a win at a given track, podiums on technical tracks.)
 //   They say what they wait for. (Milestone 16 wired strategy swings; Milestone 17 the Strategy Room, wet wins, weather
 //   tyre changes, race repairs and cautions.)
 //   Legendary / Secret (a `secret` condition): special arrival only — never an ordinary pool (Milestones 24–25).
@@ -15,6 +16,7 @@ import { RANKS } from '../../data/economy.js';
 import { TEAM_FACTS } from './careers.js';
 import { RESEARCH } from '../../data/research.js';
 import { FACILITIES } from '../../data/facilities.js';
+import { TRACKS } from '../race/tracks.js';
 
 const nodeName = (id) => RESEARCH.find((n) => n.id === id)?.name ?? id;
 const facilityName = (id) => FACILITIES.find((f) => f.id === id)?.name ?? id;
@@ -25,6 +27,7 @@ export function conditionState(c, ctx) {
   if (c.waits) return { met: false, waits: c.waits, text: c.facility ? facilityName(c.facility) : 'Not tracked yet' };
   if (c.research) return { met: ctx.researchDone(c.research), text: `Research ${nodeName(c.research)}` };
   if (c.facility) return { met: ctx.facilityBuilt(c.facility), text: `Build the ${facilityName(c.facility)}` };
+  if (c.trackWin) return { met: (ctx.trackWins?.(c.trackWin) ?? 0) > 0, text: `Win at ${TRACKS[c.trackWin]?.name ?? c.trackWin}` }; // Milestone 19
   if (c.count) {
     const have = ctx.fact(c.count);
     return { met: have >= c.n, text: `${c.n} ${TEAM_FACTS[c.count] ?? c.count}`, progress: `${Math.min(have, c.n)} of ${c.n}` };
@@ -56,6 +59,7 @@ export function eligibilityContext(team) {
     researchDone: (id) => (team.research?.doneIds() ?? []).includes(id),
     facilityBuilt: (id) => (team.facilities?.builtIds() ?? []).includes(id),
     fact: (key) => team.careers?.fact(key) ?? 0,
+    trackWins: (id) => team.careers?.trackWins(id) ?? 0, // Milestone 19
     unlocked: new Set(team.careers?.unlocked ?? []),
   };
 }

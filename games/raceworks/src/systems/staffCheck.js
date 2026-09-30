@@ -13,6 +13,7 @@ import { RESEARCH } from '../../data/research.js';
 import { FACILITIES } from '../../data/facilities.js';
 import { TRAIT_EFFECTS } from './staffTraits.js';
 import { TEAM_FACTS } from './careers.js';
+import { TRACKS } from '../race/tracks.js';
 
 export const ROSTER_SHAPE = { perRole: 10, standardOrRare: 6, elite: 2, legendary: 1, secret: 1 };
 
@@ -93,7 +94,8 @@ export function checkStaffData({ roster = ALL_STAFF, traits = TRAITS, portraitEx
       if (c.research && !nodes.has(c.research)) bad(d.id, `unknown research ${c.research}`);
       else if (c.facility && !facilities.has(c.facility)) bad(d.id, `unknown facility ${c.facility}`);
       else if (c.count && (!TEAM_FACTS[c.count] || !(c.n > 0))) bad(d.id, `unknown fact ${c.count}`);
-      else if (!c.research && !c.facility && !c.count) bad(d.id, 'a condition the game doesn’t understand');
+      else if (c.trackWin && !TRACKS[c.trackWin]) bad(d.id, `unknown track ${c.trackWin}`); // Milestone 19
+      else if (!c.research && !c.facility && !c.count && !c.trackWin) bad(d.id, 'a condition the game doesn’t understand');
     }
     const special = (e.all ?? []).some((c) => c.secret);
     if (!!tier.signature !== special) bad(d.id, special ? 'special arrival but not Legendary / Secret' : `${tier.name} must be special-arrival only`);

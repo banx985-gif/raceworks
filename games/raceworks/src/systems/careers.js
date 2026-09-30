@@ -10,6 +10,8 @@
 //   careers.unlocked — staff ids whose eligibility has held once (they stay findable) · serialize() / load(data)
 import { CLOCK } from '../../data/balance.js';
 import { CLASSES } from '../../data/cars.js';
+import { WEEKEND } from '../../data/race.js';
+import { TRACKS } from '../race/tracks.js';
 
 export const CAREER_KEYS = ['races', 'wins', 'podiums', 'carsBuilt', 'daysEmployed'];
 const FOUNDER_KEY = { races: 'racesEntered', wins: 'wins', podiums: 'podiums', carsBuilt: 'carsDeveloped', daysEmployed: 'daysEmployed' };
@@ -40,10 +42,11 @@ export const TEAM_FACTS = {
   stintsDriven: 'Drive Stints driven',
   stintOvertakes: 'overtakes made in Drive Stints',
   stintGains: 'Drive Stints that gained time',
+  technicalPodiums: 'podiums on technical tracks', // Milestone 19 (Freya Nash)
 };
 
 const blank = () => Object.fromEntries(CAREER_KEYS.map((k) => [k, 0]));
-const blankFacts = () => ({ raceStarts: 0, wins: 0, podiums: 0, poles: 0, setup80: 0, gained5: 0, cleanFinishes: 0, carsBuilt: 0, classWins: [], trackWins: {}, strategySwingWins: 0, undercutWins: 0, extendedStintWins: 0, neutralisationBenefits: 0, wetWins: 0, weatherTyreChanges: 0, raceFaultRepairs: 0, cautionBenefits: 0, stintsDriven: 0, stintOvertakes: 0, stintGains: 0, bestStintDelta: null });
+const blankFacts = () => ({ raceStarts: 0, wins: 0, podiums: 0, poles: 0, setup80: 0, gained5: 0, cleanFinishes: 0, carsBuilt: 0, classWins: [], trackWins: {}, strategySwingWins: 0, undercutWins: 0, extendedStintWins: 0, neutralisationBenefits: 0, wetWins: 0, weatherTyreChanges: 0, raceFaultRepairs: 0, cautionBenefits: 0, stintsDriven: 0, stintOvertakes: 0, stintGains: 0, bestStintDelta: null, technicalPodiums: 0 });
 
 export function createCareers({ bus, team }) {
   const api = {
@@ -90,6 +93,7 @@ export function createCareers({ bus, team }) {
       f.neutralisationBenefits += me.neutralGains ?? 0;
       // Milestone 17: a win in a race that saw rain, weather tyre changes made right, faults a pit repair fixed, cautions gained in
       if (win && entry.wet) f.wetWins++;
+      if (podium && WEEKEND.technicalProfiles.includes(TRACKS[entry.trackId]?.profile)) f.technicalPodiums++; // Milestone 19
       f.weatherTyreChanges += me.weatherChanges ?? 0;
       f.raceFaultRepairs += me.faultsFixed ?? 0;
       f.cautionBenefits += me.neutralBenefits ?? 0;

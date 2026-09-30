@@ -32,7 +32,7 @@
 //   sim.weather → the state now · sim.caution → the running caution or null · sim.cautions → every caution this race ·
 //   sim.incidents → spins + contacts so far · sim.leaderX() → the leader's race distance in laps
 import { Rng } from '../../../../core/Rng.js';
-import { RACE, TYRES, TYRE_WEAR, PACE_MODES, ORDERS, PIT, AUTO, WEEKEND, FUEL, STRATEGY, PIT_REPAIR, FAILURE_RISK, WET_SKILL, INCIDENTS, CAUTION, PIT_SERVICE, PIT_FAULT_FIX, WEATHER_NAMES } from '../../data/race.js';
+import { RACE, TYRES, TYRE_WEAR, PACE_MODES, ORDERS, PIT, AUTO, WEEKEND, FUEL, STRATEGY, PIT_REPAIR, FAILURE_RISK, WET_SKILL, INCIDENTS, CAUTION, PIT_SERVICE, PIT_FAULT_FIX, WEATHER_NAMES, TRACK_EFFECTS } from '../../data/race.js';
 import { tyreFactor, planStrategy, rivalProfile, strategyProfile, suggestTyreFor } from '../systems/raceStrategy.js';
 import { dryWeather, stateAt, weatherPace, weatherWear, weatherSpin, suitable, bestTyreFor, stateIndex } from './weather.js';
 
@@ -153,6 +153,15 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
   const baseOf = (state) =>
     (baseBy[state] ??= Object.fromEntries(entries.map((e) => [e.id, segs.map((sg) => ((sg.toS - sg.fromS) / sg.refSpeed) * paceMultiplier(paceScore(e, sg, rules, 'race', state), rules))])));
   const base = baseOf('dry');
+  // Milestone 19: the track's own surface (bible §23.1 grip zones) at each timing segment's middle, and its other traits —
+  // all from the track data (draftX: the slipstream; engineHeat: a hot track's extra heat a lap; walls: close barriers)
+  const TE = TRACK_EFFECTS;
+  const segGrip = segs.map((sg) => {
+    const f = ((sg.fromS + sg.toS) / 2) / L;
+    const z = (track.surfaceGrip ?? []).find((q) => (q.from <= q.to ? f >= q.from && f < q.to : f >= q.from || f < q.to));
+    return z?.grip ?? 1;
+  });
+  const gripTime = segGrip.map((g) => 1 + (1 - g) * TE.gripTimePer);
   const baseLap = {};
   for (const e of entries) baseLap[e.id] = base[e.id].reduce((t, x) => t + x, 0);
   const maxLat = (s) => geo.at(s).width / 2 - rules.carHalfWidth - rules.edgeMargin;
@@ -305,6 +314,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     if (c.failLapsLeft > 0) time *= 1 + c.failPct / 100;
     time *= tyreFactor(c.tyre, c.wear) * (1 + PACE_MODES[c.pace].time) * (1 + ORDERS[c.order].time) * (1 + fuelNow(c).time);
     time *= weatherPace(c.tyre, w) * (w === 'storm' ? 1 + (e.stormPacePct ?? 0) / 100 : 1); // Milestone 17
+    time *= gripTime[k]; // Milestone 19: a low-grip surface is slower
     c.segSpeed = (segs[k].toS - segs[k].fromS) / time;
   }
 
@@ -322,6 +332,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
       p *= Math.max(0, 1 + (e.wetSpinPct ?? 0) / 100);
     }
     p *= clamp(I.consistencyRef / Math.max(1, e.ratings.consistency ?? I.consistencyRef), 0.7, 1.4);
+    if (c.seg >= 0 && segGrip[c.seg] !== 1) p *= Math.pow(1 / segGrip[c.seg], TE.gripSpinPow); // Milestone 19: low grip spins more
     p *= 1 + c.damagePct * I.damageX;
     return Math.min(I.maxPerCorner, p);
   }
@@ -333,7 +344,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     c.spinT = sim.t;
     c.slowUntil = sim.t + I.spinSlowSecs;
     c.slowPct = I.spinSlowPct;
-    const damage = rng.next() < I.spinDamageShare;
+    const damage = rng.next() < I.spinDamageShare * (track.walls ? TE.wallsSpinDamageX : 1); // Milestone 19: walls
     if (damage) c.damagePct += I.spinDamagePct;
     log('spin', [c.id], `${nameOf(c.id)} spins${damage ? ' — damage' : ''}`, { damage });
     if (damage && sim.weather !== 'dry') maybeCaution('spin', `${nameOf(c.id)} spun off`);
@@ -651,7 +662,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     }
     // Milestone 16: engine heat for the lap just run (Push builds it, Rich fuel a little; Normal / Conserve cool it)
     const H = FAILURE_RISK.heat;
-    c.heat = clamp(c.heat + H[c.pace] + (c.fuel === 'rich' ? H.rich : 0), 0, 1);
+    c.heat = clamp(c.heat + H[c.pace] + (c.fuel === 'rich' ? H.rich : 0) + (track.engineHeat ?? 0), 0, 1); // Milestone 19: + a hot track
     lapFailureRoll(c);
     if (!c.retired) replan(c);
   }
@@ -802,7 +813,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
             const tr = rules.traffic;
             const passing = !caution && c.s - a.car.s > L / 2; // the car ahead is a lap down: it lets us by (not under caution)
             const sg = segs[k];
-            if (a.gap >= tr.draftRange[0] && a.gap <= tr.draftRange[1] && sg.kind === 'straight' && !caution) desired *= 1 + tr.draftPct / 100;
+            if (a.gap >= tr.draftRange[0] && a.gap <= tr.draftRange[1] && sg.kind === 'straight' && !caution) desired *= 1 + (tr.draftPct * (track.draftX ?? 1)) / 100; // Milestone 19: draftX (an oval)
             if (!passing && a.gap < tr.attemptGap + ORDERS[c.order].attemptGapPlus) {
               const zone = caution ? null : zoneAt(c.s); // no overtaking under caution
               if (zone && tryOvertake(c, a.car, zone)) {

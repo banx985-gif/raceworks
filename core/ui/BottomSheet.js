@@ -10,6 +10,7 @@
 //                                                  each with its own sections (then menu.sections is not used)
 //   A section may also hold bars (CAREWORKS Milestone 2; optional, drawn after its lines):
 //     bars: [{ label, value, max = 100, color?, text? }]   one row each: label · a filled bar · text (default the value)
+//       tick? (CAREWORKS Milestone 16, optional): a target mark across the bar at that value; bars without one draw as before
 //   Header extras (CAREWORKS Milestone 3; optional): badge (image key) — a small round badge on the picture's corner
 //   (e.g. a role badge); tag: { text, color? } — a chip beside the title (e.g. FOUNDER)
 //   Button extra (CAREWORKS Milestone 5; optional): iconBadge (image key) — a small round badge on the button's icon
@@ -558,6 +559,16 @@ export class BottomSheet {
     if (ctx.roundRect) ctx.roundRect(x, by, bw, bh, bh / 2);
     else ctx.rect(x, by, bw, bh);
     ctx.stroke();
+    if (bar.tick != null) {
+      // (CAREWORKS Milestone 16: an optional target tick — a short upright mark across the bar at tick / max)
+      const tx = x + bw * Math.max(0, Math.min(1, bar.tick / (bar.max ?? 100)));
+      ctx.strokeStyle = C.text;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(tx, by - 6);
+      ctx.lineTo(tx, by + bh + 6);
+      ctx.stroke();
+    }
     ctx.textAlign = 'right';
     ctx.fillStyle = C.text;
     ctx.font = font(S.small, true);

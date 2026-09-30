@@ -58,7 +58,8 @@ import { createRaceIntroScreen } from './screens/RaceIntroScreen.js';
 import { createRaceResultScreen } from './screens/RaceResultScreen.js';
 import { createWeekendScreen } from './screens/WeekendScreen.js';
 import { Settings } from '../../../core/Settings.js';
-import { TRACKS } from './race/tracks.js';
+import { TRACKS, TRACK_IDS } from './race/tracks.js';
+import { TEST_RACE } from '../data/rivals.js'; // Milestone 19 (the debug track picker)
 import { WEATHER_NAMES } from '../data/race.js'; // Milestone 17 (the result's weather line)
 import { createResearchScreen } from './screens/ResearchScreen.js';
 import { drawResearchBanner, researchBannerHeight } from './ui/researchBanner.js';
@@ -331,8 +332,33 @@ const drillRecords = createDrillRecords({
 });
 team.training.setDrillRecords(drillRecords);
 bus.on('stint:done', ({ record }) => drillRecords.recordStint(record)); // Milestone 18: Drive Stints on the account records
-function goWeekend() {
-  const r = team.races.createWeekend();
+// Milestone 19: trackId (?debug=1's track picker) — the normal game's weekend is still Pine Ridge (championships: M20).
+// Milestone 19 (?debug=1): the track picker and the 100-lap check on all 12 tracks (one track a frame, results as toasts).
+const debugTracks = {
+  weekend: (id) => goWeekend(id),
+  hundred() {
+    sheet.close();
+    const out = [];
+    const next = (i) => {
+      if (i >= TRACK_IDS.length) {
+        debug.log(`100-lap test: ${out.map((r) => `${r.trackId} ${r.running ? 'STUCK' : 'ok'}`).join(' ')}`);
+        window.__rw && (window.__rw.hundred = out);
+        return toast('100-lap test done', out.every((r) => r.done && !r.running && !r.badPositions) ? 'All 12 tracks finished: no bad positions, nobody stuck' : 'A track had a problem: see the debug log');
+      }
+      const r = team.races.debugLongRace(TRACK_IDS[i], 100);
+      if (r) {
+        delete r.result;
+        out.push(r);
+        toast(`${r.trackId}: 100 laps`, `${r.finished} finished · ${r.retired} out · ${r.badPositions} bad positions · ${(r.ms / 1000).toFixed(1)} s`);
+      }
+      setTimeout(() => next(i + 1), 30);
+    };
+    toast('100-lap test', 'Running every track (a few seconds each)');
+    setTimeout(() => next(0), 50);
+  },
+};
+function goWeekend(trackId = null) {
+  const r = team.races.createWeekend(trackId ? { config: { ...TEST_RACE, trackId } } : {});
   if (!r.ok) return toast(r.reason);
   if (r.race.kind !== 'weekend') {
     // an unfinished Test Race from before Milestone 7: carry it on first
@@ -386,7 +412,7 @@ carDebug.nextMonth = () => {
   const m = clock.month;
   while (clock.month === m) clock.advanceDay();
 };
-const menus = createGarageMenus({ garage: () => garage, team, assets, open: openMenu, close: () => sheet.close(), goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t, b) => toast(t, b), goWeekend: () => goWeekend(), goTestRace: debug.enabled ? () => goTestRace() : null, goRaceResult: (index) => goSub('raceResult', { index }), goResearch: () => goResearch(), goRecruit: () => goRecruit(), goTrain: (id) => goTrain(id) });
+const menus = createGarageMenus({ garage: () => garage, team, assets, open: openMenu, close: () => sheet.close(), goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t, b) => toast(t, b), goWeekend: () => goWeekend(), goTestRace: debug.enabled ? () => goTestRace() : null, goRaceResult: (index) => goSub('raceResult', { index }), goResearch: () => goResearch(), goRecruit: () => goRecruit(), goTrain: (id) => goTrain(id), debugTracks: debug.enabled ? debugTracks : null });
 
 // ---------------------------------------------------------------------------
 // Toasts (core/ui/Toast): short money news under the top bar — salary day, a contract paid, Emergency Credit on / off,

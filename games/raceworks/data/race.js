@@ -112,8 +112,9 @@ export const WEEKEND = {
   // Qualifying (§22.3): one flying lap each on the starting tyre with the Qualifying rating (§10.3, traits included);
   // Consistency only narrows the bounded variance.
   quali: { driverQualifying: 1, driverConsistency: 0 },
-  // Wind Tunnel's +5 Setup Knowledge counts on tracks with these profiles (bible §26: T05 Metro Street Circuit).
-  technicalProfiles: ['Technical'],
+  // Wind Tunnel's +5 Setup Knowledge (and Balance Artist, Freya Nash's podiums) count on tracks with these profiles (bible
+  // §26; Milestone 19 PLACEHOLDER: the technical tracks are T05 Metro Street, T08 Neon Harbor and T06 Highcrest).
+  technicalProfiles: ['Technical', 'Street/Night', 'Cornering'],
 };
 
 // Milestone 15: the fuel / energy target (bible §22.2; Electric classes call it energy). The race only (qualifying runs
@@ -389,3 +390,10 @@ export const DRIVE_STINT = {
   hitClosing: 3, // m/s (race speed): closing faster than this on the car ahead is a hit; slower, it holds you up
   minLapsLeft: 0.6, // no stint this close to the flag
 };
+
+// ---------------------------------------------------------------------------------------------------------------
+// Milestone 19: what a track's own data does in the race (src/race/raceSim.js reads the track, never its id). PLACEHOLDERS.
+//   surfaceGrip zones: a segment at grip g is × (1 + (1 − g) × gripTimePer) slower, and spins × (1 / g)^gripSpinPow.
+//   walls: true (street circuits) → a spin damages the car wallsSpinDamageX times as often.
+//   draftX (the oval's slipstream) and engineHeat (a hot track's extra engine heat a lap) are per track.
+export const TRACK_EFFECTS = { gripTimePer: 0.5, gripSpinPow: 2, wallsSpinDamageX: 1.8 };
