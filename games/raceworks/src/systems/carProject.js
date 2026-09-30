@@ -19,6 +19,8 @@
 //   perkOf(staff) → the founder perk ({ stat, pct, extras }) when that person is the founder, else null.
 //   stationIds() → staff with a garage station duty: they count as assigned (working) even when not on a car.
 //   busyElsewhere(id) → why this person can't join a car's team now (Milestone 12: away on a course), or null.
+// Milestone 13: work traits (src/systems/staffTraits.js) — workerModifier × (1 + that person's phasePct for the phase);
+//   the team's testFixPct raises Testing's daily fix chance (faultPct / breakthroughPct were already read).
 import { ProjectSystem } from '../../../../core/ProjectSystem.js';
 import { AssignmentSystem } from '../../../../core/AssignmentSystem.js';
 import { JobHistory } from '../../../../core/JobHistory.js';
@@ -26,6 +28,7 @@ import { CAR_STATS, CAR_STAT_MAX, PARTS, SLOTS, CLASSES, PHASES, BUDGETS, PROJEC
 import { partsCost, tierFor, checkCar, carCost } from './carCatalog.js';
 import { visualFamily } from './carVisual.js';
 import { ROLES, TRAITS } from '../../data/staff.js';
+import { phaseMult } from './staffTraits.js';
 
 // The stat that leads a phase (its biggest weight) → the role that gets the match bonus.
 export const leadStat = (phase) => Object.entries(phase.weights).sort((a, b) => b[1] - a[1])[0][0];
@@ -74,7 +77,7 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
     workerModifier(job, phase, s) {
       if (isResting(s.id)) return 0; // away recovering at the rest spot
       const match = ROLES[s.role]?.primaryStat === leadStat(phase) ? 1 + PROJECT.roleMatchPct / 100 : 1;
-      return match * (1 + (facilities()?.workPct(s.role) ?? 0) / 100);
+      return match * (1 + (facilities()?.workPct(s.role) ?? 0) / 100) * phaseMult(s, phase.id);
     },
     progressModifier(job, phase) {
       return 1 + (facilities()?.phaseSpeedPct(phase.id) ?? 0) / 100;
@@ -106,7 +109,7 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
       }
       if (def.fixes) {
         const open = job.data.faults.find((x) => !x.fixed);
-        if (open && rng.chance(f.testingFixDailyPct / 100)) {
+        if (open && rng.chance((f.testingFixDailyPct * (1 + traitPct(job, 'testFixPct') / 100)) / 100)) {
           open.fixed = 'testing';
           open.fixedDay = today();
           bus.emit('car:fix', { job, fault: open, how: 'testing' });

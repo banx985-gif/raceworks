@@ -59,6 +59,7 @@ import { createResearchScreen } from './screens/ResearchScreen.js';
 import { drawResearchBanner, researchBannerHeight } from './ui/researchBanner.js';
 import { createRecruitScreen } from './screens/RecruitScreen.js';
 import { createTrainScreen } from './screens/TrainScreen.js';
+import { checkStaffData } from './systems/staffCheck.js';
 const COL = THEME.color;
 
 const W = 1080;
@@ -512,6 +513,12 @@ const bootScreen = {
         // Milestone 9: the rest of the car and part art, behind the game.
         assets.register(LATER_ASSETS);
         assets.register(STAFF_PORTRAITS); // Milestone 12: loaded when a board or a hire needs one
+        if (debug.enabled) {
+          // Milestone 13: the staff data validator (the portrait files are checked by tests/raceworks/m13.test.mjs)
+          const bad = checkStaffData();
+          debug.log(bad.length ? `staff data: ${bad.length} problem(s), first: ${bad[0]}` : 'staff data: all 50 ok');
+          if (bad.length) console.warn('[staff data]', bad);
+        }
         assets.loadInBackground(Object.keys(LATER_ASSETS));
         return loadStatusIcons(assets);
       })
@@ -539,7 +546,7 @@ const bootScreen = {
 const garage = createGarageScreen({ renderer, layout, assets, bus, sheet, openMenu, clock, team, topBar, bottomBar, debug });
 const rosterScreen = createRosterScreen({ layout, assets, team, garage, topBar: screenBar, goStaff, goRecruit: () => goRecruit(), goTrain: () => goTrain() });
 const staffScreen = createStaffDetailScreen({ layout, assets, team, garage, topBar: screenBar, debugEnabled: debug.enabled, goTrain: (id) => goTrain(id), confirm: (o) => dialog.confirm(o), toast: (a, b) => toast(a, b), afterLetGo: () => back() });
-const recruitScreen = createRecruitScreen({ layout, assets, team, topBar: screenBar, toast: (a, b) => toast(a, b), goStaff }); // Milestone 12
+const recruitScreen = createRecruitScreen({ layout, assets, team, topBar: screenBar, toast: (a, b) => toast(a, b), goStaff, debugEnabled: debug.enabled }); // Milestone 12 (Milestone 13: ?debug=1 spawns on the Special tab)
 const trainScreen = createTrainScreen({ layout, assets, team, topBar: screenBar, toast: (a, b) => toast(a, b) }); // Milestone 12
 // The car screens (Milestone 4): the builder, one finished car, the Car Garage.
 const carBuilderScreen = createCarBuilderScreen({
@@ -742,7 +749,7 @@ const setupScreen = createTeamSetupScreen({
   onBack: () => router.go(setupFrom, setupFrom === 'slots' ? { mode: slotsScreen.mode } : {}),
 });
 
-if (debug.enabled) window.__rw = { slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, researchNews, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, taps: [] };
+if (debug.enabled) window.__rw = { slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, researchNews, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, taps: [] };
 
 router
   .register('boot', bootScreen)

@@ -18,8 +18,8 @@
 //   sim.gapAhead(car) / sim.gapBehind(car) → seconds to the car in front / behind in the running order
 //   sim.events → [{ t, kind, ids, text }]   sim.commands → [{ step, id, type, value }]
 // entries: [{ id, name, team, isPlayer, sprite, colour, ratings{…six}, car{SPD…TYR}, crew 0–400, setup 0–1,
-//             tyre (start compound), openFaults, condition, pitService (seconds) }] — a snapshot taken when the race
-//             is created, so nothing can change it later.
+//             tyre (start compound), openFaults, condition, pitService (seconds), tyreWearMult?, failureMult? }] — a
+//             snapshot taken when the race is created, so nothing can change it later.
 import { Rng } from '../../../../core/Rng.js';
 import { RACE, TYRES, TYRE_WEAR, PACE_MODES, ORDERS, PIT, AUTO, WEEKEND } from '../../data/race.js';
 
@@ -250,6 +250,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     let p = f.basePerLap * (1 + Math.max(0, f.relRef - (e.car.REL ?? f.relRef)) / f.relSpan) * (1 + (e.openFaults ?? 0) * f.perOpenFault);
     if ((e.condition ?? 100) < f.lowConditionBelow) p *= f.lowConditionX;
     p *= PACE_MODES[c.pace].failure;
+    p *= e.failureMult ?? 1; // Milestone 13: the race crew's reliability traits (1 = none)
     if (!rng.chance(p)) return;
     const roll = rng.next();
     if (roll < f.share.paceLoss) {

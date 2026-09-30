@@ -21,6 +21,11 @@
 //
 // Events: core's 'recruit:refresh' / 'recruit:taken'; 'staff:hired' { staff, channel }; core StaffSystem's
 // 'staff:removed' { staff }; 'staff:letGo' { id, name }.
+// Milestone 13: all 50 rows. A named person's eligibility is their row's data (src/systems/staffEligibility.js: rank,
+// research, facilities, the team's race / car records; dormant rows wait for their milestone; Legendary / Secret never).
+// Once a row's conditions have held, the team remembers it (team.careers.unlocked). Generic fillers get rarer as more
+// named people can be found (RECRUIT.namedChance…). ?debug=1: debugSpawn(id) puts any of the 50 (Legendary / Secret
+// too, never the founder or someone employed) on the Special tab as a hireable card — for testing only.
 import { RecruitmentSystem } from '../../../../core/RecruitmentSystem.js';
 import { AdService } from '../../../../core/AdService.js';
 import { FakeStoreProvider } from '../../../../core/FakeStoreProvider.js';
@@ -30,6 +35,7 @@ import { rankIndexOf } from '../../../../core/CompanyRank.js';
 import { RANKS } from '../../data/economy.js';
 import { ROSTER, staffDefById, ROLES, TIERS, STAT_KEYS } from '../../data/staff.js';
 import { CHANNELS, channelById, RECRUIT, REFRESH_SERVICES, GENERIC, ROLE_IDS } from '../../data/recruitment.js';
+import { eligibilityWhy, eligibilityContext } from './staffEligibility.js';
 
 const BOARD_CHANNELS = CHANNELS.filter((c) => !c.special);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -45,7 +51,7 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
   const rankIndex = () => money.reputation.highestRankIndex;
   const hasRank = (id) => !id || rankIndex() >= rankIndexOf(RANKS, id);
   const employed = (id) => !!team.staff.get(id);
-  const state = { lastFreeDay: 0, paid: { month: -1, count: 0 }, nextGeneric: 1 };
+  const state = { lastFreeDay: 0, paid: { month: -1, count: 0 }, nextGeneric: 1, debugCards: [] };
 
   // --- eligibility ---------------------------------------------------------------------------------------------------
   const chOpen = (ch) => !!ch && !ch.special && hasRank(ch.rank);
@@ -56,10 +62,17 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
     return hasRank(ch.rank) ? null : `Opens at Rank ${ch.rank}`;
   };
   // Why this person can't be a card on this channel now (null = they can). p: a card / candidate-shaped person.
+  // A named row's own eligibility (Milestone 13); remembered once it has held.
+  function namedWhy(def) {
+    const why = eligibilityWhy(def, eligibilityContext(team));
+    if (!why && def && !def.eligibility?.start && !team.careers.unlocked.includes(def.id)) team.careers.unlocked.push(def.id);
+    return why;
+  }
   function whyNot(p, ch = null) {
-    if (RECRUIT.neverInPools.includes(p.tier)) return 'Arrives only as a special arrival';
+    if (RECRUIT.neverInPools.includes(p.tier) && !p.debug) return 'Arrives only as a special arrival';
     if (p.personId === team.founder?.id) return 'The founder is already part of the team story';
     if (employed(p.personId)) return 'Already on the team';
+    if (p.debug) return null; // a ?debug=1 spawn: any of the 50, for testing
     const tr = RECRUIT.tierRank[p.tier];
     if (tr === undefined) return 'Not an ordinary candidate';
     if (!hasRank(tr)) return `${TIERS[p.tier].name} staff need Rank ${tr}`;
@@ -67,19 +80,14 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
       if (!ch.weights?.[p.tier]) return `${ch.name} doesn’t find ${TIERS[p.tier].name} staff`;
       if (ch.band?.[p.tier] === 'low' && p.level > GENERIC.bandLevel.low) return `${ch.name} only finds low ${TIERS[p.tier].name} staff`;
     }
-    if (!p.generic) {
-      const e = staffDefById(p.personId)?.eligibility;
-      if (!e) return 'Arrives in a later update';
-      if (e.rank && !hasRank(e.rank)) return `Needs Rank ${e.rank}`;
-      if (!e.start && !e.rank) return 'Arrives in a later update';
-    }
+    if (!p.generic) return namedWhy(staffDefById(p.personId));
     return null;
   }
   const missingRoles = () => ROLE_IDS.filter((r) => !team.roster.some((s) => s.role === r));
 
   // --- boards ---------------------------------------------------------------------------------------------------------
   const boards = {};
-  const allCards = () => Object.values(boards).flatMap((b) => b.cards);
+  const allCards = () => [...Object.values(boards).flatMap((b) => b.cards), ...state.debugCards];
   const onBoards = () => new Set(allCards().map((c) => c.personId));
   // Faces already in use (on the team or a board) and the faces of named people who could be offered now.
   function faceFor(role, tier, rng) {
@@ -112,11 +120,13 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
     const art = faceFor(role, tier, rng);
     return { personId: `GEN${state.nextGeneric++}`, name, role, tier, level, stats, salary, traits: [], art, generic: true };
   }
-  // A card for this channel and tier: a named eligible person (roles the team lacks first), else a generic one.
+  // A card for this channel and tier: a named eligible person (roles the team lacks first), else a generic one. The more
+  // named people can be found, the rarer the generic fillers (Milestone 13).
+  const namedChance = (n) => Math.min(RECRUIT.namedChanceMax, RECRUIT.namedChance + RECRUIT.namedChancePerExtra * Math.max(0, n - 1));
   function makeCandidate(ch, tier, rng) {
     const taken = onBoards();
     const named = ROSTER.filter((d) => d.tier === tier && !taken.has(d.id) && !whyNot(cardOfDef(d), ch));
-    if (named.length && rng.chance(RECRUIT.namedChance)) {
+    if (named.length && rng.chance(namedChance(named.length))) {
       const miss = missingRoles();
       const first = named.filter((d) => miss.includes(d.role));
       return cardOfDef(rng.pick(first.length && rng.chance(RECRUIT.missingRoleChance) ? first : named));
@@ -223,8 +233,22 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
       const c = b.get(cardId);
       if (c) return { card: c, ch };
     }
-    return null;
+    const d = state.debugCards.find((c) => c.id === cardId);
+    return d ? { card: d, ch: 'special' } : null;
   };
+  // ?debug=1 (Milestone 13): put any of the 50 on the Special tab as a hireable card — Legendary / Secret too. Never the
+  // founder, someone employed, or someone already on a board. → { ok, card } or { ok: false, reason }
+  function debugSpawn(personId) {
+    const d = staffDefById(personId);
+    if (!d) return { ok: false, reason: `No one called ${personId}` };
+    if (d.id === team.founder?.id) return { ok: false, reason: 'The founder is already part of the team story' };
+    if (employed(d.id)) return { ok: false, reason: 'Already on the team' };
+    if (allCards().some((c) => c.personId === d.id)) return { ok: false, reason: 'Already on a board' };
+    const card = { ...cardOfDef(d), id: `debug:${d.id}`, channel: 'special', debug: true };
+    state.debugCards.push(card);
+    bus.emit('recruit:refresh', { channel: 'special', reason: 'debug' });
+    return { ok: true, card };
+  }
   // Can this card be hired now? → { ok, why, fee, card }
   function hireCheck(cardId) {
     const f = findCard(cardId);
@@ -244,7 +268,7 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
     const chk = hireCheck(cardId);
     if (!chk.ok) return { ok: false, reason: chk.why };
     const { ch } = findCard(cardId);
-    const c = boards[ch].take(cardId);
+    const c = ch === 'special' ? state.debugCards.splice(state.debugCards.findIndex((x) => x.id === cardId), 1)[0] : boards[ch].take(cardId);
     money.economy.add('credits', -chk.fee, `Hiring fee: ${c.name}`, 'hiring');
     const s = team.staff.addFromDefinition({ id: c.personId, name: c.name, role: c.role, tier: c.tier, startLevel: c.level, stats: c.stats, salary: c.salary, traits: c.traits, art: c.art });
     s.assigned = true; // they have a garage routine from day one (no idle-morale loss)
@@ -296,7 +320,8 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
     store,
     channelWhy,
     isOpen: (id) => chOpen(channelById(id)),
-    cardsOf: (id) => boards[id]?.cards ?? [],
+    cardsOf: (id) => (id === 'special' ? state.debugCards : (boards[id]?.cards ?? [])),
+    debugSpawn,
     get cards() {
       return allCards();
     },
@@ -322,14 +347,14 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
     },
     newGame() {
       for (const b of Object.values(boards)) b.reset();
-      Object.assign(state, { lastFreeDay: today(), paid: { month: -1, count: 0 }, nextGeneric: 1 });
+      Object.assign(state, { lastFreeDay: today(), paid: { month: -1, count: 0 }, nextGeneric: 1, debugCards: [] });
       openBoards('start');
     },
     serialize: () => JSON.parse(JSON.stringify({ boards: Object.fromEntries(Object.entries(boards).map(([k, b]) => [k, b.serialize()])), state, ads: ads.serializeAccount() })),
     // A save from before Milestone 12: fresh boards for the open channels, the free-refresh clock from today.
     load(data) {
       for (const [k, b] of Object.entries(boards)) b.load(data?.boards?.[k] ?? null);
-      Object.assign(state, { lastFreeDay: today(), paid: { month: -1, count: 0 }, nextGeneric: 1 }, data?.state ?? {});
+      Object.assign(state, { lastFreeDay: today(), paid: { month: -1, count: 0 }, nextGeneric: 1, debugCards: [] }, data?.state ?? {});
       ads.loadAccount(data?.ads ?? null);
       openBoards(data ? 'open' : 'start');
     },

@@ -5,11 +5,13 @@
 // two are service stubs on a pretend provider) and its 3 candidates: portrait and role badge, name, role · level ·
 // tier, the five work stats (drivers: their Qualifying / Racecraft / Wet ratings too), trait, salary and the hiring
 // fee, and Hire — or why not (cap, Credits, rank). A locked channel says what opens it.
+// Milestone 13: with ?debug=1 the (still locked) Special tab lists all 50 with a Spawn button each; a spawned person
+// shows as a normal candidate card there and can be hired (Legendary / Secret included — testing only).
 import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { drawButton, drawPadlock, hitRect } from '../../../../core/ui/Button.js';
 import { text, para, card } from '../../../../core/ui/Kit.js';
-import { STAT_KEYS, ROLES, TIERS, TRAITS } from '../../data/staff.js';
+import { STAT_KEYS, ROLES, TIERS, TRAITS, ALL_STAFF } from '../../data/staff.js';
 import { CHANNELS, REFRESH_SERVICES, RECRUIT } from '../../data/recruitment.js';
 import { TOP_BAR } from '../../data/home.js';
 import { driverRatings } from '../systems/driverRatings.js';
@@ -19,9 +21,9 @@ const C = THEME.color;
 const S = THEME.size;
 const PAD = 24;
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
-const TIER_COLOR = { standard: C.textMuted, rare: C.progress, elite: C.purple };
+const TIER_COLOR = { standard: C.textMuted, rare: C.progress, elite: C.purple, legendary: C.gold, secret: C.bad };
 
-export function createRecruitScreen({ layout, assets, team, topBar, toast = () => {}, goStaff = () => {} }) {
+export function createRecruitScreen({ layout, assets, team, topBar, toast = () => {}, goStaff = () => {}, debugEnabled = false }) {
   const rec = team.recruitment;
   const panel = new ScrollPanel({
     getRect: () => {
@@ -74,7 +76,7 @@ export function createRecruitScreen({ layout, assets, team, topBar, toast = () =
     const h = 560 + (driver ? 50 : 0);
     const box = { x: 0, y, w, h };
     if (ctx) {
-      card(ctx, box, c.tier === 'elite' ? 'secret' : c.tier === 'rare' ? 'info' : 'normal');
+      card(ctx, box, ['elite', 'legendary', 'secret'].includes(c.tier) ? 'secret' : c.tier === 'rare' ? 'info' : 'normal');
       const pr = { x: PAD, y: y + PAD, w: 250, h: h - PAD * 3 - 120 };
       ctx.fillStyle = C.panelAlt;
       ctx.beginPath();
@@ -115,6 +117,32 @@ export function createRecruitScreen({ layout, assets, team, topBar, toast = () =
     return h;
   }
 
+  // ?debug=1 (Milestone 13): on the Special tab, any of the 50 can be spawned as a hireable card (Legendary / Secret
+  // too) — the spawned cards first, then the list. Never in normal play.
+  function debugSpawns(ctx, y, w) {
+    for (const c of rec.cardsOf('special')) y += candidate(ctx, y, w, c) + 24;
+    if (ctx) text(ctx, 'Debug: spawn anyone', 8, y, { size: S.heading, bold: true, color: C.purple });
+    y += 70;
+    const rowH = 124;
+    const bw = 240;
+    for (const d of ALL_STAFF) {
+      const busy = team.get(d.id) ? 'On the team' : d.id === team.founder?.id ? 'Founder' : rec.cardsOf('special').some((c) => c.personId === d.id) ? 'Spawned' : rec.cards.some((c) => c.personId === d.id) ? 'On a board' : null;
+      const b = { x: w - bw, y: y + 6, w: bw, h: rowH - 12 };
+      if (ctx) {
+        text(ctx, `${d.id} ${d.name}`, 8, y + 12, { size: S.small, bold: true, maxWidth: w - bw - 24 });
+        text(ctx, `${TIERS[d.tier].name} ${ROLES[d.role].name}`, 8, y + 56, { size: S.small, color: TIER_COLOR[d.tier] ?? C.textMuted, maxWidth: w - bw - 24 });
+        drawButton(ctx, b, busy ?? 'Spawn', { disabled: !!busy, accent: C.purple });
+      }
+      hits.push({ rect: b, id: `spawn_${d.id}`, onTap: () => {
+        const r = rec.debugSpawn(d.id);
+        toast(r.ok ? `${d.name} is on the Special tab` : r.reason);
+        if (r.ok) want([r.card.art]);
+      } });
+      y += rowH;
+    }
+    return y + 40;
+  }
+
   function layoutPage(ctx, w) {
     hits = [];
     let y = 0;
@@ -145,6 +173,7 @@ export function createRecruitScreen({ layout, assets, team, topBar, toast = () =
       if (why) text(ctx, why, PAD, y + PAD + 64 + lines + 10, { size: S.small, bold: true, color: C.bad, maxWidth: w - PAD * 2 });
     }
     y += chH + 24;
+    if (why && channel === 'special' && debugEnabled) return debugSpawns(ctx, y, w);
     if (why) return y + 40;
     // Refresh buttons.
     const bw = (w - 2 * 16) / 3;

@@ -24,6 +24,8 @@ export const RECRUIT = {
   refreshEscalation: 2, // PLACEHOLDER: each paid Credits refresh in the same game month costs this many times the last
   reappearChance: 0.1, // PLACEHOLDER: someone let go may turn up on a later board (core RecruitmentSystem)
   namedChance: 0.6, // PLACEHOLDER: a card is a named roster person (when one is eligible) this often, else generic
+  namedChancePerExtra: 0.05, // PLACEHOLDER (Milestone 13): +5% for each extra named person who could fill the card
+  namedChanceMax: 0.9, // PLACEHOLDER (Milestone 13): generic fillers never vanish completely
   missingRoleChance: 0.6, // PLACEHOLDER: a generic card takes a role the team has nobody for this often
   hireFeeMonths: 1, // PLACEHOLDER: the hiring fee is this many months of their salary (paid at once)
   staffCaps: { E: 6, D: 9, C: 12, B: 16, A: 20, S: 24 }, // bible §12 employee cap by rank

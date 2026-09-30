@@ -15,7 +15,11 @@
 //   races.history → [{ n, kind, trackId, laps, day, carNumber, result, wear, prize, reputation }] newest last
 // Milestone 10: facility effects through the garage's queries — setupKnowledge is added to practice's Setup Knowledge,
 //   tyreWearPct is fixed into your car's entry when the race is created (tyre prep, saved with the race).
+// Milestone 13: the race crew (bible §10.8, src/systems/staffTraits.js raceCrew) is fixed into the race when it's created
+//   (race.crew: ids, for career records) and its work traits into your entry: pitServicePct (pit time), crewPct (crew
+//   factor), tyreWearPct (tyre wear), failurePct (mechanical failures, entry.failureMult); setupKnowledge adds to practice.
 import { Rng } from '../../../../core/Rng.js';
+import { raceCrew, crewPeople, effectSum } from './staffTraits.js';
 import { createRaceSim, runQualifying } from '../race/raceSim.js';
 import { buildField, playerEntry } from '../race/field.js';
 import { TRACKS, geoOf } from '../race/tracks.js';
@@ -34,18 +38,24 @@ export function createRaces({ bus, team }) {
     return Math.round(clamp(s.base + ((mec - s.mechRef) / 10) * s.perMech10, s.min, s.max) * 100) / 100;
   };
 
-  const facilityKnowledge = () => team.facilities?.bonus('setupKnowledge') ?? 0;
+  // Setup Knowledge added on top of practice: the facilities' bonus and the race crew's traits (fixed at creation).
+  const facilityKnowledge = () => (team.facilities?.bonus('setupKnowledge') ?? 0) + (api.current?.crewKnowledge ?? 0);
 
   function newRace(kind, rec, config, laps) {
     const n = ++api.count;
     const seed = api.seedFor(n);
     const track = TRACKS[config.trackId];
+    const crew = crewPeople(raceCrew(team));
+    const trait = (key) => effectSum(crew, key);
     const player = { ...playerEntry(team, rec), pitService: serviceFor(best('MEC')), tyre: 'medium', auto: true };
-    const wearPct = team.facilities?.bonus('tyreWearPct') ?? 0;
+    if (trait('pitServicePct')) player.pitService = Math.round(player.pitService * (1 + trait('pitServicePct') / 100) * 100) / 100;
+    if (trait('crewPct')) player.crew = Math.round(player.crew * (1 + trait('crewPct') / 100));
+    const wearPct = (team.facilities?.bonus('tyreWearPct') ?? 0) + trait('tyreWearPct');
     if (wearPct) player.tyreWearMult = 1 + wearPct / 100;
+    if (trait('failurePct')) player.failureMult = Math.max(0, 1 + trait('failurePct') / 100);
     const { entries, grid } = buildField({ player, rivalPool: config.rivalPool, band: config.band, fieldSize: config.fieldSize, seed });
     for (const e of entries) if (!e.isPlayer) e.pitService = serviceFor(77 + ((e.crew ?? 80) - 80) / 2);
-    return { n, kind, seed, trackId: track.id, laps, entries, grid, carNumber: rec.number, createdDay: team.clock.totalDays, state: null, status: 'ready' };
+    return { n, kind, seed, trackId: track.id, laps, entries, grid, carNumber: rec.number, createdDay: team.clock.totalDays, state: null, status: 'ready', crew: crew.map((s) => s.id), crewKnowledge: trait('setupKnowledge') };
   }
 
   const api = {
@@ -225,7 +235,7 @@ export function createRaces({ bus, team }) {
         if (prize) team.money.economy.add('credits', prize, `Prize money: P${me.pos} at ${where}`, 'prize');
         if (reputation) team.money.reputation.add(reputation, `Race result: P${me.pos} at ${where}`);
       }
-      const entry = { n: race.n, kind: race.kind, trackId: race.trackId, laps: race.laps, day: team.clock.totalDays, carNumber: race.carNumber, seed: race.seed, result, wear, prize, reputation, grid: race.grid, quali: race.quali ?? null, setupScore: race.quali?.setupScore ?? null };
+      const entry = { n: race.n, kind: race.kind, trackId: race.trackId, laps: race.laps, day: team.clock.totalDays, carNumber: race.carNumber, seed: race.seed, result, wear, prize, reputation, grid: race.grid, quali: race.quali ?? null, setupScore: race.quali?.setupScore ?? null, crew: race.crew ?? [] };
       api.history.push(entry);
       if (api.history.length > HISTORY_KEEP) api.history.shift();
       api.current = null;

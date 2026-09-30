@@ -6,6 +6,8 @@
 //   the ratings recalculate straight away.
 // Milestone 12: Train (the Training screen with them picked) and Let go (asks first; not while on the car's team or a
 // course; the founder can be let go but never comes back).
+// Milestone 13: each trait card lists what it does (ratings, work effects, what waits for a later milestone), and a
+// Career panel shows races, wins, podiums, cars built and years here (the founder's flag under it).
 // enter({ id, from }) — from: 'roster' | 'garage' (where ‹ Back goes). Drag to scroll.
 import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
@@ -14,6 +16,7 @@ import { text, para, panel as drawPanel, tabRects, drawTabs } from '../../../../
 import { STAT_KEYS, STAT_NAMES, ROLES, TRAITS, DRIVER_RATINGS } from '../../data/staff.js';
 import { statusIconsOf } from '../ui/statusIcons.js';
 import { staffLine } from '../ui/garageMenus.js';
+import { traitLines } from '../systems/staffTraits.js';
 
 const C = THEME.color;
 const S = THEME.size;
@@ -127,21 +130,54 @@ export function createStaffDetailScreen({ layout, assets, team, garage, topBar, 
     // --- traits and salary ---
     if (ctx) text(ctx, 'Traits', 8, y, { size: S.heading, bold: true, color: C.actionDark });
     y += 64;
+    // Milestone 13: what each trait does (src/systems/staffTraits.js traitLines) — ratings (drivers), work effects and
+    // anything still waiting for a later milestone.
+    if (!s.traits.length && ctx) text(ctx, 'No trait', 8, y, { size: S.body, color: C.textMuted });
+    if (!s.traits.length) y += 60;
     for (const t of s.traits) {
       const def = TRAITS[t];
-      const bonus = Object.entries(def?.ratings ?? {})
-        .map(([k, v]) => `${RATING_NAME[k]} ${v > 0 ? '+' : '−'}${Math.abs(v)}`)
-        .join(' · ');
-      const lines = [def?.text ?? '', driver && bonus ? `Ratings: ${bonus}` : ''].filter(Boolean);
+      const effects = traitLines(t, { ratingNames: RATING_NAME }).filter((l) => driver || !l.startsWith('Ratings'));
+      const lines = [def?.text ?? '', ...effects].filter(Boolean);
       const body = lines.reduce((h, l) => h + para(null, l, 0, 0, w - 56, { size: S.body }), 0);
       const cardH = 80 + body + 20;
       if (ctx) {
         drawPanel(ctx, { x: 0, y, w, h: cardH }, { radius: THEME.panel.radius });
-        text(ctx, def?.name ?? t, 28, y + 22, { size: S.body, bold: true, color: C.purple });
+        text(ctx, `${def?.name ?? t}${def?.signature ? ' · signature' : ''}`, 28, y + 22, { size: S.body, bold: true, color: C.purple });
         let ly = y + 74;
-        for (const l of lines) ly += para(ctx, l, 28, ly, w - 56, { size: S.body, color: l.startsWith('Ratings') ? C.actionDark : C.text });
+        for (const l of lines) ly += para(ctx, l, 28, ly, w - 56, { size: S.body, color: l.startsWith('Later') ? C.textMuted : l === def?.text ? C.text : C.actionDark });
       }
       y += cardH + 16;
+    }
+    y += 12;
+
+    // --- Milestone 13: career record (src/systems/careers.js) ---
+    {
+      const r = team.careers.of(s.id);
+      const years = team.careers.years(s.id);
+      const cells = [
+        ['Races', r.races],
+        ['Wins', r.wins],
+        ['Podiums', r.podiums],
+        ['Cars built', r.carsBuilt],
+        ['Years here', years < 1 ? years.toFixed(1) : years.toFixed(1).replace(/\.0$/, '')],
+      ];
+      if (ctx) text(ctx, 'Career', 8, y, { size: S.heading, bold: true, color: C.actionDark });
+      y += 64;
+      const cw = (w - 16 * 2) / 3;
+      const ch = 150;
+      cells.forEach(([label, v], i) => {
+        const r2 = { x: (i % 3) * (cw + 16), y: y + Math.floor(i / 3) * (ch + 16), w: cw, h: ch };
+        if (ctx) {
+          drawPanel(ctx, r2, { radius: THEME.panel.radius });
+          text(ctx, label, r2.x + r2.w / 2, r2.y + 18, { size: S.small, bold: true, color: C.textMuted, align: 'center', maxWidth: r2.w - 20 });
+          text(ctx, String(v), r2.x + r2.w / 2, r2.y + 62, { size: S.title, bold: true, align: 'center' });
+        }
+      });
+      y += 2 * (ch + 16) + 8;
+      if (team.isFounder(s.id)) {
+        if (ctx) para(ctx, `${team.founder.flag ?? 'Founding Team Member'}${team.founder.history?.continuous ? ' · here since day 1' : ''}`, 8, y, w - 16, { size: S.small, bold: true, color: C.purple });
+        y += 60;
+      }
     }
     y += 12;
     if (ctx) {
