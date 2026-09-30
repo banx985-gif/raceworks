@@ -194,7 +194,7 @@ export const STRATEGY = {
   // extra service, + outsidePerLap for each further lap away, up to outsideMax: the tyres aren't ready.
   window: { windowSecs: 2.5, minWidth: 2, maxWidth: 3, outsideSecs: 2.5, outsidePerLap: 1, outsideMax: 6 },
   // The rivals' strategists (placeholder STR by team; privateers use the privateer number).
-  rivals: { R01: 150, R02: 115, privateer: 70 },
+  rivals: { R01: 150, R02: 115, privateer: 70, R03: 130, R04: 220, R05: 170, R06: 190, R07: 300, R08: 380 }, // Milestone 20: + R03–R08; a championship band adds its strStep
 };
 
 // Milestone 16: repair priority at the next pit stop (bible §24.2 "Repair priority: None / Critical / Full") — mid-race,

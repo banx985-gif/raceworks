@@ -30,6 +30,8 @@ import { liveryKey, teamColourId } from './livery.js';
 import { RESEARCH_ICONS } from '../../data/research.js';
 import { NODE, nodeLabel } from '../systems/research.js';
 import { TRACKS, TRACK_IDS, geoOf } from '../race/tracks.js'; // Milestone 19
+import { champById, TROPHY_ART } from '../../data/championships.js'; // Milestone 20
+import { RIVAL_TEAMS } from '../../data/rivals.js';
 
 const C = THEME.color;
 
@@ -39,7 +41,7 @@ export function staffLine(s) {
   return [ROLES[s.role].name, `Level ${s.level}`, TIERS[s.tier].name, ...status].join(' · ');
 }
 
-export function createGarageMenus({ garage, team, assets = null, open, close = () => {}, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null, goResearch = () => {}, goRecruit = () => {}, goTrain = () => {}, debugTracks = null }) {
+export function createGarageMenus({ garage, team, assets = null, open, close = () => {}, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null, goResearch = () => {}, goRecruit = () => {}, goTrain = () => {}, debugTracks = null, goChampRound = () => {}, enterChamp = () => {} }) {
   const menus = new MenuRegistry();
   const fac = team.facilities;
   // What a facility does, for its sheets (bible §19): its effect, its role and what it cost.
@@ -290,26 +292,121 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
       if (slot.id === 'money') return moneyMenu({ slot, team, goMainMenu, debug, toast });
       if (slot.id === 'research') return { ...menu, sections: researchSections() }; // Milestone 11
       if (slot.id === 'compete' && goWeekend) {
-        // Milestone 7: race weekends (Practice → Setup → Qualifying → Race); championships arrive in Milestone 20.
+        // Milestone 7: race weekends (Practice → Setup → Qualifying → Race). Milestone 20: the championship ladder — the
+        // season in progress and its next round, the 12 championships, the Pine Ridge practice race, rivals, trophies.
         const cur = team.races.current;
         const last = team.races.last();
         const lastMe = last?.result.rows.find((r) => r.isPlayer);
+        const CH = team.championships;
+        const season = CH?.current ?? null;
+        const next = CH?.nextRound() ?? null;
+        if (next) menu.art = TRACKS[next.trackId]?.artKey; // the next round's scenery as the sheet's backdrop
+        const champSections = [];
+        if (season) {
+          const def = champById(season.id);
+          const me = CH.standings().find((r) => r.isPlayer);
+          const inRound = cur?.champ?.id === season.id;
+          champSections.push({
+            title: `${def.name} · round ${Math.min(season.round + 1, def.rounds)} of ${def.rounds}`,
+            lines: [
+              next ? `Next: ${TRACKS[next.trackId].name} · ${next.ready ? 'ready to race' : `in ${next.daysAway} day${next.daysAway === 1 ? '' : 's'}`}` : '',
+              me ? `You: P${me.pos} · ${me.points} pts · ${me.wins} win${me.wins === 1 ? '' : 's'}` : 'No points yet: the first round is to come',
+            ].filter(Boolean),
+            columns: 2,
+            buttons: [
+              { id: 'champRound', label: inRound ? 'Carry on: this round' : next?.ready ? `Race round ${next.index + 1}` : `Round ${(next?.index ?? 0) + 1}`, sub: next ? `${TRACKS[next.trackId].name}${next.ready ? '' : ` · in ${next.daysAway} days`}` : '', icon: 'race_ui_04', disabled: !inRound && (!next?.ready || !!cur), accent: C.action, onTap: () => goChampRound() },
+              { id: 'champStandings', label: 'Standings', sub: 'Drivers and teams', icon: 'race_ui_14', accent: C.progress, onTap: () => open('champStandings') },
+            ],
+          });
+        }
+        champSections.push({
+          title: 'Championships',
+          columns: 2,
+          buttons: CH ? CH.list().filter((x) => x.def.type !== 'secret' || !x.locked || CH.debugSecrets).map((x) => ({
+            id: `champ_${x.def.id}`,
+            label: `${x.def.id} ${x.def.name}`,
+            sub: x.state === 'active' ? 'In progress' : x.state === 'won' ? `Champions · ${x.def.rounds} rounds` : x.why ? x.why : `${x.def.rounds} rounds · entry ${fmt(x.fee)} Cr${x.best < 99 ? ` · best P${x.best}` : ''}`,
+            icon: TROPHY_ART[x.def.tier],
+            locked: x.locked,
+            disabled: !!x.why && x.state !== 'active',
+            accent: x.state === 'won' ? C.good : C.action,
+            onTap: () => enterChamp(x.def.id),
+          })) : [],
+        });
+        champSections.push({
+          columns: 2,
+          buttons: [
+            { id: 'rivals', label: 'Rivals', sub: 'Teams, drivers, logos', icon: 'race_ui_27', accent: C.progress, onTap: () => open('rivals') },
+            { id: 'trophies', label: 'Trophies', sub: `${CH?.trophies.count ?? 0} in the cabinet`, icon: 'race_reward_07', accent: C.progress, onTap: () => open('trophies') },
+          ],
+        });
         menu.sections = [
+          ...champSections,
           {
             columns: 1,
             buttons: [
-              { id: 'weekend', label: cur ? 'Carry on: race weekend' : 'Race weekend', sub: cur ? `${TRACKS[cur.trackId]?.name ?? 'Pine Ridge'} · ${cur.kind !== 'weekend' ? 'test race' : cur.stage === 'race' ? (cur.state ? 'race under way' : 'on the grid') : cur.stage}` : team.races.canRace ? 'Pine Ridge Club Circuit · practice, qualifying, 12-lap race · prize money' : 'Build a car first (Build → Pit Bay)', icon: slot.icon, disabled: !cur && !team.races.canRace, onTap: goWeekend },
+              { id: 'weekend', label: cur ? 'Carry on: race weekend' : 'Practice race', sub: cur ? `${TRACKS[cur.trackId]?.name ?? 'Pine Ridge'} · ${cur.champ ? `${cur.champ.id} round ${cur.champ.round + 1} · ` : ''}${cur.kind !== 'weekend' ? 'test race' : cur.stage === 'race' ? (cur.state ? 'race under way' : 'on the grid') : cur.stage}` : team.races.canRace ? 'Pine Ridge Club Circuit · not a championship round · 12 laps · prize money' : 'Build a car first (Build → Pit Bay)', icon: slot.icon, disabled: !cur && !team.races.canRace, onTap: goWeekend },
               ...(goTestRace && !cur && team.races.canRace ? [{ id: 'testRace', label: 'Test Race (debug)', sub: 'Straight to an 8-lap race, no prize', accent: C.purple, onTap: goTestRace }] : []),
               ...(last ? [{ id: 'lastResult', label: 'Last result', sub: `${lastMe?.status === 'retired' ? 'DNF' : `P${lastMe?.pos}`} at ${TRACKS[last.trackId]?.name ?? 'Pine Ridge'} · ${team.races.history.length} race${team.races.history.length === 1 ? '' : 's'} so far`, accent: C.progress, onTap: () => goRaceResult(team.races.history.length - 1) }] : []),
             ],
           },
           // Milestone 19 (?debug=1): a race weekend on any of the 12 tracks (T12 Zero Ring too), and the 100-lap check
           ...(debugTracks && !cur && team.races.canRace
-            ? [{ title: 'Debug: tracks', columns: 2, buttons: [...TRACK_IDS.map((id) => ({ id: `dbgTrack_${id}`, label: `${id} ${TRACKS[id].name}`, sub: `${(geoOf(id).length / 1000).toFixed(1)} km · ${TRACKS[id].turns.length} turns · ${TRACKS[id].profile}${TRACKS[id].hidden ? ' · locked' : ''}`, accent: C.purple, onTap: () => debugTracks.weekend(id) })), { id: 'dbgTrack100', label: '100-lap test: all 12', sub: 'A full field, 100 laps on every track', accent: C.purple, onTap: () => debugTracks.hundred() }] }]
+            ? [{ title: 'Debug: championships', columns: 2, buttons: [{ id: 'dbgRoundDue', label: 'Skip to the next round', sub: 'The calendar jumps to its day', accent: C.purple, onTap: () => debugTracks.roundDue() }, { id: 'dbgSecrets', label: CH?.debugSecrets ? 'C11 / C12 open ✓' : 'Open C11 / C12', sub: 'And Ghostline races (testing only)', accent: C.purple, onTap: () => debugTracks.secrets() }] }, { title: 'Debug: tracks', columns: 2, buttons: [...TRACK_IDS.map((id) => ({ id: `dbgTrack_${id}`, label: `${id} ${TRACKS[id].name}`, sub: `${(geoOf(id).length / 1000).toFixed(1)} km · ${TRACKS[id].turns.length} turns · ${TRACKS[id].profile}${TRACKS[id].hidden ? ' · locked' : ''}`, accent: C.purple, onTap: () => debugTracks.weekend(id) })), { id: 'dbgTrack100', label: '100-lap test: all 12', sub: 'A full field, 100 laps on every track', accent: C.purple, onTap: () => debugTracks.hundred() }] }]
             : []),
         ];
       }
       return menu;
+    });
+  }
+  // Milestone 20: the championship sub-sheets (they replace the Compete sheet; Back returns to it)
+  const CH = team.championships;
+  if (CH) {
+    menus.register('champStandings', () => {
+      const def = champById(CH.current?.id ?? CH.history[CH.history.length - 1]?.id);
+      const rows = CH.standings();
+      return {
+        title: def ? `${def.name}${CH.current ? '' : ' (final)'}` : 'Standings',
+        subtitle: def ? `${def.rounds} rounds · ${def.tracks.map((t) => TRACKS[t].name).join(' · ')}` : 'Enter a championship first',
+        art: 'race_ui_14',
+        accent: C.progress,
+        sections: [
+          { title: 'Drivers', lines: rows.length ? rows.map((r) => ({ text: `${r.pos}. ${r.name}${r.team ? ` (${r.team})` : ''} — ${r.points} pts${r.wins ? ` · ${r.wins} win${r.wins === 1 ? '' : 's'}` : ''}`, color: r.isPlayer ? C.actionDark : undefined })) : ['No rounds raced yet'] },
+          { title: 'Teams', lines: CH.teamTable().map((t) => ({ text: `${t.pos}. ${t.team} — ${t.points} pts`, color: t.isPlayer ? C.actionDark : undefined })) },
+          { columns: 1, buttons: [{ id: 'backCompete', label: '‹ Compete', accent: C.progress, onTap: () => open('compete') }] },
+        ],
+      };
+    });
+    menus.register('rivals', () => ({
+      title: 'Rivals',
+      subtitle: 'Eight teams (one is a secret); their cars follow each championship’s band, never yours',
+      art: 'race_ui_27',
+      accent: C.progress,
+      sections: [
+        ...Object.entries(RIVAL_TEAMS).filter(([, t]) => !t.secret || CH.debugSecrets).map(([id, t]) => ({
+          title: t.name,
+          lines: [`${t.identity} · ${t.strength} · from ${champById(t.first)?.name ?? t.first}`],
+          columns: 1,
+          buttons: [{ id: `rival_${id}`, label: t.drivers.map((d) => d.name).join(' · '), sub: t.drivers.map((d) => `${d.name.split(' ')[0]}: Q${d.ratings.qualifying} R${d.ratings.racecraft} W${d.ratings.wet} T${d.ratings.tyreCare} C${d.ratings.consistency} F${d.ratings.feedback}`).join(' · '), icon: t.logo, accent: C.outline, onTap: () => {} }],
+        })),
+        { columns: 1, buttons: [{ id: 'backCompete', label: '‹ Compete', accent: C.progress, onTap: () => open('compete') }] },
+      ],
+    }));
+    menus.register('trophies', () => {
+      const list = CH.trophyList();
+      return {
+        title: 'Trophy cabinet',
+        subtitle: `${list.length} title${list.length === 1 ? '' : 's'} · ${(team.careers?.facts.wins ?? 0)} race wins · ${(team.careers?.facts.podiums ?? 0)} podiums`,
+        art: 'race_reward_08',
+        accent: C.progress,
+        sections: [
+          list.length
+            ? { columns: 2, buttons: list.map((t) => ({ id: `trophy_${t.id}`, label: t.name, sub: `${CH.tierName(t.tier)} trophy · day ${t.day ?? '—'}`, icon: t.art, accent: C.good, onTap: () => {} })) }
+            : { lines: ['No titles yet: win a championship and its trophy goes here (Club, National or World).'] },
+          { lines: CH.history.map((h) => `${champById(h.id).name} (year ${h.year}): P${h.pos} · ${h.points} pts${h.title ? ' · champions' : ''}`) },
+          { columns: 1, buttons: [{ id: 'backCompete', label: '‹ Compete', accent: C.progress, onTap: () => open('compete') }] },
+        ],
+      };
     });
   }
   for (const [id, t] of Object.entries(TOP_SHEETS)) {

@@ -31,11 +31,11 @@ export const ASSETS = {
   ...Object.fromEntries(Object.values(BUILD_ART).map((k) => art('vfx', k))),
   // Races (Milestone 6): the top-down race sprites (player class + every rival / privateer) and T01's scenery picture
   // (a pre-race backdrop only — the circuit itself is drawn in code from data/tracks/T01.js).
-  ...Object.fromEntries([CLASSES.clubHatch.raceArt, ...Object.values(RIVAL_TEAMS).map((t) => t.sprite), ...PRIVATEERS.map((p) => p.sprite)].map((k) => art('cars', k))),
+  ...Object.fromEntries([CLASSES.clubHatch.raceArt, ...[RIVAL_TEAMS.R01, RIVAL_TEAMS.R02].map((t) => t.sprite), ...PRIVATEERS.map((p) => p.sprite)].map((k) => art('cars', k))),
   ...Object.fromEntries([T01.artKey].map((k) => art('tracks', k))),
   // Milestone 8: the showcase picture of every car family in the field (race result rows), the race effects (spray and
   // sparks are code; the Underbody Sparks, Breakdown Smoke and Pit-Service Burst art) and the main menu's key art.
-  ...Object.fromEntries([...Object.values(RIVAL_TEAMS), ...PRIVATEERS].map((t) => art('cars', CAR_FAMILIES[t.family].showcase))),
+  ...Object.fromEntries([RIVAL_TEAMS.R01, RIVAL_TEAMS.R02, ...PRIVATEERS].map((t) => art('cars', CAR_FAMILIES[t.family].showcase))),
   ...Object.fromEntries(['race_vfx_03', 'race_vfx_05', 'race_vfx_10'].map((k) => art('vfx', k))),
   // Milestone 17: Tyre Smoke (spins), Track Dust (off the road in the dry) and Rain Spray (behind cars in the wet).
   ...Object.fromEntries(['race_vfx_01', 'race_vfx_02', 'race_vfx_06'].map((k) => art('vfx', k))),
@@ -65,6 +65,10 @@ export const STAFF_PORTRAITS = Object.fromEntries(ALL_STAFF.map((d) => d.art).fi
 // a few at a time behind the game (main.js), so the first screen never waits for them; a picture still on its way
 // draws nothing for a moment and pops in.
 export const LATER_ASSETS = {
+  // Milestone 20: the rival logos, the Club / National / World trophies and the standings / rival icons (the Compete sheet)
+  ...Object.fromEntries(Object.values(RIVAL_TEAMS).filter((r) => r.logo).map((r) => art('logos', r.logo))),
+  ...Object.fromEntries(['race_reward_07', 'race_reward_08', 'race_reward_09'].map((k) => art('rewards', k))),
+  ...Object.fromEntries(['race_ui_04', 'race_ui_14', 'race_ui_27'].map((k) => art('ui', k))),
   // Milestone 19: the other eleven tracks' scenery pictures (the pre-race card backdrop only — never the racing surface)
   ...Object.fromEntries(Object.values(TRACKS).filter((t) => t.artKey !== T01.artKey).map((t) => art('tracks', t.artKey))),
   ...Object.fromEntries(STATIONS.filter((s) => s.art && !START_IDS.has(s.id)).map((s) => art('facilities', s.art))), // Milestone 10

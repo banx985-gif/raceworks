@@ -48,6 +48,7 @@ import { createResearch } from '../systems/research.js';
 import { createRecruitment } from '../systems/recruitment.js';
 import { createTraining } from '../systems/training.js';
 import { createCareers } from '../systems/careers.js';
+import { createChampionships } from '../systems/championships.js';
 import { ENDURANCE } from '../../data/training.js';
 
 // A new game's setup when none is given (tests, and saves from before Milestone 4b).
@@ -102,6 +103,10 @@ export const SAVE_MIGRATIONS = {
   //   12 → 13 (Milestone 19): all 12 tracks (a race keeps its track id as before; the new career fact technicalPodiums).
   //   Nothing to change here — careers.load() gives it 0.
   12: (record) => record,
+  //   13 → 14 (Milestone 20): the championship ladder (the season in progress, its standings, finished seasons, trophies;
+  //   the title facts). Nothing to change here — championships.load() gives an old save no championship entered, and the
+  //   Pine Ridge weekend stays as the practice race.
+  13: (record) => record,
 };
 
 export class Team {
@@ -146,6 +151,7 @@ export class Team {
     this.recruitment = createRecruitment({ bus, team: this, seed }); // Milestone 12
     this.training = createTraining({ bus, team: this, seed }); // Milestone 12
     this.careers = createCareers({ bus, team: this }); // Milestone 13
+    this.championships = createChampionships({ bus, team: this }); // Milestone 20: the ladder, one season at a time
     this.recruitment.extraBusy = (id) => {
       const t = this.training.trainingOf(id);
       return t ? `Away on a course (${t.days - t.daysDone} day${t.days - t.daysDone === 1 ? '' : 's'} left)` : null;
@@ -201,6 +207,7 @@ export class Team {
     this.races.load(null);
     this.training.newGame(); // Milestone 12
     this.careers.newGame(); // Milestone 13
+    this.championships.newGame(); // Milestone 20
     this.recruitment.newGame(); // Milestone 12: a board for Local Contacts (after the team and rank are set)
   }
 
@@ -345,6 +352,7 @@ export class Team {
       recruitment: this.recruitment.serialize(), // Milestone 12
       training: this.training.serialize(), // Milestone 12
       careers: this.careers.serialize(), // Milestone 13
+      championships: this.championships.serialize(), // Milestone 20
     };
   }
 
@@ -368,6 +376,7 @@ export class Team {
     this.research.load(data.research); // none before Milestone 11
     this.training.load(data.training); // none before Milestone 12
     this.careers.load(data.careers ?? null); // none before Milestone 13: rebuilt from the save (before recruitment)
+    this.championships.load(data.championships ?? null); // none before Milestone 20: no championship entered
     this.recruitment.load(data.recruitment); // none before Milestone 12: fresh boards for the open channels
   }
 

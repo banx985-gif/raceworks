@@ -60,6 +60,7 @@ import { createWeekendScreen } from './screens/WeekendScreen.js';
 import { Settings } from '../../../core/Settings.js';
 import { TRACKS, TRACK_IDS } from './race/tracks.js';
 import { TEST_RACE } from '../data/rivals.js'; // Milestone 19 (the debug track picker)
+import { CHAMPIONSHIPS } from '../data/championships.js'; // Milestone 20
 import { WEATHER_NAMES } from '../data/race.js'; // Milestone 17 (the result's weather line)
 import { createResearchScreen } from './screens/ResearchScreen.js';
 import { drawResearchBanner, researchBannerHeight } from './ui/researchBanner.js';
@@ -332,10 +333,44 @@ const drillRecords = createDrillRecords({
 });
 team.training.setDrillRecords(drillRecords);
 bus.on('stint:done', ({ record }) => drillRecords.recordStint(record)); // Milestone 18: Drive Stints on the account records
+// Milestone 20: the championship ladder — enter one (the fee on the ledger), race its next round (its race weekend).
+function enterChamp(id) {
+  const r = team.championships.enter(id);
+  if (!r.ok) return toast('Not yet', r.reason);
+  const c = team.championships.list().find((x) => x.def.id === id).def;
+  const n = team.championships.nextRound();
+  toast(`Entered: ${c.name}`, `${c.rounds} rounds · round 1 at ${TRACKS[n.trackId].name} in ${n.daysAway} days`);
+  team.save();
+  openMenu('compete');
+}
+function goChampRound() {
+  const r = team.championships.startRound();
+  if (!r.ok) return toast('Not yet', r.reason);
+  // the field's car pictures (teams beyond the practice race load behind the game; make sure these are on their way)
+  assets.ensure?.([...new Set(r.race.entries.map((e) => e.sprite))].filter((k) => assets.isPending?.(k)));
+  sheet.close();
+  goSub('weekend');
+}
+bus.on('championship:due', ({ round, trackId }) => toast(`Round ${round + 1} is due`, `${TRACKS[trackId].name}: race it from Compete`));
+bus.on('championship:finished', ({ record, trophies }) => {
+  const c = CHAMPIONSHIPS.find((x) => x.id === record.id);
+  toast(record.title ? `Champions: ${c.name}!` : `${c.name} over: P${record.pos}`, trophies.length ? `${trophies[0].name}: the trophy is in the cabinet` : `${record.points} points`);
+});
 // Milestone 19: trackId (?debug=1's track picker) — the normal game's weekend is still Pine Ridge (championships: M20).
 // Milestone 19 (?debug=1): the track picker and the 100-lap check on all 12 tracks (one track a frame, results as toasts).
 const debugTracks = {
   weekend: (id) => goWeekend(id),
+  // Milestone 20 (?debug=1): jump the calendar to the next round's day; open C11 / C12 (and let Ghostline race)
+  roundDue() {
+    const n = team.championships.nextRound();
+    if (!n) return toast('No round to wait for');
+    while (clock.totalDays < n.due) clock.advanceDay();
+    openMenu('compete');
+  },
+  secrets() {
+    team.championships.debugSecrets = !team.championships.debugSecrets;
+    openMenu('compete');
+  },
   hundred() {
     sheet.close();
     const out = [];
@@ -412,7 +447,7 @@ carDebug.nextMonth = () => {
   const m = clock.month;
   while (clock.month === m) clock.advanceDay();
 };
-const menus = createGarageMenus({ garage: () => garage, team, assets, open: openMenu, close: () => sheet.close(), goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t, b) => toast(t, b), goWeekend: () => goWeekend(), goTestRace: debug.enabled ? () => goTestRace() : null, goRaceResult: (index) => goSub('raceResult', { index }), goResearch: () => goResearch(), goRecruit: () => goRecruit(), goTrain: (id) => goTrain(id), debugTracks: debug.enabled ? debugTracks : null });
+const menus = createGarageMenus({ garage: () => garage, team, assets, open: openMenu, close: () => sheet.close(), goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t, b) => toast(t, b), goWeekend: () => goWeekend(), goTestRace: debug.enabled ? () => goTestRace() : null, goRaceResult: (index) => goSub('raceResult', { index }), goResearch: () => goResearch(), goRecruit: () => goRecruit(), goTrain: (id) => goTrain(id), debugTracks: debug.enabled ? debugTracks : null, goChampRound: () => goChampRound(), enterChamp: (id) => enterChamp(id) });
 
 // ---------------------------------------------------------------------------
 // Toasts (core/ui/Toast): short money news under the top bar — salary day, a contract paid, Emergency Credit on / off,
@@ -652,6 +687,12 @@ const resultLines = (e) => {
       out.push({ text: bits.join(' · '), color: wx.wet ? COL.progress : COL.textMuted });
     }
   } else out.push({ text: `Test race at ${TRACKS[e.trackId].name}: no prize money`, color: COL.textMuted });
+  // Milestone 20: the championship after this round
+  if (e.champ) {
+    const c = CHAMPIONSHIPS.find((x) => x.id === e.champ.id);
+    const me = team.championships.standings().find((r) => r.isPlayer);
+    if (c && me) out.push({ text: `${c.name}, round ${e.champ.round + 1} of ${c.rounds}: you are P${me.pos} on ${me.points} pts`, color: COL.progress });
+  }
   if (e.rp) out.push({ text: `Research +${e.rp} RP (${e.rpLines.map((l) => `${l.reason} +${l.amount}`).join(' · ')})`, color: COL.progress }); // Milestone 11
   return out;
 };

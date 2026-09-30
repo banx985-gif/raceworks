@@ -6,7 +6,8 @@
 // Everything is copied into the entry (a snapshot), so the race can never change once it has been created.
 // The grid order (before Milestone 7's qualifying) is a seeded shuffle, fixed by the race seed.
 import { Rng } from '../../../../core/Rng.js';
-import { RIVAL_TEAMS, PRIVATEERS, FIELD_CAP } from '../../data/rivals.js';
+import { RIVAL_TEAMS, PRIVATEERS, FIELD_CAP, PRIVATEER_TIERS } from '../../data/rivals.js';
+import { CHAMP_BANDS, bandIndex, champById } from '../../data/championships.js';
 import { RACE } from '../../data/race.js';
 import { CLASSES, familyOfArt } from '../../data/cars.js';
 import { TEAM_COLOURS } from '../../data/setup.js';
@@ -51,29 +52,67 @@ export function playerEntry(team, rec) {
   };
 }
 
+// Milestone 20: a championship band (data/championships.js CHAMP_BANDS, 'C01'…'C12') — rival cars from the band's car level
+// × the team's shape, crew from the band, drivers' §28.1 ratings grown by driverStep a band past the team's first
+// championship, privateers scaled by the championship's tier. Never anything from the player's car (no rubber-banding).
+// The M6 'club' band (the practice race) is the teams' own data, as before.
+export function rivalCarFor(teamId, band) {
+  const def = RIVAL_TEAMS[teamId];
+  if (def?.bands?.[band]) return { car: { ...def.bands[band].car }, crew: def.bands[band].crew };
+  const b = CHAMP_BANDS[band];
+  const car = Object.fromEntries(Object.entries(def.shape).map(([k, v]) => [k, Math.round(b.carLevel * v)]));
+  return { car, crew: b.crew };
+}
+export function rivalRatingsFor(teamId, driver, band) {
+  const def = RIVAL_TEAMS[teamId];
+  const steps = CHAMP_BANDS[band] ? Math.max(0, bandIndex(band) - Math.max(0, bandIndex(def.first))) : 0;
+  const x = 1 + (CHAMP_BANDS[band]?.driverStep ?? 0) * steps;
+  return Object.fromEntries(SIX.map((k) => [k, clampRating(driver.ratings[k] * x)]));
+}
+
 export function buildField({ player, rivalPool, band, fieldSize, seed }) {
   const size = Math.min(FIELD_CAP, fieldSize);
   const entries = [player];
+  const champ = !!CHAMP_BANDS[band];
   const teams = rivalPool.map((id) => ({ id, def: RIVAL_TEAMS[id] })).filter((t) => t.def);
-  const rival = (t, d) => ({
-    id: d.id,
+  const rival = (t, d) => {
+    const c = rivalCarFor(t.id, band);
+    return {
+      id: d.id,
+      name: d.name,
+      team: t.def.name,
+      teamId: t.id,
+      sprite: t.def.sprite,
+      colour: t.def.colour,
+      ratings: rivalRatingsFor(t.id, d, band),
+      car: c.car,
+      crew: c.crew,
+      openFaults: 0,
+      condition: 100,
+      ...(champ ? { band, strStep: CHAMP_BANDS[band].strStep } : {}),
+    };
+  };
+  for (const t of teams) if (entries.length < size) entries.push(rival(t, t.def.drivers[0]));
+  for (const t of teams) if (entries.length < size && t.def.drivers[1]) entries.push(rival(t, t.def.drivers[1]));
+  const tier = champ ? PRIVATEER_TIERS[champById(band).tier] : null;
+  const privateer = (p, d, suffix = '') => ({
+    id: p.id + suffix,
     name: d.name,
-    team: t.def.name,
-    teamId: t.id,
-    sprite: t.def.sprite,
-    colour: t.def.colour,
-    ratings: Object.fromEntries(SIX.map((k) => [k, clampRating(d.ratings[k])])),
-    car: { ...t.def.bands[band].car },
-    crew: t.def.bands[band].crew,
+    team: p.team,
+    sprite: p.sprite,
+    colour: '#8A8F98',
+    ratings: Object.fromEntries(SIX.map((k) => [k, clampRating(d.ratings[k] * (tier?.ratings ?? 1))])),
+    car: tier ? Object.fromEntries(Object.entries(p.car).map(([k, v]) => [k, Math.round(v * tier.car)])) : { ...p.car },
+    crew: Math.round(p.crew * (tier?.crew ?? 1)),
     openFaults: 0,
     condition: 100,
   });
-  for (const t of teams) if (entries.length < size) entries.push(rival(t, t.def.drivers[0]));
-  for (const t of teams) if (entries.length < size && t.def.drivers[1]) entries.push(rival(t, t.def.drivers[1]));
   for (const p of PRIVATEERS) {
     if (entries.length >= size) break;
-    entries.push({ id: p.id, name: p.name, team: p.team, sprite: p.sprite, colour: '#8A8F98', ratings: Object.fromEntries(SIX.map((k) => [k, clampRating(p.ratings[k])])), car: { ...p.car }, crew: p.crew, openFaults: 0, condition: 100 });
+    entries.push(privateer(p, p));
   }
+  // Milestone 20: a championship field fills with the privateers' second drivers when it needs more cars
+  if (champ) for (const p of PRIVATEERS) if (entries.length < size && p.second) entries.push(privateer(p, p.second, '2'));
   const grid = new Rng(`grid:${seed}`).shuffle(entries.map((e) => e.id));
   return { entries, grid };
 }

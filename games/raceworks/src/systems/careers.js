@@ -43,10 +43,13 @@ export const TEAM_FACTS = {
   stintOvertakes: 'overtakes made in Drive Stints',
   stintGains: 'Drive Stints that gained time',
   technicalPodiums: 'podiums on technical tracks', // Milestone 19 (Freya Nash)
+  // Milestone 20: championship seasons
+  titles: 'championship titles',
+  seasonPodiums: 'championship podiums (final standings)',
 };
 
 const blank = () => Object.fromEntries(CAREER_KEYS.map((k) => [k, 0]));
-const blankFacts = () => ({ raceStarts: 0, wins: 0, podiums: 0, poles: 0, setup80: 0, gained5: 0, cleanFinishes: 0, carsBuilt: 0, classWins: [], trackWins: {}, strategySwingWins: 0, undercutWins: 0, extendedStintWins: 0, neutralisationBenefits: 0, wetWins: 0, weatherTyreChanges: 0, raceFaultRepairs: 0, cautionBenefits: 0, stintsDriven: 0, stintOvertakes: 0, stintGains: 0, bestStintDelta: null, technicalPodiums: 0 });
+const blankFacts = () => ({ raceStarts: 0, wins: 0, podiums: 0, poles: 0, setup80: 0, gained5: 0, cleanFinishes: 0, carsBuilt: 0, classWins: [], trackWins: {}, strategySwingWins: 0, undercutWins: 0, extendedStintWins: 0, neutralisationBenefits: 0, wetWins: 0, weatherTyreChanges: 0, raceFaultRepairs: 0, cautionBenefits: 0, stintsDriven: 0, stintOvertakes: 0, stintGains: 0, bestStintDelta: null, technicalPodiums: 0, titles: 0, seasonPodiums: 0 });
 
 export function createCareers({ bus, team }) {
   const api = {
@@ -150,6 +153,11 @@ export function createCareers({ bus, team }) {
     for (const m of record.team ?? []) api.credit(m.id, 'carsBuilt');
   });
   bus.on('race:finished', ({ race }) => api.raceFinished(race));
+  // Milestone 20: a season over — a title, a podium in the final standings
+  bus.on('championship:finished', ({ record }) => {
+    if (record.title) api.facts.titles++;
+    if (record.pos && record.pos <= 3) api.facts.seasonPodiums++;
+  });
   // Milestone 18: a Drive Stint handed back (weekends and the Test Race alike): driven, overtakes, the best delta (lowest)
   bus.on('stint:done', ({ record }) => {
     const f = api.facts;

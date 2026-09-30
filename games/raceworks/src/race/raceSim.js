@@ -85,7 +85,7 @@ export function pitServiceTime(e, fuel = 'normal') {
 // The Lead Mechanic's part of a stop: seconds added (+) or saved (−) against the reference Mechanic.
 export function mechanicSecs(mec) {
   const S = PIT_SERVICE;
-  return Math.round(clamp(-((mec - S.mechRef) / 10) * S.perMech10, -S.mechBest, S.mechWorst) * 100) / 100;
+  return Math.round(clamp(-((mec - S.mechRef) / 10) * S.perMech10, -S.mechBest, S.mechWorst) * 100) / 100 || 0; // (never −0: a save would turn it into 0)
 }
 
 // The chance of a mechanical failure on one lap (bible §23.6, mild): the car's REL, open faults, a Condition under

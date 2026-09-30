@@ -53,7 +53,7 @@ export function strategyProfile({ str = STRATEGY.contractorStr, traits = [], wor
 }
 export function rivalProfile(entry) {
   const S = STRATEGY.rivals;
-  return strategyProfile({ str: S[entry.teamId] ?? S.privateer, tyres: DRY.filter((t) => TYRES[t].unlocked) });
+  return strategyProfile({ str: (S[entry.teamId] ?? S.privateer) + (entry.strStep ?? 0), tyres: DRY.filter((t) => TYRES[t].unlocked) }); // Milestone 20: + the championship band's strStep
 }
 export const qualityOf = (profile) => profile?.q ?? 0;
 

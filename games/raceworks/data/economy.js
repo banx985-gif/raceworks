@@ -118,6 +118,7 @@ export const CATEGORY_NAMES = {
   research: 'Research',
   hiring: 'Hiring and recruitment', // Milestone 12
   training: 'Training', // Milestone 12
+  championship: 'Championships (entry fees, title bonuses)', // Milestone 20
   debug: 'Debug',
   carried: 'Earlier lines',
 };

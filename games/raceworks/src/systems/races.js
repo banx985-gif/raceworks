@@ -35,6 +35,7 @@ import { makeWeather, dryWeather, stateAt, forecast, forecastText, bestTyreFor, 
 import { buildField, playerEntry } from '../race/field.js';
 import { TRACKS, geoOf } from '../race/tracks.js';
 import { TEST_RACE } from '../../data/rivals.js';
+import { CHAMP_BANDS } from '../../data/championships.js';
 import { RACE_TYPES, DRIVE_STINT, WEATHER_NAMES, RACE, WEEKEND, SETUP_AXES, TYRES, TYRE_ORDER, PRIZES, AUTO, FUEL, REPAIR, REPAIR_ORDER, DRIVE_LAP, STRATEGY, SWING } from '../../data/race.js';
 import { COSTS } from '../../data/economy.js';
 import { CLASSES } from '../../data/cars.js';
@@ -160,6 +161,7 @@ export function createRaces({ bus, team }) {
       w.quali = null;
       w.repair = null; // Milestone 15: what the repair did when the setup locked
       w.driveLap = null; // Milestone 15: the Qualifying Drive lap, once started
+      w.champ = config.champ ?? null; // Milestone 20: { id, round } when this weekend is a championship round
       api.current = w;
       bus.emit('race:created', { race: w });
       return { ok: true, race: w };
@@ -462,14 +464,16 @@ export function createRaces({ bus, team }) {
       let prize = 0;
       let reputation = 0;
       if (race.kind === 'weekend' && me && me.status !== 'retired') {
-        prize = PRIZES.credits[me.pos - 1] ?? 0;
-        reputation = PRIZES.reputation[me.pos - 1] ?? 0;
-        const where = TRACKS[race.trackId].name;
+        // Milestone 20: a championship round pays its band's money (data/championships.js CHAMP_BANDS[id].money)
+        const x = race.champ ? CHAMP_BANDS[race.champ.id]?.money ?? 1 : 1;
+        prize = Math.round(((PRIZES.credits[me.pos - 1] ?? 0) * x) / 50) * 50;
+        reputation = Math.round((PRIZES.reputation[me.pos - 1] ?? 0) * x);
+        const where = race.champ ? `${TRACKS[race.trackId].name} (${race.champ.id} round ${race.champ.round + 1})` : TRACKS[race.trackId].name;
         if (prize) team.money.economy.add('credits', prize, `Prize money: P${me.pos} at ${where}`, 'prize');
         if (reputation) team.money.reputation.add(reputation, `Race result: P${me.pos} at ${where}`);
       }
       const swingWin = race.kind === 'weekend' ? api.strategySwing(me) : null;
-      const entry = { swingWin, wet: !!result.weather?.wet, n: race.n, kind: race.kind, trackId: race.trackId, laps: race.laps, day: team.clock.totalDays, carNumber: race.carNumber, seed: race.seed, result, wear, prize, reputation, grid: race.grid, quali: race.quali ?? null, setupScore: race.quali?.setupScore ?? null, crew: race.crew ?? [] };
+      const entry = { champ: race.champ ?? null, swingWin, wet: !!result.weather?.wet, n: race.n, kind: race.kind, trackId: race.trackId, laps: race.laps, day: team.clock.totalDays, carNumber: race.carNumber, seed: race.seed, result, wear, prize, reputation, grid: race.grid, quali: race.quali ?? null, setupScore: race.quali?.setupScore ?? null, crew: race.crew ?? [] };
       api.history.push(entry);
       if (api.history.length > HISTORY_KEEP) api.history.shift();
       api.current = null;

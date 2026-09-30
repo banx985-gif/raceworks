@@ -204,6 +204,23 @@ export const FACILITIES = [
     art: 'facility_f24', size: { w: 2, h: 2 }, draw: { width: 1.06, drop: 0.3 },
     purpose: 'Rubber tested to the limit: every tyre lasts longer.',
   },
+  // Milestone 20: the two facilities the championship ladder asks for (bible §27 C07 / C08, §19). Their effects are STORED
+  // until their systems exist. F32's bible unlock is "Endurance Masters unlocked" while C08 needs F32 — a loop — so it opens
+  // at Rank B, C08's own rank (PLACEHOLDER, DECISIONS.md).
+  {
+    id: 'F30', name: 'Prototype Bay', role: 'Maker', unlock: { rank: 'A' }, cost: 12000,
+    effectText: 'Required for Prototype/Experimental class',
+    effects: [{ key: 'unlock.prototypeClass', value: 1 }],
+    art: 'facility_f30', size: { w: 4, h: 4 }, draw: { width: 1.06, drop: 0.35 },
+    purpose: 'A bay for prototypes: it opens the Prototype Challenge (and the prototype class, later).',
+  },
+  {
+    id: 'F32', name: 'Endurance Ops', role: 'Thinker', unlock: { rank: 'B' }, cost: 9000,
+    effectText: 'Pit/strategy errors -10% in long races',
+    effects: [{ key: 'longRaceErrorPct', value: -10 }],
+    art: 'facility_f32', size: { w: 3, h: 3 }, draw: { width: 1.02, drop: 0.3 },
+    purpose: 'An operations room for long races: it opens Endurance Masters.',
+  },
   {
     id: 'F33', name: 'Weather Station', role: 'Thinker', unlock: { research: 'ELE5' }, cost: 8500,
     effectText: 'Forecast accuracy +20%',
