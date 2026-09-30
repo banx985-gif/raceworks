@@ -82,6 +82,10 @@ export const SAVE_MIGRATIONS = {
   //   7 → 8 (Milestone 14): each running course's drill choice and bonus (training.drills). Nothing to change here —
   //   a save without it has none (every course carries on as Auto Train).
   7: (record) => record,
+  //   8 → 9 (Milestone 15): the complete race weekend (practice runs, fuel / energy target, repair priority, the Drive
+  //   lap). Nothing to change here — races.load() gives a weekend saved without them Normal fuel, Skip repair and its
+  //   practice as the full 3 runs (what Milestone 7's single practice was worth).
+  8: (record) => record,
 };
 
 export class Team {

@@ -18,10 +18,11 @@
 //   sim.gapAhead(car) / sim.gapBehind(car) → seconds to the car in front / behind in the running order
 //   sim.events → [{ t, kind, ids, text }]   sim.commands → [{ step, id, type, value }]
 // entries: [{ id, name, team, isPlayer, sprite, colour, ratings{…six}, car{SPD…TYR}, crew 0–400, setup 0–1,
-//             tyre (start compound), openFaults, condition, pitService (seconds), tyreWearMult?, failureMult? }] — a
+//             tyre (start compound), openFaults, condition, pitService (seconds), tyreWearMult?, failureMult?,
+//             fuel? (Milestone 15: 'lean' | 'normal' | 'rich', data/race.js FUEL — race pace, tyre wear, failures) }] — a
 //             snapshot taken when the race is created, so nothing can change it later.
 import { Rng } from '../../../../core/Rng.js';
-import { RACE, TYRES, TYRE_WEAR, PACE_MODES, ORDERS, PIT, AUTO, WEEKEND } from '../../data/race.js';
+import { RACE, TYRES, TYRE_WEAR, PACE_MODES, ORDERS, PIT, AUTO, WEEKEND, FUEL } from '../../data/race.js';
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
@@ -41,6 +42,9 @@ export function paceMultiplier(score, rules = RACE) {
   const c = rules.paceCurve;
   return clamp(1 - c.slope * (score - c.ref), c.min, c.max);
 }
+// Milestone 15: the entry's fuel / energy target (Normal when it has none).
+export const fuelOf = (entry) => FUEL[entry?.fuel] ?? FUEL.normal;
+
 // Time multiplier for a tyre at this wear (fresh = its compound pace only).
 export function tyreFactor(tyre, wear) {
   const w = TYRE_WEAR;
@@ -56,16 +60,37 @@ export function wearPerLap(entry, tyre) {
   return base * clamp(care, 0.6, 1.4) * clamp(stat, 0.6, 1.4) * (entry.tyreWearMult ?? 1); // Milestone 10: tyre prep (facilities)
 }
 
-// Qualifying (§22.3): one flying lap each on the starting tyre, seeded bounded variance. → rows fastest first.
-export function runQualifying({ geo, entries, seed, rules = RACE }) {
+// Milestone 15: the weather's effect on a tyre (§22.3 "weather"). Real weather arrives in Milestone 17; until then every
+// session is 'dry' and a tyre runs at its own dry pace (data/race.js TYRES), so this is 1.
+export function weatherPace(tyre, weather = 'dry') {
+  void tyre;
+  void weather;
+  return 1;
+}
+
+// The chance of a mechanical failure on one lap (bible §23.6, mild): the car's REL, open faults, a Condition under
+// lowConditionBelow, the pace mode, the race crew's traits and a skipped repair (entry.failureMult), and the fuel target.
+export function failureChance(e, paceId = 'normal', rules = RACE) {
+  const f = rules.failure;
+  let p = f.basePerLap * (1 + Math.max(0, f.relRef - (e.car.REL ?? f.relRef)) / f.relSpan) * (1 + (e.openFaults ?? 0) * f.perOpenFault);
+  if ((e.condition ?? 100) < f.lowConditionBelow) p *= f.lowConditionX;
+  p *= PACE_MODES[paceId].failure;
+  p *= e.failureMult ?? 1; // Milestone 13: the race crew's reliability traits (1 = none); Milestone 15: a skipped repair
+  p *= fuelOf(e).failure; // Milestone 15: the fuel / energy target
+  return p;
+}
+
+// Qualifying (§22.3): one flying lap each on the starting tyre: car track-fit + the Qualifying rating + setup score +
+// tyre + weather + seeded bounded variance. → rows fastest first (each with its setup score 0–100).
+export function runQualifying({ geo, entries, seed, weather = 'dry', rules = RACE }) {
   const rng = new Rng(`quali:${seed}`);
   const v = rules.variance;
   const rows = entries.map((e) => {
     const width = (v.maxPct / 100) * clamp(1 - e.ratings.consistency / v.consistencyFull, v.minShare, 1);
     let time = 0;
     for (const sg of geo.segments) time += ((sg.toS - sg.fromS) / sg.refSpeed) * paceMultiplier(paceScore(e, sg, rules, 'quali'), rules) * (1 + rng.range(-1, 1) * width);
-    time *= tyreFactor(e.tyre ?? 'medium', 0);
-    return { id: e.id, name: e.name, team: e.team, isPlayer: !!e.isPlayer, tyre: e.tyre ?? 'medium', time: Math.round(time * 1000) / 1000 };
+    time *= tyreFactor(e.tyre ?? 'medium', 0) * weatherPace(e.tyre ?? 'medium', weather);
+    return { id: e.id, name: e.name, team: e.team, isPlayer: !!e.isPlayer, tyre: e.tyre ?? 'medium', setup: Math.round((e.setup ?? rules.pace.setupDefault) * 100), time: Math.round(time * 1000) / 1000 };
   });
   rows.sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
   rows.forEach((r, i) => (r.pos = i + 1));
@@ -151,7 +176,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
   const nameOf = (id) => byId[id].name;
   const zoneAt = (s) => zones.find((z) => geo.inZone(s, z)) ?? null;
   const lapsLeft = (c) => laps - Math.max(0, c.s) / L; // race distance still to go, in laps
-  const wearRate = (c) => wearPerLap(byId[c.id], c.tyre) * PACE_MODES[c.pace].wear * ORDERS[c.order].wear;
+  const wearRate = (c) => wearPerLap(byId[c.id], c.tyre) * PACE_MODES[c.pace].wear * ORDERS[c.order].wear * fuelOf(byId[c.id]).wear;
 
   // Variance width for this driver (bible §23.4: Consistency narrows it, never to zero).
   const varWidth = (e) => {
@@ -166,7 +191,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     const u = rng.range(-1, 1) * varWidth(e);
     let time = base[c.id][k] * (1 + u) * (1 + c.damagePct / 100);
     if (c.failLapsLeft > 0) time *= 1 + c.failPct / 100;
-    time *= tyreFactor(c.tyre, c.wear) * (1 + PACE_MODES[c.pace].time) * (1 + ORDERS[c.order].time);
+    time *= tyreFactor(c.tyre, c.wear) * (1 + PACE_MODES[c.pace].time) * (1 + ORDERS[c.order].time) * (1 + fuelOf(e).time);
     c.segSpeed = (segs[k].toS - segs[k].fromS) / time;
   }
 
@@ -247,11 +272,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
   function lapFailureRoll(c) {
     const e = byId[c.id];
     const f = rules.failure;
-    let p = f.basePerLap * (1 + Math.max(0, f.relRef - (e.car.REL ?? f.relRef)) / f.relSpan) * (1 + (e.openFaults ?? 0) * f.perOpenFault);
-    if ((e.condition ?? 100) < f.lowConditionBelow) p *= f.lowConditionX;
-    p *= PACE_MODES[c.pace].failure;
-    p *= e.failureMult ?? 1; // Milestone 13: the race crew's reliability traits (1 = none)
-    if (!rng.chance(p)) return;
+    if (!rng.chance(failureChance(e, c.pace, rules))) return;
     const roll = rng.next();
     if (roll < f.share.paceLoss) {
       c.failLapsLeft = f.paceLossLaps;

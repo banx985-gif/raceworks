@@ -12,10 +12,17 @@
 // The medal goes into the account records (src/systems/drills.js) and, when the drill was played for a course, sets
 // that course's bonus (team.training.drillDone). A hand back or quit is a no-medal result: the course still trains.
 // enter({ drillId, staffId, courseId, practice }) — practice: played from the medal history (records only, no course).
+// Milestone 15: enter({ qualiLap: true }) — the optional Qualifying Drive lap (bible §22.3 / §25): one lap of the race
+// weekend's real circuit (src/race/lapCourse.js) in the same controller, with the same controls and aids. Start commits
+// qualifying to the lap (team.races.startDriveLap); finishing it runs qualifying with the lap's bounded bonus / penalty,
+// and a hand back runs the normal simulated session. The intro's Back leaves without driving (Run qualifying is still
+// there). No medals or records. ?debug=1 adds "Debug: autopilot lap" (the controller's own perfect lap, at once).
 import { THEME } from '../../../../core/Theme.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { text, para, card } from '../../../../core/ui/Kit.js';
-import { DrivingChallengeController } from '../minigames/DrivingChallengeController.js';
+import { DrivingChallengeController, autopilot } from '../minigames/DrivingChallengeController.js';
+import { DRIVE_LAP } from '../../data/race.js';
+import { TRACKS } from '../race/tracks.js';
 import { ReactionLights } from '../minigames/ReactionLights.js';
 import { drillById, MEDALS, MEDAL_NAMES, DRILL_BONUS, DRILL_SETTINGS, DRIVE } from '../../data/drills.js';
 import { CLASSES } from '../../data/cars.js';
@@ -30,6 +37,16 @@ const PAD = 28;
 const PX = 13; // screen px per metre while driving
 const GRASS = '#7DB65A';
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+// The Qualifying Drive lap, dressed as a drill for this screen (Milestone 15).
+function qualiLapDrill(trackName) {
+  return {
+    id: 'qualiLap',
+    name: 'Qualifying Drive lap',
+    kind: 'lap',
+    how: `One flying lap of ${trackName}, driven by you. Auto throttle: drag the lower-left zone to steer and hold Brake. Beat the crew’s lap to gain time on the grid; a slow lap, going off or hitting a wall loses time — a little either way. Hand Back at any time and qualifying is simulated as normal.`,
+  };
+}
 
 export function createDrillScreen({ renderer, layout, assets, team, bus, settings, records, debugEnabled = false, onDone = () => {}, toast = () => {} }) {
   let drill = null;
@@ -62,6 +79,18 @@ export function createDrillScreen({ renderer, layout, assets, team, bus, setting
 
   function begin() {
     const d = drill;
+    if (params.qualiLap) {
+      const cfg = team.races.startDriveLap();
+      if (!cfg) return onDone(params, null);
+      ctl = new DrivingChallengeController().start({ ...cfg, aids: { line: opt('lineAid'), brake: opt('brakeAid') }, sensitivity: opt('steerSensitivity') });
+      camH = ctl.state.car.h;
+      steer = 0;
+      steerId = null;
+      brakeIds.clear();
+      handBack = false;
+      step = 'play';
+      return;
+    }
     const s = driver();
     const seed = `${d.id}:${team.setup.teamName}:${params.staffId ?? 'practice'}:${team.clock.totalDays}`;
     if (d.kind === 'lights') ctl = new ReactionLights().start({ seed, rounds: d.length });
@@ -77,6 +106,12 @@ export function createDrillScreen({ renderer, layout, assets, team, bus, setting
 
   // The drill ended (finished, handed back, skipped or forced): records, the course bonus, the result panel.
   function finish(r, { forced = false, skipped = false } = {}) {
+    if (params.qualiLap) {
+      const quali = team.races.finishDriveLap(r);
+      result = { ...r, quali, drive: quali?.drive ?? null };
+      step = 'result';
+      return;
+    }
     const medal = r.finished ? medalFor(drill, r.score) : null;
     const rec = skipped ? { medal: null, firstGold: false, newBest: false } : records.record(drill.id, r, { forced });
     if (!params.practice && params.staffId) team.training.drillDone(params.staffId, { medal });
@@ -138,7 +173,7 @@ export function createDrillScreen({ renderer, layout, assets, team, bus, setting
     ctx.fill();
     // kerbs on the bends (red / white blocks at both edges)
     for (let i = i0; i < i1; i += 2) {
-      if (!P[i].k) continue;
+      if (Math.abs(P[i].k) < 1 / 160) continue; // a circuit's centreline is rarely exactly straight
       for (const side of [-1, 1]) {
         const a = edge(P[i], side);
         const b = edge(P[i + 2], side);
@@ -229,7 +264,8 @@ export function createDrillScreen({ renderer, layout, assets, team, bus, setting
     card(ctx, box, 'info');
     text(ctx, drill.name, box.x + PAD, box.y + 20, { size: S.heading, bold: true, maxWidth: box.w - PAD * 2 });
     let line = '';
-    if (st.kind === 'line' || st.kind === 'wet') line = `Gates ${st.gates.filter((g) => g.hit).length} / ${st.gates.length} · ${st.t.toFixed(1)} s (par ${st.par.toFixed(1)})`;
+    if (st.kind === 'lap') line = `Lap ${st.t.toFixed(1)} s · the crew’s lap ${(st.par * DRIVE_LAP.parSlack).toFixed(1)} s · apexes ${st.gates.filter((g) => g.hit).length} / ${st.gates.length}`;
+    else if (st.kind === 'line' || st.kind === 'wet') line = `Gates ${st.gates.filter((g) => g.hit).length} / ${st.gates.length} · ${st.t.toFixed(1)} s (par ${st.par.toFixed(1)})`;
     else if (st.kind === 'brake') line = `Attempt ${Math.min(3, st.attempts.length + 1)} of 3 · ${st.attempts.map((a) => (a.ok ? a.score : 'over')).join(' · ') || 'hold Brake late'}`;
     else if (st.kind === 'overtake') line = `Passed ${st.ai.filter((a) => a.passed).length} / ${st.ai.length} · contacts ${st.contacts} · ${Math.max(0, DRIVE.overtake.timeLimit - st.t).toFixed(0)} s`;
     else if (st.kind === 'tyre') line = `${st.t.toFixed(1)} s (target ${st.par.toFixed(1)}–${(st.par * 1.1).toFixed(1)}) · tyre load ${Math.round((100 * st.load) / (st.parLoad * 1.15))}%`;
@@ -305,7 +341,63 @@ export function createDrillScreen({ renderer, layout, assets, team, bus, setting
     card(ctx, box, 'normal');
     return box;
   }
+  function drawQualiIntro(ctx) {
+    ctx.fillStyle = GRASS;
+    ctx.fillRect(0, 0, renderer.width, renderer.height);
+    const box = panel(ctx, 700 + (debugEnabled ? 134 : 0));
+    let y = box.y + PAD;
+    text(ctx, drill.name, box.x + PAD, y, { size: S.title, bold: true, maxWidth: box.w - PAD * 2 - 180 });
+    assets.drawContained(ctx, 'race_ui_30', { x: box.x + box.w - PAD - 150, y: y - 10, w: 150, h: 150 });
+    y += 90;
+    text(ctx, `${driver()?.name ?? ''} · ${TRACKS[team.races.current?.trackId]?.name ?? ''}`, box.x + PAD, y, { size: S.small, bold: true, color: C.textMuted, maxWidth: box.w - PAD * 2 - 180 });
+    y += 70;
+    para(ctx, drill.how, box.x + PAD, y, box.w - PAD * 2, { size: S.body });
+    const bw = (box.w - PAD * 2 - 20) / 2;
+    const go = { x: box.x + PAD, y: box.y + box.h - PAD - 120 - (debugEnabled ? 134 : 0), w: bw, h: 120 };
+    const back = { x: box.x + PAD + bw + 20, y: go.y, w: bw, h: 120 };
+    drawButton(ctx, go, 'Start lap', { accent: C.good });
+    drawButton(ctx, back, 'Back', { accent: C.progress });
+    hits.push({ rect: go, id: 'go', onTap: begin });
+    hits.push({ rect: back, id: 'skip', onTap: () => onDone(params, null) });
+    if (debugEnabled) {
+      const r = { x: box.x + PAD, y: go.y + 134, w: box.w - PAD * 2, h: 120 };
+      drawButton(ctx, r, 'Debug: autopilot lap', { accent: C.purple });
+      hits.push({ rect: r, id: 'force_auto', onTap: autoLap });
+    }
+  }
+  // ?debug=1: start the lap and let the controller's perfect driver finish it at once.
+  function autoLap() {
+    begin();
+    if (step !== 'play') return;
+    let guard = 0;
+    while (!ctl.state.finished && guard++ < 60 * 400) ctl._step(autopilot(ctl));
+    finish(ctl.result());
+  }
+  function drawQualiResult(ctx) {
+    const r = result;
+    const q = r.quali;
+    const box = panel(ctx, 700);
+    let y = box.y + PAD;
+    const d = r.drive;
+    text(ctx, d ? 'Lap complete' : 'Handed back', box.x + box.w / 2, y, { size: S.title, bold: true, align: 'center', maxWidth: box.w - PAD * 2 });
+    y += 110;
+    if (d) {
+      text(ctx, `Your lap ${d.time.toFixed(2)} s · the crew’s lap ${(d.par * DRIVE_LAP.parSlack).toFixed(2)} s`, box.x + box.w / 2, y, { size: S.body, bold: true, align: 'center', maxWidth: box.w - PAD * 2 });
+      y += 70;
+      const words = d.delta < 0 ? `−${Math.abs(d.delta).toFixed(2)} s on your qualifying time` : d.delta > 0 ? `+${d.delta.toFixed(2)} s on your qualifying time` : 'No change to your qualifying time';
+      text(ctx, words, box.x + box.w / 2, y, { size: S.heading, bold: true, align: 'center', color: d.delta <= 0 ? C.good : C.bad, maxWidth: box.w - PAD * 2 });
+      y += 70;
+      text(ctx, `(a lap can move it by at most ±${d.cap.toFixed(2)} s)`, box.x + box.w / 2, y, { size: S.small, align: 'center', color: C.textMuted });
+    } else text(ctx, 'Qualifying was simulated as normal', box.x + box.w / 2, y, { size: S.body, align: 'center', color: C.textMuted, maxWidth: box.w - PAD * 2 });
+    y += 80;
+    const me = q?.rows.find((x) => x.isPlayer);
+    if (me) text(ctx, `You start P${me.pos}`, box.x + box.w / 2, y, { size: S.title, bold: true, align: 'center' });
+    const b = { x: box.x + PAD, y: box.y + box.h - PAD - 120, w: box.w - PAD * 2, h: 120 };
+    drawButton(ctx, b, 'Done', { accent: C.good });
+    hits.push({ rect: b, id: 'done', onTap: done });
+  }
   function drawIntro(ctx) {
+    if (params.qualiLap) return drawQualiIntro(ctx);
     const s = driver();
     const R = sr();
     ctx.fillStyle = GRASS;
@@ -346,6 +438,7 @@ export function createDrillScreen({ renderer, layout, assets, team, bus, setting
     void R;
   }
   function drawResult(ctx) {
+    if (params.qualiLap) return drawQualiResult(ctx);
     const r = result;
     const box = panel(ctx, 820);
     let y = box.y + PAD;
@@ -396,7 +489,8 @@ export function createDrillScreen({ renderer, layout, assets, team, bus, setting
     buttonRect: (id) => hits.find((h) => h.id === id)?.rect ?? null,
     enter(p = {}) {
       params = { ...p };
-      drill = drillById(p.drillId);
+      if (p.qualiLap) params.staffId = team.races.current?.entries.find((e) => e.isPlayer)?.driverId ?? null;
+      drill = p.qualiLap ? qualiLapDrill(TRACKS[team.races.current?.trackId]?.name ?? 'the circuit') : drillById(p.drillId);
       step = 'intro';
       ctl = null;
       result = null;

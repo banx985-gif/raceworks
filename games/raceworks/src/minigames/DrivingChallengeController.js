@@ -2,9 +2,13 @@
 // steering and brake on a short code-drawn course, for the car drills now and the Qualifying Drive Challenge (M15) and
 // race Drive Stints (M25) later. RACEWORKS-only (not core/) until a second series game needs it.
 //   const c = new DrivingChallengeController()
-//   c.start(config)            config: { seed, kind: 'line' | 'brake' | 'overtake' | 'wet' | 'tyre' | 'free', length,
+//   c.start(config)            config: { seed, kind: 'line' | 'brake' | 'overtake' | 'wet' | 'tyre' | 'free' | 'lap', length,
 //                                         ratings (the driver's six, for §25.4 assistance), aids: { line, brake },
 //                                         sensitivity (0.5–1.5), rules (data/drills.js DRIVE) }
+//                              Milestone 15 (the Qualifying Drive lap): course (a ready course, e.g. a real circuit from
+//                              src/race/lapCourse.js, instead of a seeded one), startSpeed (m/s), timeLimitX (the time
+//                              limit as a multiple of par). Kind 'lap' is scored like the Racing Line (gates at each
+//                              corner's apex + time against par) and its detail also has offTime and walls.
 //   c.tick(dt, input)          input: { steer: −1…1, brake: bool, handBack: bool } — runs whole fixed steps (1/60 s)
 //   c.result()                 → { score 0–100, finished, handedBack, detail } (score only counts when finished)
 //   c.state                    what the screen draws: car, course, gates, AI cars, aids, timers
@@ -133,11 +137,11 @@ export class DrivingChallengeController {
     const rules = config.rules ?? DRIVE;
     const kind = config.kind ?? 'free';
     const r = config.ratings ?? {};
-    const course = buildCourse({ seed: config.seed, kind, length: config.length ?? 900, rules });
+    const course = config.course ?? buildCourse({ seed: config.seed, kind, length: config.length ?? 900, rules });
     const grip = kind === 'wet' ? rules.wet.grip * (1 + (r.wet ?? 0) / 3000) : 1;
     // §25.4: better ratings give bounded help — steering-centre assist, a wider brake window, gentler tyre load.
     const assist = clamp(((r.feedback ?? 0) + (r.racecraft ?? 0)) / 2 / 4000, 0, rules.steerAssistMax);
-    const gates = kind === 'line' || kind === 'wet' ? course.bends.map((b) => ({ s: b.apex, lat: racingOffset(course, b.apex), w: rules.gate.width, hit: null })) : [];
+    const gates = kind === 'line' || kind === 'wet' || kind === 'lap' ? course.bends.map((b) => ({ s: b.apex, lat: racingOffset(course, b.apex), w: rules.gate.width, hit: null })) : [];
     const st = {
       kind,
       seed: config.seed,
@@ -164,12 +168,13 @@ export class DrivingChallengeController {
       tyreGentle: 1 - clamp((r.tyreCare ?? 0) / 3000, 0, 0.2),
       par: config.par ?? null,
       parLoad: config.parLoad ?? null,
+      timeLimit: config.timeLimit ?? (kind === 'overtake' ? rules.overtake.timeLimit : rules.timeLimit),
       lastBrake: false,
       events: [], // [{ t, kind }] for the screen (gate hit / miss, contact, attempt)
     };
     this.state = st;
     this.acc = 0;
-    this._placeCar(kind === 'brake' ? rules.car.topSpeed : kind === 'overtake' ? rules.car.topSpeed * 0.6 : 18);
+    this._placeCar(config.startSpeed ?? (kind === 'brake' ? rules.car.topSpeed : kind === 'overtake' ? rules.car.topSpeed * 0.6 : 18));
     if (kind === 'overtake') {
       const o = rules.overtake;
       for (let n = 0; n < o.aiCount; n++) {
@@ -187,12 +192,13 @@ export class DrivingChallengeController {
     // Par (the autopilot's run on this same course) unless given.
     if (st.par == null && kind !== 'brake' && !config.noPar) {
       const ghost = new DrivingChallengeController();
-      ghost.start({ ...config, noPar: true, par: 1, parLoad: 1 });
+      ghost.start({ ...config, noPar: true, par: 1, parLoad: 1, timeLimitX: null, ...(config.timeLimitX ? { timeLimit: Infinity } : {}) });
       let guard = 0;
       while (!ghost.state.finished && guard++ < 60 * 200) ghost._step(autopilot(ghost));
       st.par = ghost.state.t / (kind === 'tyre' ? 1.05 : 1); // Tyre Care: a careful lap sits mid-band
       st.parLoad = ghost.state.load;
     }
+    if (config.timeLimitX && st.par) st.timeLimit = st.par * config.timeLimitX;
     return this;
   }
 
@@ -278,7 +284,7 @@ export class DrivingChallengeController {
     if (st.kind === 'overtake') this._stepAi(dt);
     if (st.kind === 'brake') return this._stepBrake(braking);
     if (car.s >= c.finishAt) st.finished = true;
-    if (st.t >= (st.kind === 'overtake' ? R.overtake.timeLimit : R.timeLimit)) st.finished = true;
+    if (st.t >= st.timeLimit) st.finished = true;
   }
 
   _stepAi(dt) {
@@ -337,12 +343,13 @@ export class DrivingChallengeController {
     const detail = {};
     let score = 0;
     const k = st.kind;
-    if (k === 'line' || k === 'wet') {
+    if (k === 'line' || k === 'wet' || k === 'lap') {
       const hit = st.gates.filter((g) => g.hit).length;
       const gates = st.gates.length || 1;
       const timeF = clamp((st.par * 1.25 - st.t) / (st.par * 0.25), 0, 1);
       score = 70 * (hit / gates) + 30 * timeF - st.offTime * 4 - st.walls * 5;
       Object.assign(detail, { gatesHit: hit, gates: st.gates.length, time: +st.t.toFixed(2), par: +st.par.toFixed(2) });
+      if (k === 'lap') Object.assign(detail, { offTime: +st.offTime.toFixed(2), walls: st.walls });
     } else if (k === 'brake') {
       score = st.attempts.length ? st.attempts.reduce((t, a) => t + a.score, 0) / (st.rules.brake.attempts ?? 3) : 0;
       detail.attempts = st.attempts;

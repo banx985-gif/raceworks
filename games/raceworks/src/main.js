@@ -11,6 +11,8 @@
 // Milestone 12: Recruitment (Staff → Hire, the Sponsor Wall) and Training (Staff → Train, the Driver Simulator).
 // Milestone 14: optional driver drills (Training → Play Drill / Drills · Medals); with ?debug=1 the drill intro has
 // Force Bronze / Silver / Gold / Fail and the medal history has Practise and Reset records.
+// Milestone 15: the complete race weekend — up to 3 practice runs, the hint bands, fuel / energy and repair priority, and
+// the optional Qualifying Drive lap (the drill screen in its qualiLap mode; ?debug=1 adds an autopilot lap).
 import { THEME, font } from '../../../core/Theme.js';
 import { EventBus } from '../../../core/EventBus.js';
 import { Rng } from '../../../core/Rng.js';
@@ -573,6 +575,8 @@ const trainScreen = createTrainScreen({ layout, assets, team, topBar: screenBar,
 // Milestone 14: a drill, and the medal history. A finished drill returns to where it was opened from.
 const drillScreen = createDrillScreen({ renderer, layout, assets, team, bus, settings, records: drillRecords, debugEnabled: debug.enabled, toast: (a, b) => toast(a, b), onDone: (p, result) => {
   back();
+  // Milestone 15: the Qualifying Drive lap returns to the weekend with the grid set
+  if (p.qualiLap && result?.quali) toast(`Qualified P${result.quali.rows.find((r) => r.isPlayer).pos}`, result.drive ? 'With your Drive lap' : 'Simulated after the hand back');
   if (result?.medal) toast(`${result.medal[0].toUpperCase()}${result.medal.slice(1)} medal!`, result.pct ? `+${result.pct}% on this course` : 'Saved in your medal history');
   team.save();
 } });
@@ -597,7 +601,7 @@ const carGarageScreen = createCarGarageScreen({ layout, assets, team, topBar: sc
 const researchScreen = createResearchScreen({ layout, assets, team, topBar: screenBar, toast: (a, b) => toast(a, b), debugEnabled: debug.enabled }); // Milestone 11
 const raceIntroScreen = createRaceIntroScreen({ layout, assets, team, topBar: screenBar, onStart: startRace });
 const raceScreen = createRaceScreen({ renderer, layout, assets, team, bus, settings, onFinished: raceFinished, onLeave: () => leaveRace(), toast: (a, b) => toast(a, b) });
-const weekendScreen = createWeekendScreen({ layout, assets, team, topBar: screenBar, onStartRace: startRace, toast: (a, b) => toast(a, b) });
+const weekendScreen = createWeekendScreen({ layout, assets, team, topBar: screenBar, onStartRace: startRace, onDriveLap: () => goSub('drill', { qualiLap: true }), toast: (a, b) => toast(a, b) }); // Milestone 15: + the Drive lap
 // The result: prize Credits and Reputation (through the Milestone 5 ledger and rank), setup and qualifying.
 const resultLines = (e) => {
   const out = [];

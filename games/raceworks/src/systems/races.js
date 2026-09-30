@@ -24,10 +24,25 @@ import { createRaceSim, runQualifying } from '../race/raceSim.js';
 import { buildField, playerEntry } from '../race/field.js';
 import { TRACKS, geoOf } from '../race/tracks.js';
 import { TEST_RACE } from '../../data/rivals.js';
-import { RACE, WEEKEND, SETUP_AXES, TYRES, PIT, PRIZES } from '../../data/race.js';
+import { RACE, WEEKEND, SETUP_AXES, TYRES, TYRE_ORDER, PIT, PRIZES, AUTO, FUEL, REPAIR, REPAIR_ORDER, DRIVE_LAP } from '../../data/race.js';
+import { COSTS } from '../../data/economy.js';
+import { CLASSES } from '../../data/cars.js';
+import { courseFromTrack } from '../race/lapCourse.js';
 
 const HISTORY_KEEP = 30;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const r3 = (v) => Math.round(v * 1000) / 1000;
+const TYRE_WEAR_LIMIT = AUTO.pitWear; // "laps before a stop": when the crew would pit
+
+// Milestone 15: what a Qualifying Drive lap does to the simulated qualifying time (bible §25.5). The lap is compared
+// with the controller's perfect lap × parSlack; off-road seconds and wall hits cost extra; the change is capped at
+// ± clamp(capMin, capMax, simulated time × capShare). A lap that ran out of time counts as the full +cap.
+//   drive: { time, finished, detail: { par, offTime, walls } } → { delta, cap, raw, time, par }
+export function driveLapDelta(drive, simTime, D = DRIVE_LAP) {
+  const cap = r3(clamp(simTime * D.capShare, D.capMin, D.capMax));
+  const raw = drive.finished ? simTime * (drive.time / (drive.detail.par * D.parSlack) - 1) + (drive.detail.offTime ?? 0) * D.offTrackSecs + (drive.detail.walls ?? 0) * D.wallSecs : cap;
+  return { delta: r3(clamp(raw, -cap, cap)), cap, raw: r3(raw), time: drive.time, par: drive.detail.par };
+}
 
 export function createRaces({ bus, team }) {
   const cur = () => api.current;
@@ -58,6 +73,27 @@ export function createRaces({ bus, team }) {
     return { n, kind, seed, trackId: track.id, laps, entries, grid, carNumber: rec.number, createdDay: team.clock.totalDays, state: null, status: 'ready', crew: crew.map((s) => s.id), crewKnowledge: trait('setupKnowledge') };
   }
 
+  // Milestone 15: the setup locks (qualifying): the repair priority is paid through the ledger (Credits, and the Lead
+  // Mechanic's Energy for the pit crew's time) and the car's Condition goes into the entry; racing unrepaired (Skip,
+  // or a repair you can no longer afford) carries REPAIR.skipFailureX into the race's failure rolls.
+  function lockSetup(w) {
+    const rec = team.cars.cars.get(w.carNumber);
+    const me = w.entries.find((e) => e.isPlayer);
+    const q = api.repairQuote(w.setup.repair);
+    let paid = 0;
+    if (rec && q.points && q.affordable) {
+      team.money.economy.add('credits', -q.cost, `Race repair (${REPAIR[q.choice].name}): ${rec.name}`, 'repair');
+      rec.condition = q.to;
+      paid = q.cost;
+      if (q.mechanic) q.mechanic.energy = Math.max(0, q.mechanic.energy - q.energy);
+      bus.emit('car:repaired', { record: rec, cost: q.cost });
+    }
+    me.condition = rec?.condition ?? me.condition;
+    const unrepaired = me.condition < 100 && !paid;
+    if (unrepaired) me.failureMult = r3((me.failureMult ?? 1) * REPAIR.skipFailureX);
+    w.repair = { choice: w.setup.repair, from: q.condition, to: me.condition, cost: paid, energy: paid ? q.energy : 0, mechanicId: paid ? q.mechanic?.id ?? null : null, unrepaired };
+  }
+
   const api = {
     current: null,
     history: [],
@@ -78,7 +114,7 @@ export function createRaces({ bus, team }) {
       return { ok: true, race: api.current };
     },
 
-    // --- the race weekend (Milestone 7, bible §22) ----------------------------------------------------------------
+    // --- the race weekend (Milestone 7, bible §22; completed in Milestone 15) -------------------------------------
     createWeekend({ carNumber = null, config = TEST_RACE } = {}) {
       if (api.current) return { ok: true, race: api.current, existing: true };
       const rec = carNumber ? team.cars.cars.get(carNumber) : team.cars.cars.latest();
@@ -87,33 +123,67 @@ export function createRaces({ bus, team }) {
       w.grid = null; // set by qualifying
       w.stage = 'practice';
       w.practice = null;
-      w.setup = { aero: 0, gearing: 0, suspension: 0, tyre: 'medium', auto: true, touched: false };
+      w.setup = { aero: 0, gearing: 0, suspension: 0, tyre: 'medium', auto: true, touched: false, fuel: 'normal', repair: 'skip' };
       w.quali = null;
+      w.repair = null; // Milestone 15: what the repair did when the setup locked
+      w.driveLap = null; // Milestone 15: the Qualifying Drive lap, once started
       api.current = w;
       bus.emit('race:created', { race: w });
       return { ok: true, race: w };
     },
-    // Practice (§22.1): Setup Knowledge 0–100 from the Engineer, the driver's feedback and the crew.
+    // Practice (§22.1): Setup Knowledge 0–100 from the Engineer, the driver's Technical Feedback (bible §10.3) and the
+    // Mechanic / Aero crew — the full value after all maxRuns practice runs.
     practiceValue() {
       const p = WEEKEND.practice;
       const me = cur().entries.find((e) => e.isPlayer);
       const raw = p.eng * best('ENG') + p.feedback * me.ratings.feedback + p.crew * ((best('MEC') + best('AER')) / 2);
       return (raw / p.full) * 100;
     },
+    // Where the knowledge comes from (the screen and tests): the staff value, the facilities (Basic Dyno, Telemetry Room
+    // and, on a technical track, the Wind Tunnel — all through the garage's effect queries) and the race crew's traits.
+    knowledgeSources(w = cur()) {
+      const technical = WEEKEND.technicalProfiles.includes(TRACKS[w.trackId]?.profile);
+      return {
+        staff: api.practiceValue(),
+        facilities: team.facilities?.bonus('setupKnowledge') ?? 0,
+        technical: technical ? team.facilities?.bonus('setupKnowledge.technical') ?? 0 : 0,
+        traits: w.crewKnowledge ?? 0,
+      };
+    },
+    // Setup Knowledge after this many practice runs (0 = skipped). Fixed by the weekend seed: a reload can't reroll it.
+    knowledgeAfter(runs) {
+      const w = cur();
+      const p = WEEKEND.practice;
+      const src = api.knowledgeSources(w);
+      const extra = src.facilities + src.technical + src.traits;
+      const skipped = Math.round(clamp(src.staff * p.skipShare + extra, 0, 100));
+      if (!runs) return skipped;
+      const u = new Rng(`practice:${w.seed}`).range(-1, 1) * p.variance;
+      const share = p.runShares[Math.min(runs, p.maxRuns) - 1];
+      return Math.max(skipped, Math.round(clamp(share * (src.staff + u) + extra, 0, 100)));
+    },
+    practiceRuns: () => cur()?.practice?.runs ?? 0,
+    // One practice run (up to maxRuns, until qualifying). The first moves the weekend on to Setup; each run adds
+    // knowledge (diminishing returns), and an untouched Auto Setup follows what the crew now knows.
+    canPractice() {
+      const w = cur();
+      return !!w && w.kind === 'weekend' && !w.quali && !w.driveLap && !w.practice?.skipped && api.practiceRuns() < WEEKEND.practice.maxRuns;
+    },
     runPractice() {
       const w = cur();
-      if (!w || w.kind !== 'weekend' || w.stage !== 'practice') return null;
-      const u = new Rng(`practice:${w.seed}`).range(-1, 1) * WEEKEND.practice.variance;
-      w.practice = { knowledge: Math.round(clamp(api.practiceValue() + u + facilityKnowledge(), 0, 100)), skipped: false };
-      w.stage = 'setup';
-      api.autoSetup(true);
+      if (!api.canPractice()) return null;
+      const runs = api.practiceRuns() + 1;
+      const knowledge = api.knowledgeAfter(runs);
+      w.practice = { knowledge, skipped: false, runs, log: [...(w.practice?.log ?? []), knowledge] };
+      if (w.stage === 'practice') w.stage = 'setup';
+      if (w.setup.auto) api.autoSetup(true);
       bus.emit('race:progress', {});
       return w.practice;
     },
     skipPractice() {
       const w = cur();
       if (!w || w.kind !== 'weekend' || w.stage !== 'practice') return null;
-      w.practice = { knowledge: Math.round(clamp(api.practiceValue() * WEEKEND.practice.skipShare + facilityKnowledge(), 0, 100)), skipped: true };
+      w.practice = { knowledge: api.knowledgeAfter(0), skipped: true, runs: 0, log: [] };
       w.stage = 'setup';
       api.autoSetup(true);
       bus.emit('race:progress', {});
@@ -130,48 +200,119 @@ export function createRaces({ bus, team }) {
       for (const a of SETUP_AXES) out[a.id] = clamp(ideal[a.id] + rng.range(-1, 1) * (1 - k) * WEEKEND.setup.autoNoise, -1, 1);
       return out;
     },
-    // What the engineer says per axis: nothing below hintFrom knowledge, a range, or one option from exactFrom.
-    hints() {
-      const k = api.knowledge();
+    // Milestone 15: the engineer's hint band per axis on the −1…+1 scale, around the crew's estimate: the whole range
+    // at 0 knowledge, exact at 100. → { aero: { lo, hi, centre, half, options: [first, last] (option indexes 0–2) } … }
+    hintBands() {
+      const k = api.knowledge() / 100;
       const est = api.estimate();
-      const st = WEEKEND.setup;
+      const half = WEEKEND.setup.hintHalfMax * (1 - k);
       const out = {};
       for (const a of SETUP_AXES) {
-        if (k < st.hintFrom) out[a.id] = null;
-        else {
-          const unc = k >= st.exactFrom ? 0 : (1 - k / 100) * 0.8;
-          const lo = Math.round(clamp(est[a.id] - unc, -1, 1));
-          const hi = Math.round(clamp(est[a.id] + unc, -1, 1));
-          out[a.id] = lo === hi ? a.options[lo + 1] : `${a.options[lo + 1]}–${a.options[hi + 1]}`;
-        }
+        const lo = clamp(est[a.id] - half, -1, 1);
+        const hi = clamp(est[a.id] + half, -1, 1);
+        // an option is covered when it is within half a step of the band
+        out[a.id] = { lo, hi, centre: est[a.id], half, options: [Math.max(-1, Math.ceil(lo - 0.5)) + 1, Math.min(1, Math.floor(hi + 0.5)) + 1] };
       }
       return out;
     },
-    // Auto Setup: the option nearest the crew's estimate on each axis.
+    // What the engineer says per axis: the options the band covers ("Balanced–High"), one option when it's that sure,
+    // or null when it could be anything (the band covers all three).
+    hints() {
+      const bands = api.hintBands();
+      const out = {};
+      for (const a of SETUP_AXES) {
+        const [f, l] = bands[a.id].options;
+        out[a.id] = f === 0 && l === 2 ? null : f === l ? a.options[f] : `${a.options[f]}–${a.options[l]}`;
+      }
+      return out;
+    },
+    // Auto Setup: the option nearest the crew's estimate (the band's centre) on each axis.
     autoSetup(quiet = false) {
       const w = cur();
-      if (!w || w.quali) return false;
+      if (!w || w.quali || w.driveLap) return false;
       const est = api.estimate();
-      for (const a of SETUP_AXES) w.setup[a.id] = Math.round(est[a.id]);
+      for (const a of SETUP_AXES) w.setup[a.id] = Math.round(est[a.id]) || 0; // never −0
       w.setup.auto = true;
       if (!quiet) bus.emit('race:progress', {});
       return true;
     },
+    // Can the setup still change? (from the start of the weekend until qualifying — or a Drive lap — locks it)
+    get setupOpen() {
+      const w = cur();
+      return !!w && w.kind === 'weekend' && !w.quali && !w.driveLap;
+    },
     setAxis(axis, value) {
       const w = cur();
-      if (!w || w.quali || !SETUP_AXES.some((a) => a.id === axis)) return false;
-      w.setup[axis] = clamp(Math.round(value), -1, 1);
+      if (!api.setupOpen || !SETUP_AXES.some((a) => a.id === axis)) return false;
+      w.setup[axis] = clamp(Math.round(value), -1, 1) || 0;
       w.setup.auto = false;
       w.setup.touched = true;
       bus.emit('race:progress', {});
       return true;
     },
+    // Every compound, and whether this team may start on it (Milestone 11: research opens Hard / Inter / Wet).
+    tyreOptions: () => TYRE_ORDER.map((id) => ({ id, open: team.research.tyreOpen(id) })),
     setTyre(id) {
       const w = cur();
-      if (!w || w.quali || !team.research.tyreOpen(id)) return false; // Milestone 11: research opens Hard / Inter / Wet
+      if (!api.setupOpen || !team.research.tyreOpen(id)) return false;
       w.setup.tyre = id;
       bus.emit('race:progress', {});
       return true;
+    },
+    // Milestone 15: the fuel / energy target (Lean / Normal / Rich). Electric classes call it energy.
+    get energyWord() {
+      const rec = team.cars.cars.get(cur()?.carNumber);
+      return CLASSES[rec?.result?.classId]?.tag === 'electric' ? 'Energy' : 'Fuel';
+    },
+    setFuel(id) {
+      const w = cur();
+      if (!api.setupOpen || !FUEL[id]) return false;
+      w.setup.fuel = id;
+      bus.emit('race:progress', {});
+      return true;
+    },
+    // Milestone 15: repair priority when the car's Condition is under 100. → { choice, condition, to, points, cost,
+    // energy, mechanic, affordable } — nothing is paid until the setup locks.
+    repairQuote(choice = cur()?.setup?.repair ?? 'skip') {
+      const w = cur();
+      const rec = team.cars.cars.get(w?.carNumber);
+      const condition = rec?.condition ?? 100;
+      const r = REPAIR[choice] ?? REPAIR.skip;
+      const points = Math.ceil((100 - condition) * r.share);
+      const cost = points * COSTS.repair.perPoint;
+      const mechanic = crewPeople([raceCrew(team).mechanic]).find(Boolean) ?? null;
+      return { choice, condition, to: condition + points, points, cost, energy: points ? r.crewEnergy : 0, mechanic, affordable: !cost || team.money.affordable(cost) };
+    },
+    needsRepair: () => (team.cars.cars.get(cur()?.carNumber)?.condition ?? 100) < 100,
+    setRepair(choice) {
+      const w = cur();
+      if (!api.setupOpen || !REPAIR_ORDER.includes(choice)) return false;
+      if (!api.repairQuote(choice).affordable) return false;
+      w.setup.repair = choice;
+      bus.emit('race:progress', {});
+      return true;
+    },
+    // The one-line "what this costs" for the setup screen.
+    costLine(kind) {
+      const w = cur();
+      const pct = (v) => `${Math.abs(v * 100).toFixed(1)}%`;
+      if (kind === 'tyre') {
+        const t = TYRES[w.setup.tyre];
+        const laps = Math.round(TYRE_WEAR_LIMIT / (t.wearPerLap * FUEL[w.setup.fuel].wear));
+        return `${t.name}: ${t.pace < 0 ? `${pct(t.pace)} quicker` : t.pace > 0 ? `${pct(t.pace)} slower` : 'the baseline pace'} in the dry · about ${laps} laps before a stop`;
+      }
+      if (kind === 'fuel') {
+        const f = FUEL[w.setup.fuel];
+        if (w.setup.fuel === 'normal') return `${api.energyWord} Normal: no change to pace, tyre wear or failure risk`;
+        return `${api.energyWord} ${f.name}: ${pct(f.time)} ${f.time < 0 ? 'quicker' : 'slower'} a lap · tyre wear ${f.wear > 1 ? '+' : '−'}${Math.round(Math.abs(f.wear - 1) * 100)}% · failure risk ×${f.failure}`;
+      }
+      if (kind === 'repair') {
+        const q = api.repairQuote();
+        if (q.condition >= 100) return 'Condition 100: nothing to repair';
+        if (q.choice === 'skip') return `Skip: race at Condition ${q.condition} · failure risk ×${REPAIR.skipFailureX}`;
+        return `${REPAIR[q.choice].name}: ${q.cost.toLocaleString('en-US')} Cr · Condition ${q.condition} → ${q.to} · ${q.mechanic?.name ?? 'the pit crew'} −${q.energy} Energy`;
+      }
+      return '';
     },
     // Setup score 0–100 against the track's hidden ideal (§22.2).
     // ideal: the track's hidden ideal by default; the crew's estimate() gives their own guess at the score.
@@ -182,27 +323,78 @@ export function createRaces({ bus, team }) {
       const fit = clamp(1 - miss / st.fitDiv, 0, 1);
       return Math.round(100 * fit * (st.base + st.knowledgeShare * (knowledge / 100)));
     },
-    // Qualifying (§22.3): fixed by the weekend seed; locks the setup and sets the grid.
-    runQualifying() {
+    // The weather for qualifying (Milestone 17 brings real weather; until then it is always dry — this is the one place).
+    weather: () => 'dry',
+    // A rival car's setup score (0–1) from its own crew: the driver's Technical Feedback and the team's crew factor.
+    rivalSetup(e, rng) {
+      const rs = WEEKEND.rivalSetup;
+      const v = rs.base + ((e.ratings.feedback - rs.feedbackRef) / 100) * rs.feedbackPer100 + (((e.crew ?? rs.crewRef) - rs.crewRef) / 100) * rs.crewPer100 + rng.range(-1, 1) * rs.spread;
+      return Math.round(clamp(v, 0.2, 0.9) * 100) / 100;
+    },
+    // Qualifying (§22.3): fixed by the weekend seed; locks the setup (repair paid, fuel set) and sets the grid.
+    // drive: a finished Qualifying Drive lap's result (the controller's) — it moves your time within the §25.5 cap.
+    runQualifying({ drive = null } = {}) {
       const w = cur();
       if (!w || w.kind !== 'weekend' || w.stage !== 'setup' || w.quali) return null;
+      if (w.driveLap?.status === 'running' && !drive) return null; // the lap in progress decides
+      lockSetup(w);
       const rng = new Rng(`rivals:${w.seed}`);
       const rs = WEEKEND.rivalSetup;
       for (const e of w.entries) {
         if (e.isPlayer) {
           e.setup = api.setupScore() / 100;
           e.tyre = w.setup.tyre;
+          e.fuel = w.setup.fuel;
         } else {
-          e.setup = Math.round(clamp(rs.base + ((e.ratings.feedback - rs.feedbackRef) / 100) * rs.feedbackPer100 + rng.range(-1, 1) * rs.spread, 0.2, 0.9) * 100) / 100;
+          e.setup = api.rivalSetup(e, rng);
           e.tyre = rng.chance(rs.softShare) ? 'soft' : 'medium';
         }
       }
-      const rows = runQualifying({ geo: geoOf(w.trackId), entries: w.entries, seed: w.seed });
-      w.quali = { rows, setupScore: api.setupScore() };
+      const rows = runQualifying({ geo: geoOf(w.trackId), entries: w.entries, seed: w.seed, weather: api.weather() });
+      let driveOut = null;
+      if (drive) {
+        const me = rows.find((r) => r.isPlayer);
+        driveOut = driveLapDelta(drive, me.time);
+        me.simTime = me.time;
+        me.time = Math.round((me.time + driveOut.delta) * 1000) / 1000;
+        me.drive = true;
+        rows.sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
+        rows.forEach((r, i) => (r.pos = i + 1));
+      }
+      w.quali = { rows, setupScore: api.setupScore(), weather: api.weather(), drive: driveOut };
       w.grid = rows.map((r) => r.id);
       w.stage = 'race';
       bus.emit('race:progress', {});
       return w.quali;
+    },
+
+    // --- the Qualifying Drive lap (Milestone 15, bible §22.3 / §25): optional, one lap of the real circuit ----------
+    get canDriveLap() {
+      return api.setupOpen && cur().stage === 'setup';
+    },
+    // What the DrivingChallengeController needs (the screen starts it). Same weekend = the same lap and the same par.
+    driveLapConfig() {
+      const w = cur();
+      const me = w.entries.find((e) => e.isPlayer);
+      const D = DRIVE_LAP;
+      return { seed: `qlap:${w.seed}`, kind: 'lap', course: courseFromTrack(geoOf(w.trackId)), startSpeed: D.startSpeed, timeLimitX: D.timeLimitX, ratings: { ...me.ratings } };
+    },
+    // Starting the lap commits qualifying to it: the setup locks, and a hand back (or leaving, or a reload mid-lap)
+    // gives the normal simulated session — never a second lap.
+    startDriveLap() {
+      const w = cur();
+      if (!api.canDriveLap) return null;
+      w.driveLap = { status: 'running' };
+      bus.emit('race:progress', {});
+      return api.driveLapConfig();
+    },
+    // The lap is over (the controller's result): qualifying runs with it, or simulated after a hand back.
+    finishDriveLap(result) {
+      const w = cur();
+      if (w?.driveLap?.status !== 'running') return null;
+      const handedBack = !result || result.handedBack;
+      w.driveLap = handedBack ? { status: 'handedBack' } : { status: 'done', time: result.time, finished: result.finished, detail: { ...result.detail } };
+      return api.runQualifying({ drive: handedBack ? null : w.driveLap });
     },
 
     sim(race = api.current) {
@@ -246,6 +438,18 @@ export function createRaces({ bus, team }) {
     serialize: () => JSON.parse(JSON.stringify({ current: api.current, history: api.history, count: api.count })),
     load(s) {
       api.current = s?.current ? JSON.parse(JSON.stringify(s.current)) : null;
+      const w = api.current;
+      if (w?.kind === 'weekend') {
+        // Milestone 15: a weekend saved before it — Normal fuel, Skip repair; an M7 practice was the full value (3 runs)
+        w.setup.fuel ??= 'normal';
+        w.setup.repair ??= 'skip';
+        w.repair ??= null;
+        w.driveLap ??= null;
+        if (w.practice && w.practice.runs == null) w.practice.runs = w.practice.skipped ? 0 : WEEKEND.practice.maxRuns;
+        if (w.practice) w.practice.log ??= [w.practice.knowledge];
+        // a Drive lap that was still running when the game closed can't be driven again: qualifying is simulated
+        if (w.driveLap?.status === 'running' && !w.quali) w.driveLap = { status: 'abandoned' };
+      }
       api.history = JSON.parse(JSON.stringify(s?.history ?? []));
       api.count = s?.count ?? 0;
     },

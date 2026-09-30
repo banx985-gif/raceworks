@@ -99,13 +99,47 @@ export const AUTO = {
 export const WEEKEND = {
   laps: 12, // a weekend race (the Test Race was 8)
   // Practice → Setup Knowledge 0–100 (§22.1): Engineer ENG, the driver's Technical Feedback, Mechanic / Aero help.
-  practice: { eng: 0.45, feedback: 0.35, crew: 0.2, full: 130, variance: 6, skipShare: 0.35 },
+  // Milestone 15: time spent — up to maxRuns practice runs; after run n the crew has runShares[n − 1] of the full value
+  // (diminishing returns). Skip = skipShare. Facilities and crew traits add on top whatever the runs.
+  practice: { eng: 0.45, feedback: 0.35, crew: 0.2, full: 130, variance: 6, skipShare: 0.35, runShares: [0.62, 0.86, 1], maxRuns: 3 },
   // Setup (§22.2): three axes, each −1 / 0 / +1. Score = 100 × fit × (base + knowledgeShare × knowledge).
-  setup: { axisWeight: { aero: 0.4, gearing: 0.3, suspension: 0.3 }, fitDiv: 2, base: 0.75, knowledgeShare: 0.25, autoNoise: 1.2, hintFrom: 25, exactFrom: 75 },
-  rivalSetup: { base: 0.45, feedbackRef: 100, feedbackPer100: 0.25, spread: 0.05, softShare: 0.55 },
-  // Qualifying (§22.3): one flying lap each on the starting tyre, Qualifying rating, bounded variance.
-  quali: { driverQualifying: 0.8, driverConsistency: 0.2 },
+  // Milestone 15: the engineer's hint is a band around the crew's estimate, half-width hintHalfMax × (1 − knowledge):
+  // all three options at 0 (1.5 covers them from any estimate), exact at 100. hintHalfMax ≥ autoNoise, so the band
+  // always holds the track's real ideal.
+  setup: { axisWeight: { aero: 0.4, gearing: 0.3, suspension: 0.3 }, fitDiv: 2, base: 0.75, knowledgeShare: 0.25, autoNoise: 1.2, hintHalfMax: 1.5 },
+  // Rivals' setup scores (0–1) from their own crew: the driver's Technical Feedback and the team's crew factor.
+  rivalSetup: { base: 0.45, feedbackRef: 100, feedbackPer100: 0.25, crewRef: 80, crewPer100: 0.3, spread: 0.05, softShare: 0.55 },
+  // Qualifying (§22.3): one flying lap each on the starting tyre with the Qualifying rating (§10.3, traits included);
+  // Consistency only narrows the bounded variance.
+  quali: { driverQualifying: 1, driverConsistency: 0 },
+  // Wind Tunnel's +5 Setup Knowledge counts on tracks with these profiles (bible §26: T05 Metro Street Circuit).
+  technicalProfiles: ['Technical'],
 };
+
+// Milestone 15: the fuel / energy target (bible §22.2; Electric classes call it energy). The race only (qualifying runs
+// light): time = lap-time change (+ = slower), wear = tyre wear ×, failure = mechanical failure chance ×.
+export const FUEL = {
+  lean: { name: 'Lean', time: 0.01, wear: 0.95, failure: 0.85 },
+  normal: { name: 'Normal', time: 0, wear: 1, failure: 1 },
+  rich: { name: 'Rich', time: -0.005, wear: 1.15, failure: 1.8 },
+};
+export const FUEL_ORDER = ['lean', 'normal', 'rich'];
+// Milestone 15: repair priority before the race when the car's Condition is under 100 (bible §22.2). Credits at the
+// garage's rate a point (data/economy.js COSTS.repair) through the ledger when the setup locks; share = how much of the
+// missing Condition comes back; crewEnergy = the Lead Mechanic's Energy (the pit crew's time). Skip: the race's
+// failure chance × skipFailureX on top of the usual low-Condition rule.
+export const REPAIR = {
+  skip: { name: 'Skip', share: 0, crewEnergy: 0 },
+  quick: { name: 'Quick', share: 0.5, crewEnergy: 6 },
+  full: { name: 'Full', share: 1, crewEnergy: 14 },
+  skipFailureX: 1.3,
+};
+export const REPAIR_ORDER = ['skip', 'quick', 'full'];
+// Milestone 15: the optional Qualifying Drive lap (bible §22.3 / §25.5). One lap of the track in the M14
+// DrivingChallengeController. It's compared with the controller's own perfect lap × parSlack (a good driver's lap);
+// the difference, as a share of the simulated qualifying time, plus offTrackSecs a second off the road and wallSecs a
+// wall hit, moves your qualifying time — capped at ± clamp(capMin, capMax, simulated time × capShare) (§25.5).
+export const DRIVE_LAP = { parSlack: 1.03, capShare: 0.02, capMin: 0.75, capMax: 2.25, offTrackSecs: 0.5, wallSecs: 0.5, startSpeed: 30, timeLimitX: 2.2 };
 export const SETUP_AXES = [
   { id: 'aero', name: 'Aero', icon: 'race_ui_06', options: ['Low', 'Balanced', 'High'] },
   { id: 'gearing', name: 'Gearing', icon: 'race_ui_06', options: ['Short', 'Balanced', 'Long'] },
@@ -122,4 +156,4 @@ export const PRIZES = {
 export const KEY_MOMENTS = { pitWindowWear: 0.55, podiumLastLaps: 2, podiumGap: 1.2 };
 
 // Race HUD icons (assets/images/ui).
-export const RACE_ICONS = { setup: 'race_ui_06', pit: 'race_ui_07', tyres: 'race_ui_09', qualifying: 'race_ui_11', practice: 'race_ui_12', overtake: 'race_ui_16', defend: 'race_ui_17', pace: 'race_ui_18', auto: 'race_ui_29' };
+export const RACE_ICONS = { setup: 'race_ui_06', pit: 'race_ui_07', tyres: 'race_ui_09', fuel: 'race_ui_10', qualifying: 'race_ui_11', practice: 'race_ui_12', overtake: 'race_ui_16', defend: 'race_ui_17', pace: 'race_ui_18', condition: 'race_ui_24', auto: 'race_ui_29', drive: 'race_ui_30' }; // Milestone 15: + fuel, condition, drive (Take the Wheel)
