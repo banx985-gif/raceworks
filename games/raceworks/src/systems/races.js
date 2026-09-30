@@ -18,16 +18,22 @@
 // Milestone 13: the race crew (bible §10.8, src/systems/staffTraits.js raceCrew) is fixed into the race when it's created
 //   (race.crew: ids, for career records) and its work traits into your entry: pitServicePct (pit time), crewPct (crew
 //   factor), tyreWearPct (tyre wear), failurePct (mechanical failures, entry.failureMult); setupKnowledge adds to practice.
+// Milestone 16: the race Strategist's planning quality (src/systems/raceStrategy.js strategyProfile: STR, traits, the
+//   facilities' workPct('strategist') and bonus('autoStrategyPct')) is fixed into every entry as entry.strategy (rivals:
+//   their placeholder strategists), the team's open compounds as entry.openTyres, and the forecast quality (STR, the
+//   Strategist work %, bonus('forecast'), bonus('forecastUncertaintyPct')) as race.forecast for Milestone 17's weather.
+//   races.strategySwing(entry) → the Strategy Swing win a finished race earned ({ kind, lap, planLap, pos } or null).
 import { Rng } from '../../../../core/Rng.js';
 import { raceCrew, crewPeople, effectSum } from './staffTraits.js';
 import { createRaceSim, runQualifying } from '../race/raceSim.js';
 import { buildField, playerEntry } from '../race/field.js';
 import { TRACKS, geoOf } from '../race/tracks.js';
 import { TEST_RACE } from '../../data/rivals.js';
-import { RACE, WEEKEND, SETUP_AXES, TYRES, TYRE_ORDER, PIT, PRIZES, AUTO, FUEL, REPAIR, REPAIR_ORDER, DRIVE_LAP } from '../../data/race.js';
+import { RACE, WEEKEND, SETUP_AXES, TYRES, TYRE_ORDER, PIT, PRIZES, AUTO, FUEL, REPAIR, REPAIR_ORDER, DRIVE_LAP, STRATEGY, SWING } from '../../data/race.js';
 import { COSTS } from '../../data/economy.js';
 import { CLASSES } from '../../data/cars.js';
 import { courseFromTrack } from '../race/lapCourse.js';
+import { strategyProfile, rivalProfile, forecastOf } from './raceStrategy.js';
 
 const HISTORY_KEEP = 30;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -68,9 +74,21 @@ export function createRaces({ bus, team }) {
     const wearPct = (team.facilities?.bonus('tyreWearPct') ?? 0) + trait('tyreWearPct');
     if (wearPct) player.tyreWearMult = 1 + wearPct / 100;
     if (trait('failurePct')) player.failureMult = Math.max(0, 1 + trait('failurePct') / 100);
+    // Milestone 16: the race Strategist (bible §10.8 race crew) and the garage's strategy effects, fixed now
+    const strategist = raceCrew(team).strategist;
+    const str = strategist?.stats.STR ?? STRATEGY.contractorStr;
+    const fx = (key) => team.facilities?.bonus(key) ?? 0;
+    const workPct = team.facilities?.workPct('strategist') ?? 0;
+    player.openTyres = TYRE_ORDER.filter((t) => team.research?.tyreOpen(t) ?? TYRES[t].unlocked);
+    player.strategy = strategyProfile({ str, traits: strategist?.traits ?? [], workPct, autoPct: fx('autoStrategyPct'), tyres: player.openTyres });
+    player.strategy.strategistId = strategist?.id ?? null;
+    const forecast = forecastOf({ str, workPct, forecastPts: fx('forecast'), uncertaintyPct: fx('forecastUncertaintyPct') });
     const { entries, grid } = buildField({ player, rivalPool: config.rivalPool, band: config.band, fieldSize: config.fieldSize, seed });
-    for (const e of entries) if (!e.isPlayer) e.pitService = serviceFor(77 + ((e.crew ?? 80) - 80) / 2);
-    return { n, kind, seed, trackId: track.id, laps, entries, grid, carNumber: rec.number, createdDay: team.clock.totalDays, state: null, status: 'ready', crew: crew.map((s) => s.id), crewKnowledge: trait('setupKnowledge') };
+    for (const e of entries) if (!e.isPlayer) {
+      e.pitService = serviceFor(77 + ((e.crew ?? 80) - 80) / 2);
+      e.strategy = rivalProfile(e);
+    }
+    return { n, kind, seed, trackId: track.id, laps, entries, grid, carNumber: rec.number, createdDay: team.clock.totalDays, state: null, status: 'ready', crew: crew.map((s) => s.id), crewKnowledge: trait('setupKnowledge'), forecast };
   }
 
   // Milestone 15: the setup locks (qualifying): the repair priority is paid through the ledger (Credits, and the Lead
@@ -427,12 +445,20 @@ export function createRaces({ bus, team }) {
         if (prize) team.money.economy.add('credits', prize, `Prize money: P${me.pos} at ${where}`, 'prize');
         if (reputation) team.money.reputation.add(reputation, `Race result: P${me.pos} at ${where}`);
       }
-      const entry = { n: race.n, kind: race.kind, trackId: race.trackId, laps: race.laps, day: team.clock.totalDays, carNumber: race.carNumber, seed: race.seed, result, wear, prize, reputation, grid: race.grid, quali: race.quali ?? null, setupScore: race.quali?.setupScore ?? null, crew: race.crew ?? [] };
+      const swingWin = race.kind === 'weekend' ? api.strategySwing(me) : null;
+      const entry = { swingWin, n: race.n, kind: race.kind, trackId: race.trackId, laps: race.laps, day: team.clock.totalDays, carNumber: race.carNumber, seed: race.seed, result, wear, prize, reputation, grid: race.grid, quali: race.quali ?? null, setupScore: race.quali?.setupScore ?? null, crew: race.crew ?? [] };
       api.history.push(entry);
       if (api.history.length > HISTORY_KEEP) api.history.shift();
       api.current = null;
       bus.emit('race:finished', { race: entry });
       return entry;
+    },
+    // Milestone 16: a Strategy Swing win (data/race.js SWING): your first pit decision that differed from Auto's plan,
+    // in a race you won or finished gainPlaces above where you were when you made it. One per race at most.
+    strategySwing(row) {
+      const first = row?.swings?.[0];
+      if (!first || row.status === 'retired' || row.status === 'running') return null;
+      return row.pos === 1 || first.pos - row.pos >= SWING.gainPlaces ? { ...first } : null;
     },
     last: () => api.history[api.history.length - 1] ?? null,
     serialize: () => JSON.parse(JSON.stringify({ current: api.current, history: api.history, count: api.count })),

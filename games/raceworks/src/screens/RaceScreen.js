@@ -11,13 +11,18 @@
 // gives the same result for the same commands.
 // Milestone 8: your car is Aaron's race sprite in the team colour (src/ui/livery.js); spray, braking sparks, breakdown
 // smoke and the pit burst come from src/race/raceFx.js (looks only, capped).
+// Milestone 16 (bible §24.2–24.3): the plan line ("Plan: pit window laps 5–7 · next tyre Medium" on Auto, the crew's
+//   suggestion in Manual), Fuel / Energy target and Repair priority (None / Critical / Full at the next stop) buttons, the
+//   next tyre kept in the race (saved), and the weather tyre-call prompt (Accept / Ignore) in the plan line — it only fires
+//   from the ?debug=1 "Test call" button until Milestone 17 brings weather. All inside the bottom panel: nothing covers the
+//   track.
 //   enter() takes the team's current race; onFinished(sim) when it ends; onLeave() for ‹ Garage.
 import { THEME, font } from '../../../../core/Theme.js';
 import { CachedLayer } from '../../../../core/CachedLayer.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { text, para, panel as drawPanel } from '../../../../core/ui/Kit.js';
 import { fitView, drawCircuit, drawCar, drawMinimap, toScreen } from '../race/trackDraw.js';
-import { RACE, TYRES, TYRE_ORDER, PACE_MODES, ORDERS, KEY_MOMENTS, RACE_ICONS } from '../../data/race.js';
+import { RACE, TYRES, TYRE_ORDER, PACE_MODES, ORDERS, KEY_MOMENTS, RACE_ICONS, FUEL, FUEL_ORDER, PIT_REPAIR, PIT_REPAIR_ORDER } from '../../data/race.js';
 import { createRaceFx } from '../race/raceFx.js';
 import { liveryKey, teamColourId } from '../ui/livery.js';
 
@@ -27,6 +32,7 @@ const TOP_H = 150;
 const ROW_H = 50;
 const HUD = S.body; // Milestone 8: the race numbers (order, gaps, wear) at body size so they read on a 360-wide phone
 const CTRL_H = 104;
+const PLAN_H = 110; // Milestone 16: the plan line / tyre-call prompt (its buttons PLAN_H − 12 = 98, thumb-sized like M8)
 const GAP = 12;
 const CAR_LEN = 46; // logical px a car is drawn in the Overview (the road is drawn wider to match)
 const FOLLOW = { sc: 3.2, carLen: 74 }; // Follow camera: pixels per metre, car length
@@ -39,7 +45,7 @@ export const raceClock = (secs) => {
 };
 const surname = (name) => name.split(' ').slice(-1)[0];
 
-export function createRaceScreen({ renderer, layout, assets, team, bus, settings = null, onFinished, onLeave, toast = () => {} }) {
+export function createRaceScreen({ renderer, layout, assets, team, bus, settings = null, onFinished, onLeave, toast = () => {}, debug = false }) {
   let sim = null;
   let race = null;
   let speed = 1;
@@ -51,12 +57,37 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
   let trackRect = null;
   let buttons = [];
   let banner = null; // { title, body, kind: 'moment' | 'hint' }
-  let nextTyre = 'medium';
   // The Pit Now tyre button steps through the compounds this team has (Soft, Medium, and whatever research opened).
+  // Milestone 16: the choice lives in the race (your car's nextTyre, else the crew's plan), so it saves and survives Auto.
   const nextOpenTyre = (id) => {
-    const open = TYRE_ORDER.filter((t) => team.research.tyreOpen(t));
+    const open = TYRE_ORDER.filter((t) => (sim?.byId[PLAYER]?.openTyres ?? TYRE_ORDER.filter((x) => team.research.tyreOpen(x))).includes(t));
     return open[(open.indexOf(id) + 1) % open.length];
   };
+  const nextTyreNow = () => {
+    const c = me();
+    return c?.nextTyre ?? c?.plan?.nextTyre ?? (c?.tyre === 'soft' ? 'medium' : 'soft');
+  };
+  const cycle = (list, id) => list[(list.indexOf(id) + 1) % list.length];
+  // The plan line (bible §24.1–24.2): what the crew plans (Auto) or suggests (Manual).
+  function planText(c) {
+    if (!c) return '';
+    if (c.finished || c.retired) return c.finished ? 'Finished' : 'Retired';
+    if (c.pit) return `In the pits: ${TYRES[c.pit.next].name} tyres${c.pit.repair && c.pit.repair !== 'none' ? ` · ${PIT_REPAIR[c.pit.repair].name.toLowerCase()} repair` : ''}`;
+    const p = c.plan;
+    if (!p) return c.auto ? 'Plan: the crew is working it out' : 'Crew suggestion: coming';
+    const head = c.auto ? 'Plan' : 'Crew suggests';
+    const bits = [];
+    if (p.stops && c.win) {
+      const missed = c.win.to < sim.nextStopLap(c);
+      bits.push(missed ? `pit window laps ${c.win.from}–${c.win.to} missed` : `pit window laps ${c.win.from}–${c.win.to}`);
+      bits.push(`next tyre ${TYRES[p.nextTyre].name}`);
+      if (p.reason === 'undercut') bits.push('undercut');
+    } else bits.push(`no stop: ${TYRES[c.tyre].name} to the flag`);
+    if (p.fuel !== c.fuel || !c.auto) bits.push(`${energyWord()} ${FUEL[p.fuel].name}`);
+    if (p.repair !== 'none') bits.push(`repair ${PIT_REPAIR[p.repair].name}`);
+    return `${head}: ${bits.join(' · ')}`;
+  }
+  const energyWord = () => (team.races?.current ? team.races.energyWord : 'Fuel');
   let camera = settings?.get('raceCamera') ?? 'overview';
   const layer = new CachedLayer({ width: 1, height: 1, draw: (g) => drawTrackLayer(g) });
   const ws = () => sim.geo.def.display?.widthScale ?? 1;
@@ -66,7 +97,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     const sr = layout.safeRect;
     const top = { x: sr.x + 16, y: sr.y + 12, w: sr.w - 32, h: TOP_H };
     const rows = Math.ceil((sim?.cars.length ?? 8) / 2);
-    const bh = 16 + rows * ROW_H + 12 + 3 * CTRL_H + 2 * GAP + 16;
+    const bh = 16 + rows * ROW_H + 12 + PLAN_H + GAP + 4 * CTRL_H + 3 * GAP + 16;
     const bottom = { x: sr.x + 16, y: sr.y + sr.h - bh - 12, w: sr.w - 32, h: bh };
     const track = { x: sr.x, y: top.y + top.h + 8, w: sr.w, h: bottom.y - (top.y + top.h) - 16 };
     return { top, bottom, track };
@@ -108,12 +139,12 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     const c = me();
     if (!c || !c.auto) return true;
     if (!sim.command(PLAYER, 'auto', false)) return false;
-    toast('Auto Strategy off', 'You are in charge: pace, order and pit stops. AUTO hands back to the crew.');
+    toast('Auto Strategy off', 'You are in charge: pace, order, fuel, tyres, repairs and pit stops. AUTO hands back to the crew.');
     return true;
   }
   function cmd(type, value) {
     if (!sim || sim.done) return false;
-    if (type !== 'auto' && !takeOver()) {
+    if (type !== 'auto' && type !== 'tyreCall' && !takeOver()) {
       toast('Not during a pit stop');
       return false;
     }
@@ -145,6 +176,14 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     paused = true;
     banner = { kind: 'moment', title: mo.title, body: mo.body, id: mo.id };
     team.races.keep(sim);
+  }
+
+  // ?debug=1 (until Milestone 17's weather): the forecast says rain — the crew makes its tyre call
+  function testCall() {
+    if (!sim || sim.done) return;
+    const ok = sim.command(PLAYER, 'weather', me()?.tyre === 'inter' ? 'wet' : 'damp') || sim.command(PLAYER, 'weather', 'wet');
+    if (ok) team.races.keep(sim);
+    else toast('No tyre call', 'The crew has no other tyre for that weather.');
   }
 
   function skip() {
@@ -296,16 +335,48 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     };
     let y = bot.y + 14 + rows * ROW_H + 12;
     const auto = !!c?.auto;
+    // Milestone 16: the plan line, or the weather tyre call (Accept / Ignore); ?debug=1 adds a Test call button
+    const strip = { x: bot.x + 16, y, w: bot.w - 32, h: PLAN_H };
+    const call = c?.tyreCall?.status === 'open' && !done ? c.tyreCall : null;
+    drawPanel(ctx, strip, { fill: call ? C.panelGold : C.panelInfo, stroke: call ? C.gold : C.line, lineWidth: 2, radius: 16 });
+    if (call) {
+      const bw = 170;
+      text(ctx, `Tyre call (${call.weather}): fit ${TYRES[call.tyre].name}?`, strip.x + 16, strip.y + 30, { size: S.small, bold: true, maxWidth: strip.w - 2 * bw - 48 });
+      const acc = { x: strip.x + strip.w - 2 * bw - 16, y: strip.y + 6, w: bw, h: PLAN_H - 12 };
+      const ign = { x: strip.x + strip.w - bw - 8, y: strip.y + 6, w: bw, h: PLAN_H - 12 };
+      drawButton(ctx, acc, 'Accept', { accent: C.good, font: f });
+      drawButton(ctx, ign, 'Ignore', { accent: C.outline, font: f });
+      buttons.push({ id: 'callAccept', rect: acc, onTap: () => cmd('tyreCall', 'accept') });
+      buttons.push({ id: 'callIgnore', rect: ign, onTap: () => cmd('tyreCall', 'ignore') });
+    } else {
+      const tw = debug && !done ? strip.w - 232 : strip.w - 32;
+      assets.drawContained(ctx, RACE_ICONS.pit, { x: strip.x + 12, y: strip.y + 23, w: 64, h: 64 });
+      text(ctx, planText(c), strip.x + 88, strip.y + 30, { size: S.small, bold: true, color: C.text, maxWidth: tw - 72 });
+      if (debug && !done) {
+        const tb = { x: strip.x + strip.w - 206, y: strip.y + 6, w: 196, h: PLAN_H - 12 };
+        drawButton(ctx, tb, 'Test call', { accent: C.outline, font: f });
+        buttons.push({ id: 'testCall', rect: tb, onTap: () => testCall() });
+      }
+    }
+    y += PLAN_H + GAP;
     row(y, [
       { id: 'auto', label: auto ? 'AUTO on' : 'AUTO off', icon: RACE_ICONS.auto, w: 250, selected: auto, disabled: done || !!c?.pit, accent: C.good, onTap: () => cmd('auto', !auto) },
       ...Object.entries(PACE_MODES).map(([id, m]) => ({ id: `pace_${id}`, label: m.name, selected: c?.pace === id, disabled: done, accent: auto ? C.textFaint : C.action, onTap: () => cmd('pace', id) })),
     ]);
     y += CTRL_H + GAP;
     const pitLabel = c?.pit ? 'In pits' : c?.pitReq ? `Pit ${TYRES[c.pitReq.tyre].name[0]} ✓` : 'Pit Now';
+    const nextTyre = nextTyreNow();
+    const fuel = c?.fuel ?? 'normal';
+    const repair = c?.repairReq ?? c?.plan?.repair ?? 'none';
     row(y, [
       ...Object.entries(ORDERS).map(([id, m]) => ({ id: `order_${id}`, label: m.name, selected: c?.order === id, disabled: done, accent: auto ? C.textFaint : C.action, onTap: () => cmd('order', id) })),
-      { id: 'nextTyre', label: TYRES[nextTyre].name, icon: TYRES[nextTyre].icon, w: 230, disabled: done, accent: C.progress, onTap: () => (nextTyre = nextOpenTyre(nextTyre)) }, // Milestone 11: every compound research has opened
-      { id: 'pit', label: pitLabel, w: 190, disabled: done || !!c?.pit, selected: !!c?.pitReq, accent: C.bad, onTap: () => (c?.pitReq && !c.auto ? cmd('pitCancel') : cmd('pit', nextTyre)) },
+      { id: 'fuel', label: `${energyWord()} ${FUEL[fuel].name}`, w: 250, disabled: done, accent: auto ? C.textFaint : C.action, onTap: () => cmd('fuel', cycle(FUEL_ORDER, fuel)) }, // Milestone 16
+    ]);
+    y += CTRL_H + GAP;
+    row(y, [
+      { id: 'nextTyre', label: TYRES[nextTyre].name, icon: TYRES[nextTyre].icon, w: 250, disabled: done || !!c?.pit, accent: C.progress, onTap: () => cmd('tyre', nextOpenTyre(nextTyre)) }, // Milestone 11: every compound research has opened
+      { id: 'repair', label: `Repair ${PIT_REPAIR[repair].name}`, disabled: done, accent: auto ? C.textFaint : C.action, onTap: () => cmd('repair', cycle(PIT_REPAIR_ORDER, repair)) }, // Milestone 16
+      { id: 'pit', label: pitLabel, icon: RACE_ICONS.pit, w: 250, disabled: done || !!c?.pit, selected: !!c?.pitReq, accent: C.bad, onTap: () => (c?.pitReq?.by === 'player' && !c.auto ? cmd('pitCancel') : cmd('pit', nextTyre)) }, // your own call cancels; the crew's becomes yours
     ]);
     y += CTRL_H + GAP;
     row(y, [
@@ -343,9 +414,13 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
       return banner;
     },
     get nextTyre() {
-      return nextTyre;
+      return nextTyreNow();
     },
     hudTextSize: HUD, // (tests)
+    get planLine() {
+      return planText(me()); // (tests)
+    },
+    layoutRects: () => rects(), // (tests)
     fx, // (tests)
     buttonRect(id) {
       return buttons.find((b) => b.id === id)?.rect ?? null;
@@ -361,7 +436,6 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
       ended = false;
       banner = null;
       fx.reset();
-      nextTyre = me()?.tyre === 'soft' ? 'medium' : 'soft';
       camera = settings?.get('raceCamera') ?? camera;
       // the first weekend race: the crew runs it (bible §33 "First race weekend")
       if (!team.races.history.some((h) => h.kind === 'weekend') && !race.hinted && race.kind === 'weekend') {

@@ -11,7 +11,7 @@
 //       A field that is in none of the lists can't survive: transition() refuses a snapshot that has one.
 //     legacy: { picksByLevel: [n at level 0, 1, 2, 3…], startLevel, statPct, historyTiers: [tier] }
 //       historyTiers: tiers that may only be picked if the account has hired that person before
-//     blueprints: { perLevel, max }
+//     blueprints: { perLevel, max } or { byLevel: [n at level 0, 1, 2, 3…] }
 //     advantages: { perRun: { key: amount }, maxRuns }     automatic, stacked per completed run up to maxRuns
 //     modifiers: [{ id, name, … }]                          optional challenges; at most one per run
 //
@@ -50,6 +50,7 @@ export class NgPlusSystem {
     }
     if (kind === 'blueprints') {
       const b = this.rules.blueprints ?? { perLevel: 0, max: 0 };
+      if (b.byLevel) return b.byLevel[Math.min(level, b.byLevel.length - 1)] ?? 0; // DEVWORKS: an exact count per level
       return Math.min(b.max, b.perLevel * level);
     }
     return 0;

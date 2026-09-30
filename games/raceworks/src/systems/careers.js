@@ -26,10 +26,15 @@ export const TEAM_FACTS = {
   cleanFinishes: 'races finished without a mechanical retirement',
   carsBuilt: 'cars built',
   classWins: 'different classes with a win',
+  // Milestone 16 (bible §11 STR06 / STR08, §36 SEC-STAFF-L5): race strategy records
+  strategySwingWins: 'Strategy Swing wins',
+  undercutWins: 'Strategy Swing wins by undercut',
+  extendedStintWins: 'Strategy Swing wins by extending a stint',
+  neutralisationBenefits: 'places gained under caution',
 };
 
 const blank = () => Object.fromEntries(CAREER_KEYS.map((k) => [k, 0]));
-const blankFacts = () => ({ raceStarts: 0, wins: 0, podiums: 0, poles: 0, setup80: 0, gained5: 0, cleanFinishes: 0, carsBuilt: 0, classWins: [], trackWins: {} });
+const blankFacts = () => ({ raceStarts: 0, wins: 0, podiums: 0, poles: 0, setup80: 0, gained5: 0, cleanFinishes: 0, carsBuilt: 0, classWins: [], trackWins: {}, strategySwingWins: 0, undercutWins: 0, extendedStintWins: 0, neutralisationBenefits: 0 });
 
 export function createCareers({ bus, team }) {
   const api = {
@@ -67,6 +72,13 @@ export function createCareers({ bus, team }) {
       if ((entry.setupScore ?? 0) >= 80) f.setup80++;
       if (finished && me.grid - me.pos >= 5) f.gained5++;
       if (finished) f.cleanFinishes++; // every retirement so far is a mechanical failure (bible §23; crashes arrive in M17)
+      // Milestone 16: a Strategy Swing win (src/systems/races.js strategySwing) and places gained under caution (M17)
+      if (entry.swingWin) {
+        f.strategySwingWins++;
+        if (entry.swingWin.kind === 'undercut') f.undercutWins++;
+        else f.extendedStintWins++;
+      }
+      f.neutralisationBenefits += me.neutralGains ?? 0;
       if (win) {
         const classId = team.cars.cars.get(entry.carNumber)?.result?.classId;
         if (classId && CLASSES[classId] && !f.classWins.includes(classId)) f.classWins.push(classId);

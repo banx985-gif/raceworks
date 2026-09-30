@@ -89,16 +89,16 @@ export const TRAITS = {
   airSculptor: { name: 'Air Sculptor', signature: true, text: 'Shapes air like clay.', effects: { phasePct: { chassisAero: 20, concept: 8 }, breakthroughPct: 4 } },
   invisibleWing: { name: 'Invisible Wing', signature: true, text: 'Downforce from nowhere.', effects: { phasePct: { chassisAero: 25 }, crewPct: 3 } },
   // Strategists
-  safeCall: { name: 'Safe Call', text: 'Picks the safe strategy: steadier races, fewer failures.', ratings: { consistency: 10 }, effects: { failurePct: -6 }, later: { text: 'Strategy calls', waits: 'Milestone 16 (race strategy)' } },
-  fuelCounter: { name: 'Fuel Counter', text: 'Knows every drop in the tank and every lap on the tyres.', effects: { tyreWearPct: -4 }, later: { text: 'Fuel plans', waits: 'Milestone 16 (race strategy)' } },
-  undercut: { name: 'Undercut', text: 'Pits a lap early to jump rivals.', effects: { crewPct: 3 }, later: { text: 'Undercut calls', waits: 'Milestone 16 (race strategy)' } },
+  safeCall: { name: 'Safe Call', text: 'Picks the safe strategy: steadier races, fewer failures.', ratings: { consistency: 10 }, effects: { failurePct: -6 }, strategy: 'Plans with a bigger tyre margin (stops earlier)' },
+  fuelCounter: { name: 'Fuel Counter', text: 'Knows every drop in the tank and every lap on the tyres.', effects: { tyreWearPct: -4 }, strategy: 'Reads tyre wear exactly and weighs fuel targets' },
+  undercut: { name: 'Undercut', text: 'Pits a lap early to jump rivals.', effects: { crewPct: 3 }, strategy: 'Undercuts the car ahead at any planning quality' },
   weatherWatch: { name: 'Weather Watch', text: 'Knows when the rain is coming.', effects: { crewPct: 2 }, later: { text: 'Weather calls', waits: 'Milestone 17 (weather)' } },
-  longGame: { name: 'Long Game', text: 'Plans the whole season, not just the race.', effects: { crewPct: 3, tyreWearPct: -2 } },
+  longGame: { name: 'Long Game', text: 'Plans the whole season, not just the race.', effects: { crewPct: 3, tyreWearPct: -2 }, strategy: 'Runs the tyres a little longer before a stop' },
   safetyCarSense: { name: 'Safety Car Sense', text: 'Always pits at the right moment under caution.', effects: { crewPct: 2 }, later: { text: 'Safety car calls', waits: 'Milestone 17 (incidents)' } },
-  splitSecond: { name: 'Split Second', text: 'Makes the call in a split second: faster stops.', effects: { pitServicePct: -6, crewPct: 4 } },
-  threeMovesAhead: { name: 'Three Moves Ahead', text: 'Always three moves ahead of the other pit walls.', effects: { crewPct: 6 }, later: { text: 'Strategy swings', waits: 'Milestone 16 (race strategy)' } },
-  grandmaster: { name: 'Grandmaster', signature: true, text: 'Plays a race like chess.', effects: { crewPct: 10, tyreWearPct: -6 } },
-  futureSight: { name: 'Future Sight', signature: true, text: 'Seems to know what happens next.', effects: { crewPct: 12, failurePct: -10 } },
+  splitSecond: { name: 'Split Second', text: 'Makes the call in a split second: faster stops.', effects: { pitServicePct: -6, crewPct: 4 }, strategy: 'Race planning +10 STR' },
+  threeMovesAhead: { name: 'Three Moves Ahead', text: 'Always three moves ahead of the other pit walls.', effects: { crewPct: 6 }, strategy: 'Race planning +40 STR' },
+  grandmaster: { name: 'Grandmaster', signature: true, text: 'Plays a race like chess.', effects: { crewPct: 10, tyreWearPct: -6 }, strategy: 'Race planning +60 STR' },
+  futureSight: { name: 'Future Sight', signature: true, text: 'Seems to know what happens next.', effects: { crewPct: 12, failurePct: -10 }, strategy: 'Race planning +80 STR' },
 };
 
 // --- eligibility (bible §11 "Initial eligibility") -------------------------------------------------------------------
@@ -188,8 +188,8 @@ export const ALL_STAFF = [
   row('STR04', 'Oscar Reed', 'rare', 6, [61, 76, 75, 151, 58], 1050, 'weatherWatch', E.when('Use 3 weather tyre changes correctly', [{ waits: 'Milestone 17 (weather)' }])),
   row('STR05', 'Zara Wynn', 'rare', 8, [72, 56, 55, 158, 69], 1100, 'longGame', E.rank('C')),
   row('STR06', 'Eli Moss', 'rare', 10, [52, 67, 66, 144, 49], 1150, 'safetyCarSense', E.when('Benefit from 3 neutralisations', [{ waits: 'Milestone 17 (safety car)' }])),
-  row('STR07', 'Talia Frost', 'elite', 14, [95, 110, 109, 251, 92], 2150, 'splitSecond', E.when('Rank B + Strategy Room', [{ facility: 'F23', waits: 'Milestone 16 (the Strategy Room)' }], 'B')),
-  row('STR08', 'Dorian Pike', 'elite', 17, [106, 90, 89, 258, 103], 2200, 'threeMovesAhead', E.when('Rank A + 5 strategy swing wins', [{ waits: 'Milestone 16 (strategy swings)' }], 'A')),
+  row('STR07', 'Talia Frost', 'elite', 14, [95, 110, 109, 251, 92], 2150, 'splitSecond', E.when('Rank B + Strategy Room', [{ facility: 'F23', waits: 'the Strategy Room (F23) joins the Build shop' }], 'B')),
+  row('STR08', 'Dorian Pike', 'elite', 17, [106, 90, 89, 258, 103], 2200, 'threeMovesAhead', E.when('Rank A + 5 strategy swing wins', [{ count: 'strategySwingWins', n: 5 }], 'A')),
   row('STR09', 'Cass Vega', 'legendary', 21, [121, 136, 135, 349, 118], 4050, 'grandmaster', E.secret('SEC-STAFF-L5')),
   row('STR10', 'Oracle Rey', 'secret', 24, [167, 182, 150, 446, 164], 5700, 'futureSight', E.secret('SEC-STAFF-S5')),
 ];

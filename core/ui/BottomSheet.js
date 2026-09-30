@@ -22,6 +22,8 @@
 //     Every header and card is a button (buttonRect(id) finds it; a tap calls its onTap).
 //   Section title extra (CAREWORKS Milestone 8; optional): titleDot (a colour) — a round dot after the title (e.g. amber
 //   for a care plan due for review)
+//   Line extra (CAREWORKS Milestone 13; optional): a line may be { text, color?, glyph } where glyph(ctx, x, y, size) draws
+//   a small code-drawn mark before its first row (e.g. a heart); the text moves over to make room
 // A MenuRegistry maps what was tapped (a station type, 'worker', 'floor'…) to the function that builds its menu.
 //   sheet.open(builder) — builder() → menu        sheet.close()        sheet.active
 //   sheet.handleInput(hook, p) → true when the sheet used it (tap a button, tap above it to close, drag to scroll)
@@ -247,11 +249,13 @@ export class BottomSheet {
         y += lineH(S.heading, 1.3);
       }
       for (const line of sec.lines ?? []) {
-        const lines = wrap(ctx, typeof line === 'string' ? line : line.text, w, font(S.body));
-        for (const l of lines) {
-          items.push({ kind: 'line', text: l, y, color: line.color ?? C.text });
+        const glyph = typeof line === 'object' && typeof line.glyph === 'function' ? line.glyph : null;
+        const indent = glyph ? S.body + 10 : 0;
+        const lines = wrap(ctx, typeof line === 'string' ? line : line.text, w - indent, font(S.body));
+        lines.forEach((l, i) => {
+          items.push({ kind: 'line', text: l, y, color: line.color ?? C.text, glyph: i === 0 ? glyph : null, indent });
           y += lineH(S.body, 1.35);
-        }
+        });
       }
       if (sec.lines?.length) y += 10;
       for (const bar of sec.bars ?? []) {
@@ -395,7 +399,13 @@ export class BottomSheet {
         ctx.fillStyle = it.color;
         ctx.font = font(S.body);
         ctx.textBaseline = 'top';
-        ctx.fillText(it.text, 0, it.y, b.w);
+        if (it.glyph) {
+          ctx.save();
+          it.glyph(ctx, 0, it.y, S.body);
+          ctx.restore();
+          ctx.fillStyle = it.color;
+        }
+        ctx.fillText(it.text, it.indent ?? 0, it.y, b.w - (it.indent ?? 0));
       } else if (it.kind === 'bar') this._bar(ctx, it.bar, it.y, b.w);
       else if (it.kind === 'laneHead') this._laneHead(ctx, it.button, it.rect);
       else if (it.kind === 'laneCard') this._laneCard(ctx, it.button, it.rect);

@@ -6,6 +6,7 @@
 //   topics: [{ id, title, icon, art, paras: [..] }] (game data) · text: labels (HELP_TEXT) · fill(step) → the step with
 //   its run-specific words filled in (optional) · guide: core/GuideSystem (seenSteps, state.off, turnOn / turnOff)
 //   enter({ back, topic }) — topic: open straight on that page
+//   icon: the Help picture (Robot Workshop's ui_icon_27 by default; DEVWORKS passes its own)
 import { THEME, font, lineH } from '../Theme.js';
 import { ScrollPanel } from './ScrollPanel.js';
 import { drawButton, hitRect } from './Button.js';
@@ -18,7 +19,7 @@ const TABS_H = 110;
 const FOOT_H = 160;
 const GAP = 16;
 
-export function createHelpArchive({ renderer, layout, assets, router, guide, topics, text: T, fill = null }) {
+export function createHelpArchive({ renderer, layout, assets, router, guide, topics, text: T, fill = null, icon = 'ui_icon_27' }) {
   const W = renderer.width;
   let back = 'workshop';
   let tab = 'topics';
@@ -104,7 +105,7 @@ export function createHelpArchive({ renderer, layout, assets, router, guide, top
         assets.drawContained(ctx, page.icon, { x: s.x + 240, y: s.y + 30, w: 96, h: 96 });
         text(ctx, page.title, s.x + 352, s.y + 78, { size: S.heading, bold: true, baseline: 'middle', maxWidth: s.w - 380 });
       } else {
-        assets.drawContained(ctx, 'ui_icon_27', { x: s.x + 240, y: s.y + 30, w: 96, h: 96 });
+        assets.drawContained(ctx, icon, { x: s.x + 240, y: s.y + 30, w: 96, h: 96 });
         text(ctx, T.title, s.x + 352, s.y + 78, { size: S.title, bold: true, baseline: 'middle' });
         drawTabs(ctx, tabRects(tabsArea(), TABS.length), TABS, tab);
       }
@@ -125,7 +126,7 @@ export function createHelpArchive({ renderer, layout, assets, router, guide, top
       } else {
         const list = seen();
         if (!list.length) {
-          const st = { art: 'ui_icon_27', title: T.seenTab, text: T.noneSeen };
+          const st = { art: icon, title: T.seenTab, text: T.noneSeen };
           const h = stateHeight(w, st);
           emptyState(ctx, assets, { x: 0, y, w, h }, st);
           y += h;

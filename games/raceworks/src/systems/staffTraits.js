@@ -75,6 +75,7 @@ export function traitLines(id, { ratingNames = {} } = {}) {
     if (e) (byScope[e.scope] ??= []).push(...e.words(v));
   }
   for (const [scope, words] of Object.entries(byScope)) lines.push(SCOPE_WORDS[scope] ? `${words.join(' · ')} (${SCOPE_WORDS[scope]})` : words.join(' · '));
+  if (t.strategy) lines.push(`Race strategy: ${t.strategy}`); // Milestone 16 (src/systems/raceStrategy.js)
   if (t.later) lines.push(`Later: ${t.later.text} — ${t.later.waits}`);
   return lines;
 }

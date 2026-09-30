@@ -86,6 +86,10 @@ export const SAVE_MIGRATIONS = {
   //   lap). Nothing to change here — races.load() gives a weekend saved without them Normal fuel, Skip repair and its
   //   practice as the full 3 runs (what Milestone 7's single practice was worth).
   8: (record) => record,
+  //   9 → 10 (Milestone 16): race strategy (each car's plan, pit window, fuel, heat, repair priority, swings; the race's
+  //   forecast; the career strategy records). Nothing to change here — a race saved mid-way gets each car's strategy
+  //   state when it loads (src/race/raceSim.js), its player a starter strategist, and careers.load() zero records.
+  9: (record) => record,
 };
 
 export class Team {

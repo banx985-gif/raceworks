@@ -157,3 +157,87 @@ export const KEY_MOMENTS = { pitWindowWear: 0.55, podiumLastLaps: 2, podiumGap: 
 
 // Race HUD icons (assets/images/ui).
 export const RACE_ICONS = { setup: 'race_ui_06', pit: 'race_ui_07', tyres: 'race_ui_09', fuel: 'race_ui_10', qualifying: 'race_ui_11', practice: 'race_ui_12', overtake: 'race_ui_16', defend: 'race_ui_17', pace: 'race_ui_18', condition: 'race_ui_24', auto: 'race_ui_29', drive: 'race_ui_30' }; // Milestone 15: + fuel, condition, drive (Take the Wheel)
+
+// ---------------------------------------------------------------------------------------------------------------
+// Milestone 16: race strategy, complete (bible §23.6, §24.2–24.3; src/systems/raceStrategy.js plans it). PLACEHOLDERS.
+
+// The planner's quality 0–1 (q) from the race Strategist (bible §11.5): effective STR = STR × (1 + Strategist work % from
+// facilities, Strategy Desk +8) × (1 + Auto Strategy % from facilities, Strategy Room +8) + trait points; q = (effective −
+// strRef) ÷ strSpan, kept 0–1. No Strategist (a contractor) plans with contractorStr. A starting team's Ben Hale (86) → ~0.1;
+// Dorian Pike (258) → ~0.6; Oracle Rey (446) → 1.
+// Planning (each lap, and after a stop / a mode switch): every 0-, 1- and (if needed) 2-stop plan over the laps left, each
+// open dry compound and the fuel targets it may use, costed with the stint-time model (tyre pace + wear + the cliff) plus a
+// pit loss. A weak strategist is conservative: any stint that ends past safeWear (q 0 → safeWear.min, q 1 → .max) costs
+// marginSecs per 1.0 of wear over it, so it stops before the cliff; its wear estimate is off by up to ± estimateErr × (1 − q)
+// (fixed per car per race). A strong one runs the tyre longer (stint extensions) and, from undercutQ, undercuts (stops a lap early for) a car
+// within undercutGap seconds that still has its stop to make.
+// Fuel: from fuelQ the planner also weighs a Lean or Normal target mid-race (never Rich — too risky for the crew).
+export const STRATEGY = {
+  strRef: 60,
+  strSpan: 360,
+  contractorStr: 40,
+  traitPoints: { threeMovesAhead: 40, grandmaster: 60, futureSight: 80, splitSecond: 10 },
+  safeWear: { min: 0.6, max: 0.8, longGame: 0.05, safeCall: -0.05 },
+  hardWear: 0.95, // no plan lets a stint end past this (sound plan, any quality)
+  marginSecs: 60,
+  estimateErr: 0.15,
+  undercutQ: 0.5, // the Undercut trait undercuts at any quality
+  undercutGap: 2.0,
+  undercutSecs: 8, // the lap-early stop may cost the model up to this much (the fresh tyres win it back in the fight)
+  fuelQ: 0.55, // the Fuel Counter trait weighs fuel at any quality (and reads wear exactly)
+  minLapsLeftToPit: 2, // no planned stop with fewer laps than this to go
+  // The pit window: the stop laps whose modelled race time is within windowSecs of the best, at least minWidth laps wide
+  // and at most maxWidth. It's fixed for the stint when first planned (the HUD shows it) and Auto stops inside it.
+  // A stop the crew didn't plan for (Pit Now before or after the window, or with no stop planned) costs outsideSecs of
+  // extra service, + outsidePerLap for each further lap away, up to outsideMax: the tyres aren't ready.
+  window: { windowSecs: 2.5, minWidth: 2, maxWidth: 3, outsideSecs: 2.5, outsidePerLap: 1, outsideMax: 6 },
+  // The rivals' strategists (placeholder STR by team; privateers use the privateer number).
+  rivals: { R01: 150, R02: 115, privateer: 70 },
+};
+
+// Milestone 16: repair priority at the next pit stop (bible §24.2 "Repair priority: None / Critical / Full") — mid-race,
+// unlike the Milestone 15 garage repair before the race. Only costs time when there is something to fix: race damage
+// (damagePct from failures) or a pace-loss fault still running. share = how much of the damage is fixed; secs = extra
+// service time; heat = what happens to the engine heat (Full lets it cool).
+export const PIT_REPAIR = {
+  none: { name: 'None', share: 0, secs: 0, clearsFault: false, heat: 1 },
+  critical: { name: 'Critical', share: 0.5, secs: 2.5, clearsFault: true, heat: 1 },
+  full: { name: 'Full', share: 1, secs: 6, clearsFault: true, heat: 0.3 },
+};
+export const PIT_REPAIR_ORDER = ['none', 'critical', 'full'];
+
+// Milestone 16: failure risk (bible §23.6) — one failureRisk() for the per-lap roll. Base per lap × REL × open faults × low
+// Condition (Milestone 6) × pace mode (Push 2.5 / Conserve 0.6) × fuel (Milestone 15) × crew traits / skipped repair
+// (entry.failureMult) × heat (1 + heat × heatX) × damage (1 + damagePct × damagePer1) × race length (1 + share of the race
+// run × lengthX). Never above maxPerLap.
+// Heat 0–1 builds each lap on Push (+push) and on Rich fuel (+rich), cools on Normal / Conserve.
+// A failure's severity = a seeded roll + stress × severityShift, stress = the average of heat, damage ÷ damageFull and open
+// faults ÷ faultsFull. Severity below paceLoss → pace loss; below forcedPit → a forced pit stop (a Critical repair, if
+// there are laps enough to stop, else a pace loss); below damage → component damage; at or above it (the severe
+// threshold) → retirement.
+export const FAILURE_RISK = {
+  heat: { push: 0.3, normal: -0.15, conserve: -0.3, rich: 0.05 },
+  heatX: 1.2,
+  damagePer1: 0.08,
+  lengthX: 0.4,
+  maxPerLap: 0.06,
+  severityShift: 0.12,
+  damageFull: 10,
+  faultsFull: 3,
+  thresholds: { paceLoss: 0.5, forcedPit: 0.65, damage: 0.92 },
+};
+
+// Milestone 16: the Strategy Swing record (bible §11 STR08, §36 SEC-STAFF-L5). A pit decision of yours that differs from
+// the one Auto had planned — an undercut (stopping before Auto's lap) or an extended stint (after it, or never) — is a
+// Strategy Swing win when you win the race, or finish at least gainPlaces above where you were when you made it.
+// One per race at most (the first swing counts).
+export const SWING = { gainPlaces: 3 };
+
+// Milestone 16: forecast quality (bible §19 F11 / F23 / F33, §23.7) — stored with each race for Milestone 17's weather.
+// accuracy 0–100 = base + STR × perStr, × (1 + Strategist work %), + the facilities' forecast points (Strategy Desk +3,
+// Weather Station +20); uncertainty = (100 − accuracy) × (1 + forecastUncertaintyPct, Strategy Room −15%).
+export const FORECAST = { base: 25, perStr: 0.18, max: 98 };
+
+// Milestone 16: the crew's tyre call for the weather (bible §24.2 "Weather: accept suggested tyre call or ignore"). The race
+// is always dry until Milestone 17, so the call only fires from the ?debug=1 test button. dry → the planner's own choice.
+export const WEATHER_TYRES = { dry: ['soft', 'medium', 'hard'], damp: ['inter', 'medium', 'hard'], wet: ['wet', 'inter'], storm: ['wet', 'inter'] };
