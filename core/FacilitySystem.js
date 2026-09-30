@@ -11,6 +11,8 @@
 //   zoneShown(zone) → false keeps a zone off the floor entirely until it is opened (a secret room)
 //   entrance: { col, row } — where people come in; always kept clear, and everything must be reachable from it
 //   keepClear:[{ col, row }] — more cells that may never be built on
+//   fixed:    [{ col, row }] — cells that are part of the building (inside walls, fixed props): never built on and
+//             never walked through (optional, default none — CAREWORKS M10)
 //   sellRefundPct: share of the build price paid back on selling (default 50)
 //
 // Placement rules: inside usable (owned) floor, no overlaps, not on a kept-clear cell, and after the
@@ -27,13 +29,15 @@ const REASONS = {
   locked: 'That area is locked — buy the expansion first',
   overlap: 'Overlaps {name}',
   door: 'Keep the doorway clear',
+  fixed: 'That is part of the building',
   blocked: 'That would block the walkway — {name} could not be reached',
   unknown: 'Unknown facility',
 };
 
 export class FacilitySystem {
-  constructor({ bus = null, defs, area, zones = [], entrance, keepClear = [], sellRefundPct = 50, reasons = {}, zoneShown = () => true }) {
+  constructor({ bus = null, defs, area, zones = [], entrance, keepClear = [], fixed = [], sellRefundPct = 50, reasons = {}, zoneShown = () => true }) {
     this.zoneShown = zoneShown;
+    this.fixed = new Set(fixed.map((f) => `${f.col},${f.row}`));
     this.bus = bus;
     this.defs = defs;
     this.area = area;
@@ -155,6 +159,7 @@ export class FacilitySystem {
         const o = occ[r * this.cols + c];
         if (o > 0) return this._no('overlap', this.defs[this.get(o).def].name);
         if (this.keepClear.some((k) => k.col === c && k.row === r)) return this._no('door');
+        if (this.fixed.has(`${c},${r}`)) return this._no('fixed');
       }
     }
     const cand = { uid: -1, def: defId, col, row, rot };
@@ -299,7 +304,7 @@ export class FacilitySystem {
 
   _occupancy(ignoreUid) {
     const occ = new Int32Array(this.cols * this.rows);
-    for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.cols; c++) if (!this.isUsable(c, r)) occ[r * this.cols + c] = -1;
+    for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.cols; c++) if (!this.isUsable(c, r) || this.fixed.has(`${c},${r}`)) occ[r * this.cols + c] = -1;
     for (const p of this.placed) if (p.uid !== ignoreUid) this._mark(occ, p, p.uid);
     return occ;
   }

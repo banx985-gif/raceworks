@@ -4,6 +4,8 @@
 //   Everyone else: the five work stats.
 //   Then traits (with any rating bonuses) and salary. With ?debug=1: nudge buttons (a stat, Energy, Morale) —
 //   the ratings recalculate straight away.
+// Milestone 12: Train (the Training screen with them picked) and Let go (asks first; not while on the car's team or a
+// course; the founder can be let go but never comes back).
 // enter({ id, from }) — from: 'roster' | 'garage' (where ‹ Back goes). Drag to scroll.
 import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
@@ -21,7 +23,7 @@ const TABS = [
 ];
 const RATING_NAME = Object.fromEntries(DRIVER_RATINGS.map((r) => [r.id, r.name]));
 
-export function createStaffDetailScreen({ layout, assets, team, garage, topBar, debugEnabled = false }) {
+export function createStaffDetailScreen({ layout, assets, team, garage, topBar, debugEnabled = false, goTrain = () => {}, confirm = null, toast = () => {}, afterLetGo = () => {} }) {
   const panel = new ScrollPanel({
     getRect: () => {
       const t = topBar.rect();
@@ -148,6 +150,24 @@ export function createStaffDetailScreen({ layout, assets, team, garage, topBar, 
     }
     y += 80;
 
+    // --- Milestone 12: train / let go ---
+    {
+      const bw = (w - 24) / 2;
+      const tr = { x: 0, y, w: bw, h: 120 };
+      const lg = { x: bw + 24, y, w: bw, h: 120 };
+      const course = team.training.courseOf(s.id);
+      const why = team.recruitment.letGoWhy(s.id);
+      if (ctx) {
+        drawButton(ctx, tr, course ? `On ${course.name} (${team.training.daysLeft(s.id)}d)` : 'Train', { accent: C.progress });
+        drawButton(ctx, lg, 'Let go', { accent: C.bad, disabled: !!why });
+      }
+      hits.push({ rect: tr, id: 'train', onTap: () => goTrain(s.id) });
+      hits.push({ rect: lg, id: 'letGo', onTap: () => (why ? toast(why) : askLetGo(s)) });
+      y += 140;
+      if (why && ctx) para(ctx, `Let go: ${why}`, 8, y, w - 16, { size: S.small, color: C.textMuted });
+      if (why) y += 60;
+    }
+
     // --- debug nudges (?debug=1) ---
     if (debugEnabled) {
       const main = ROLES[s.role].primaryStat;
@@ -170,6 +190,21 @@ export function createStaffDetailScreen({ layout, assets, team, garage, topBar, 
       y += 3 * 134;
     }
     return y + 24;
+  }
+
+  function letGo(s) {
+    const r = team.recruitment.letGo(s.id);
+    if (!r.ok) return toast(r.reason);
+    toast(`${s.name} has left the team`, 'Their salary stops from next month');
+    afterLetGo();
+  }
+  function askLetGo(s) {
+    const founder = team.isFounder(s.id);
+    const body = founder
+      ? `${s.name} founded this team with you. If they go, they will never come back.`
+      : `${s.name} leaves the garage today. They may turn up again later on a recruitment board.`;
+    if (confirm) confirm({ title: `Let ${s.name.split(' ')[0]} go?`, body, yes: 'Let go', danger: true, onYes: () => letGo(s) });
+    else letGo(s);
   }
 
   function bar(ctx, x, y, w, h, frac, color) {

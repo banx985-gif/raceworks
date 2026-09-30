@@ -1,5 +1,6 @@
 // RACEWORKS staff content (bible §10–11). Plain data only; the rules live in core/StaffSystem.js and
-// src/systems/driverRatings.js. Milestone 3: the three starters only.
+// src/systems/driverRatings.js. Milestone 3: the three starters only. Milestone 12: the rows recruitment can offer now
+// (ROSTER: "Start candidate" / "Start staff" and the rank-gated rows), each with its eligibility as data.
 
 // The five work stats (bible §10.2). Visible range 1–999.
 export const STAT_KEYS = ['MEC', 'ENG', 'AER', 'STR', 'DRV'];
@@ -52,6 +53,18 @@ export const TRAITS = {
     text: 'Picks the safe strategy: steadier races, fewer gambles (from racing on).',
     ratings: { consistency: 10 },
   },
+  // Milestone 12: the traits of the rows recruitment can offer. Names from bible §11; what they do arrives with the
+  // trait framework (Milestone 13) — driver rating bonuses are PLACEHOLDER values like the ones above.
+  smoothHands: { name: 'Smooth Hands', text: 'Gentle on the car: kind to tyres, steady lap after lap.', ratings: { tyreCare: 30, consistency: 10 } },
+  quickLearner: { name: 'Quick Learner', text: 'Picks things up fast (more XP arrives with the full staff update).', ratings: { feedback: 10 } },
+  carefulBuilder: { name: 'Careful Builder', text: 'Checks every bolt twice (its effect arrives with the full staff update).', ratings: {} },
+  pitReady: { name: 'Pit Ready', text: 'Always ready for the stop (its effect arrives with the full staff update).', ratings: {} },
+  calmRadio: { name: 'Calm Radio', text: 'A calm voice on the radio (its effect arrives with the full staff update).', ratings: {} },
+  telemetryEye: { name: 'Telemetry Eye', text: 'Spots the problem in the data (its effect arrives with the full staff update).', ratings: {} },
+  downforce: { name: 'Downforce', text: 'Loves grip in the corners (its effect arrives with the full staff update).', ratings: {} },
+  fuelCounter: { name: 'Fuel Counter', text: 'Knows every drop in the tank (its effect arrives with the full staff update).', ratings: {} },
+  undercut: { name: 'Undercut', text: 'Pits a lap early to jump rivals (its effect arrives with the full staff update).', ratings: {} },
+  longGame: { name: 'Long Game', text: 'Plans the whole season, not just the race (its effect arrives with the full staff update).', ratings: {} },
 };
 
 // The three starters (bible §11 rows, exact stats). startLevel / salary per month in Credits.
@@ -63,6 +76,30 @@ export const STAFF = [
   { id: 'AER01', name: 'Nia Bell', role: 'aero', tier: 'standard', startLevel: 1, stats: { MEC: 35, ENG: 60, AER: 83, STR: 25, DRV: 32 }, salary: 500, traits: ['cleanShapes'], art: 'staff_aer01' },
   { id: 'STR01', name: 'Ben Hale', role: 'strategist', tier: 'standard', startLevel: 1, stats: { MEC: 35, ENG: 50, AER: 49, STR: 86, DRV: 32 }, salary: 500, traits: ['safeCall'], art: 'staff_str01' },
 ];
+// Milestone 12: everyone recruitment can offer by name now (bible §11 rows, exact stats and salaries). eligibility:
+//   { start: true }  a "Start candidate" (or "Start staff" not on this team — spec §3: the missing roles are hired)
+//   { rank: 'D' }    the rank that opens them (Rank D, Rank C rows)
+// The other rows (conditions, Elite rank + condition, Legendary / Secret) arrive with the full 50 in Milestone 13; the
+// recruitment system already reads any row that is here, so they only need adding.
+const row = (id, name, role, tier, startLevel, [MEC, ENG, AER, STR, DRV], salary, trait, eligibility) => ({ id, name, role, tier, startLevel, stats: { MEC, ENG, AER, STR, DRV }, salary, traits: [trait], art: `staff_${id.toLowerCase()}`, eligibility });
+export const CANDIDATE_ROWS = [
+  row('DRV02', 'Mina Vale', 'driver', 'standard', 2, [46, 58, 29, 48, 96], 550, 'smoothHands', { start: true }),
+  row('DRV03', 'Jax Rowan', 'driver', 'rare', 4, [50, 62, 64, 83, 147], 1000, 'quickLearner', { rank: 'D' }),
+  row('MEC02', 'Arun Pike', 'mechanic', 'standard', 2, [84, 63, 29, 36, 43], 550, 'carefulBuilder', { start: true }),
+  row('MEC03', 'Milo Trent', 'mechanic', 'rare', 4, [135, 67, 64, 71, 78], 1000, 'pitReady', { rank: 'D' }),
+  row('ENG02', 'Finn Mercer', 'engineer', 'standard', 2, [61, 87, 29, 46, 43], 550, 'calmRadio', { start: true }),
+  row('ENG03', 'Kira Tane', 'engineer', 'rare', 4, [65, 138, 64, 81, 78], 1000, 'telemetryEye', { rank: 'D' }),
+  row('AER03', 'Zoe Park', 'aero', 'rare', 4, [50, 75, 141, 71, 78], 1000, 'downforce', { rank: 'D' }),
+  row('STR02', 'Noor Quinn', 'strategist', 'standard', 2, [46, 61, 29, 93, 43], 550, 'fuelCounter', { start: true }),
+  row('STR03', 'Mei Tan', 'strategist', 'rare', 4, [50, 65, 64, 144, 78], 1000, 'undercut', { rank: 'D' }),
+  row('STR05', 'Zara Wynn', 'strategist', 'rare', 8, [72, 56, 55, 158, 69], 1100, 'longGame', { rank: 'C' }),
+];
+// The five founder choices are candidates too when they are not on the team (Sam, Nia, Ben: "Start candidate"; Tessa,
+// Mara: "Start staff" — spec §2: the other four remain recruitable normally). The founder never is (recruitment).
+const START_ELIGIBLE = { eligibility: { start: true } };
+export const ROSTER = [...STAFF.map((d) => ({ ...d, ...START_ELIGIBLE })), ...CANDIDATE_ROWS];
+export const staffDefById = (id) => ROSTER.find((d) => d.id === id) ?? null;
+
 // The default starting team (Sam, Tessa and Mara) — a new game now builds its team from the founder (data/setup.js).
 export const STARTERS = ['DRV01', 'MEC01', 'ENG01'];
 

@@ -116,6 +116,8 @@ export const CATEGORY_NAMES = {
   interest: 'Emergency Credit interest',
   facilities: 'Facilities',
   research: 'Research',
+  hiring: 'Hiring and recruitment', // Milestone 12
+  training: 'Training', // Milestone 12
   debug: 'Debug',
   carried: 'Earlier lines',
 };

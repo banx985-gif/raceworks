@@ -21,6 +21,10 @@
 // Milestone 11: team.research (src/systems/research.js) — the 36-node tree on core/ResearchSystem, RP on the ledger, one
 //   queue; finished nodes open parts (team.unlocks.research → the car builder), facilities (the shop), tyres and
 //   bonuses (added into team.facilities.bonus(key)).
+// Milestone 12: team.recruitment (src/systems/recruitment.js) — five channels, a 3-card board for each open one, refreshes,
+//   hire (fee + salary, staff cap by rank) and let go; team.training (src/systems/training.js) — the seven Auto Training
+//   courses, capacity, the ledger. Everyone on the team has a garage routine (data/garage.js routineFor), so every hire
+//   counts as on duty; someone on a course can't join the car's team.
 import { Clock } from '../../../../core/Clock.js';
 import { Rng } from '../../../../core/Rng.js';
 import { StaffSystem } from '../../../../core/StaffSystem.js';
@@ -32,7 +36,6 @@ import { TOP_BAR } from '../../data/home.js';
 import { createRatingsCache } from '../systems/driverRatings.js';
 import { createCarProjects } from '../systems/carProject.js';
 import { BUDGETS } from '../../data/cars.js';
-import { ASSIGNMENT } from '../../data/garage.js';
 import { createTeamMoney } from '../systems/economy.js';
 import { createRaces } from '../systems/races.js';
 import { partsOf, partsCost } from '../systems/carProject.js';
@@ -40,6 +43,9 @@ import { unlockContext, checkCar } from '../systems/carCatalog.js';
 import { CLASSES } from '../../data/cars.js';
 import { createGarageFacilities } from '../systems/garageFacilities.js';
 import { createResearch } from '../systems/research.js';
+import { createRecruitment } from '../systems/recruitment.js';
+import { createTraining } from '../systems/training.js';
+import { ENDURANCE } from '../../data/training.js';
 
 // A new game's setup when none is given (tests, and saves from before Milestone 4b).
 export const DEFAULT_SETUP = { teamName: 'RACEWORKS', principal: 'Principal', colour: 'red', founderId: 'MEC01' };
@@ -64,6 +70,9 @@ export const SAVE_MIGRATIONS = {
   //   4 → 5 (Milestone 11): research. Nothing to change here — Team.load() gives a save without it an empty tree (its
   //   RP is already on the ledger).
   4: (record) => record,
+  //   5 → 6 (Milestone 12): recruitment and training. Nothing to change here — Team.load() gives a save without them a
+  //   fresh board for each open channel and nobody on a course.
+  5: (record) => record,
 };
 
 export class Team {
@@ -82,6 +91,8 @@ export class Team {
       traits: TRAITS,
       rules: STAFF_RULES,
       planActivity: (s) => this.activityOf(s),
+      // Endurance Camp (Milestone 12): each camp done adds to resting recovery for good (data/training.js ENDURANCE).
+      restModifier: (s) => ({ energyMult: 1 + (ENDURANCE.recoveryPct * Math.min(ENDURANCE.maxCamps, s.counters?.enduranceCamps ?? 0)) / 100 }),
       // Push Quality (bible §14.7): +10% Energy drain for the car's team.
       energyLossMultiplier: (s) => {
         const job = this.cars?.active;
@@ -95,13 +106,20 @@ export class Team {
       isResting: (id) => this.restingOf(id),
       today: () => this.clock.totalDays,
       perkOf: (s) => this.founderPerk(s),
-      stationIds: () => Object.keys(ASSIGNMENT).filter((id) => this.staff.get(id)),
+      stationIds: () => this.staff.staff.map((s) => s.id), // Milestone 12: everyone has a garage routine (hires too)
       facilities: () => this.facilities,
+      busyElsewhere: (id) => (this.training?.trainingOf(id) ? 'Away on a training course' : null),
     });
     this.money = createTeamMoney({ bus, seed, clock: this.clock, staff: this.staff, cars: this.cars, revealBonus: () => this.facilities.bonus('revealReputation') });
     this.facilities = createGarageFacilities({ bus, money: this.money, research: () => new Set(this.unlocks.research), extraBonus: (key) => this.research.bonus(key), extraKeys: () => this.research.bonusKeys() }); // Milestone 10
     this.research = createResearch({ bus, team: this }); // Milestone 11
     this.races = createRaces({ bus, team: this }); // Milestone 6: the race being run (fixed seed) and the results
+    this.recruitment = createRecruitment({ bus, team: this, seed }); // Milestone 12
+    this.training = createTraining({ bus, team: this, seed }); // Milestone 12
+    this.recruitment.extraBusy = (id) => {
+      const t = this.training.trainingOf(id);
+      return t ? `Away on a course (${t.days - t.daysDone} day${t.days - t.daysDone === 1 ? '' : 's'} left)` : null;
+    };
     this.ratings = createRatingsCache();
     this.garageSnapshot = () => null; // the garage replaces this
     this.garageState = null; // positions from the last load, for the garage to put people back
@@ -112,6 +130,7 @@ export class Team {
     this.playSeconds = 0;
     bus.on('clock:day', () => {
       this.staff.dailyTick();
+      this.training.dailyTick(); // Milestone 12: after the staff day (a finished course's Energy stays)
       this.money.daily(this.cars.active); // the build's running cost for today (before it can finish)
       this.cars.projects.dailyTick(); // after the staff day, so today's Energy counts
       this.money.dailyAfter(); // contract deadlines
@@ -151,6 +170,8 @@ export class Team {
     this.facilities.newGame(); // Milestone 10: the starting garage (bible §19)
     this.research.newGame(); // Milestone 11: nothing researched; 120 RP came with the money (§30.2)
     this.races.load(null);
+    this.training.newGame(); // Milestone 12
+    this.recruitment.newGame(); // Milestone 12: a board for Local Contacts (after the team and rank are set)
   }
 
   // Start a car project, paying for its class and parts (Milestones 5 and 9). car = { classId, parts } (parts default:
@@ -180,6 +201,8 @@ export class Team {
     const parts = opts.parts ?? partsOf(classId);
     const can = this.canStartCar({ classId, parts }, { debugAll: !!opts.debugAll });
     if (!can.ok) return can;
+    const away = (opts.staffIds ?? []).find((id) => this.training.trainingOf(id)); // Milestone 12
+    if (away) return { ok: false, reason: `${this.get(away)?.name ?? 'Someone'} is away on a training course` };
     const r = this.cars.start({ ...opts, classId, parts });
     if (r.ok) {
       const price = this.carPrice({ classId, parts: r.job.data.parts });
@@ -291,6 +314,8 @@ export class Team {
       races: this.races.serialize(),
       facilities: this.facilities.serialize(), // Milestone 10
       research: this.research.serialize(), // Milestone 11
+      recruitment: this.recruitment.serialize(), // Milestone 12
+      training: this.training.serialize(), // Milestone 12
     };
   }
 
@@ -312,6 +337,8 @@ export class Team {
     this.facilities.load(data.facilities); // Milestone 10 (after the money: the rank opens the Bay Extension)
     this.races.load(data.races); // none before Milestone 6
     this.research.load(data.research); // none before Milestone 11
+    this.training.load(data.training); // none before Milestone 12
+    this.recruitment.load(data.recruitment); // none before Milestone 12: fresh boards for the open channels
   }
 
   // A team saved before Milestone 5 had no money: it gets the §30.2 starting state today, and each car it already

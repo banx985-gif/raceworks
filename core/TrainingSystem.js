@@ -7,9 +7,14 @@
 //        'primary' the worker's main stat (hook primaryStat) +min..max
 //        'lowest'  the `count` lowest stats +min..max each
 //        'all'     every stat +min..max
+//        'none'    no stat gain (the game's onComplete hook does the rest, e.g. an Energy / recovery course)
+//        'stats'   several named stats, each its own range: stats: { key: [min, max] } (CAREWORKS M11; min / max
+//                  unused)
 //   morale: extra Morale on completion (on top of rules.successMorale)
-// slots (plain data): [{ id, name, roles: null | ['pilot'] }] — how many of each is open comes from slotCount(slot).
-//   A worker takes the first free slot made for their role, else a general one (roles: null).
+//   slot: optional — the one slot id this course must use (e.g. a single simulator seat)
+// slots (plain data): [{ id, name, roles: null | ['pilot'], courseOnly? }] — how many of each is open comes from
+//   slotCount(slot). A worker takes the first free slot made for their role, else a general one (roles: null).
+//   courseOnly: true = only courses that name it (course.slot) use it; a course with a slot uses only that one.
 // Game hooks:
 //   statCap(staff, statKey), primaryStat(staff), slotCount(slot), conditionMet(rule) → bool
 //   busyElsewhere(staffId) → reason | null    (on a project, researching…)
@@ -48,9 +53,9 @@ export class TrainingSystem {
     return this.active.filter((a) => a.slotId === slotId).length;
   }
 
-  // Slot a worker would take right now, or null.
-  slotFor(s) {
-    const fits = (slot) => this.used(slot.id) < this.slotCount(slot);
+  // Slot a worker would take right now for this course (optional), or null.
+  slotFor(s, course = null) {
+    const fits = (slot) => this.used(slot.id) < this.slotCount(slot) && (course?.slot ? slot.id === course.slot : !slot.courseOnly);
     return this.slots.find((sl) => sl.roles?.includes(s.role) && fits(sl)) ?? this.slots.find((sl) => !sl.roles && fits(sl)) ?? null;
   }
 
@@ -84,8 +89,8 @@ export class TrainingSystem {
     const running = this.active.some((a) => a.staffId === staffId && a.courseId === courseId) ? 1 : 0;
     if (lim.perWorkerPerYear && past.filter((l) => l.year === now.year).length + running >= lim.perWorkerPerYear) return 'Already done this year';
     if (lim.perWorkerPerRun && past.length + running >= lim.perWorkerPerRun) return 'Already done';
-    if (!this.slotFor(s)) return 'No free training slot';
-    if (this.gainRoom(courseId, s) <= 0) return 'Already at the tier cap';
+    if (!this.slotFor(s, c)) return 'No free training slot';
+    if (c.effect.kind !== 'none' && this.gainRoom(courseId, s) <= 0) return 'Already at the tier cap';
     return null;
   }
 
@@ -94,6 +99,7 @@ export class TrainingSystem {
     const e = course.effect;
     const cap = this.hooks.statCap?.(s) ?? Infinity;
     if (e.kind === 'stat') return [e.stat];
+    if (e.kind === 'stats') return Object.keys(e.stats ?? {});
     if (e.kind === 'primary') return [this.hooks.primaryStat?.(s)].filter(Boolean);
     if (e.kind === 'all') return [...this.statKeys];
     if (e.kind === 'lowest') {
@@ -119,7 +125,8 @@ export class TrainingSystem {
     return this.targets(c, s).map((k) => {
       const from = s.stats[k] ?? 0;
       const kc = this.hooks.statCap?.(s, k) ?? cap;
-      return { key: k, from, min: Math.min(kc, from + c.effect.min) - from, max: Math.min(kc, from + c.effect.max) - from, cap: kc };
+      const [mn, mx] = this._range(c, k);
+      return { key: k, from, min: Math.min(kc, from + mn) - from, max: Math.min(kc, from + mx) - from, cap: kc, want: mx };
     });
   }
 
@@ -134,7 +141,7 @@ export class TrainingSystem {
     if (block) return { ok: false, reason: block };
     const c = this.byId[courseId];
     const s = this.staff.get(staffId);
-    const slot = this.slotFor(s);
+    const slot = this.slotFor(s, c);
     this.hooks.pay?.(c, s);
     const now = this.hooks.now?.() ?? { day: 0 };
     const t = { staffId, courseId, slotId: slot.id, daysDone: 0, days: this.daysFor(c, s, slot), startedDay: now.day };
@@ -168,7 +175,8 @@ export class TrainingSystem {
     const gains = {};
     for (const k of this.targets(c, s)) {
       const from = s.stats[k] ?? 0;
-      const to = Math.min(this.hooks.statCap?.(s, k) ?? cap, from + this.rng.int(c.effect.min, c.effect.max));
+      const [mn, mx] = this._range(c, k);
+      const to = Math.min(this.hooks.statCap?.(s, k) ?? cap, from + this.rng.int(mn, mx));
       if (to > from) gains[k] = to - from;
       s.stats[k] = Math.max(from, to);
     }
@@ -177,6 +185,11 @@ export class TrainingSystem {
     this.log.push({ staffId: s.id, courseId: c.id, year: now.year, day: now.day, gains });
     this.hooks.onComplete?.(s, c, gains);
     this.bus?.emit('training:complete', { staff: s, course: c, gains });
+  }
+
+  // A course's gain range for one stat: its own for 'stats', else the course's min / max.
+  _range(c, k) {
+    return c.effect.kind === 'stats' ? c.effect.stats[k] : [c.effect.min, c.effect.max];
   }
 
   serialize() {

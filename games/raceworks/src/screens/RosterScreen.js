@@ -1,23 +1,24 @@
 // Roster (Milestone 3): everyone on the team as core/ui/StaffCard cards — portrait and role badge, name, role and
 // level, XP, the five work stats, Energy / Morale bars, traits, status icons and what they are assigned to / doing.
 // Opened from the Staff sheet (bottom bar). Tap a card → their details. Drag to scroll. The top bar's ‹ Garage
-// (or the phone's Back) returns.
+// (or the phone's Back) returns. Milestone 12: Hire and Train buttons at the top.
 import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { drawStaffCard, STAFF_CARD_HEIGHT } from '../../../../core/ui/StaffCard.js';
 import { text } from '../../../../core/ui/Kit.js';
+import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { STAT_KEYS, ROLES, TRAITS } from '../../data/staff.js';
-import { STATIONS, ASSIGNMENT } from '../../data/garage.js';
+import { STATIONS, stationOf } from '../../data/garage.js';
 import { statusIconsOf } from '../ui/statusIcons.js';
 
 const C = THEME.color;
 const S = THEME.size;
 const GAP = 24;
-const HEAD = 130;
+const HEAD = 290; // title, count line and the Hire / Train buttons (Milestone 12)
 
 // The card's content for one worker (also used by tests).
 export function rosterView(s, { team, garage }) {
-  const station = STATIONS.find((x) => x.id === ASSIGNMENT[s.id]);
+  const station = STATIONS.find((x) => x.id === stationOf(s));
   return {
     title: s.name,
     subtitle: `${ROLES[s.role].name} · Level ${s.level}`,
@@ -35,7 +36,7 @@ export function rosterView(s, { team, garage }) {
   };
 }
 
-export function createRosterScreen({ layout, assets, team, garage, topBar, goStaff }) {
+export function createRosterScreen({ layout, assets, team, garage, topBar, goStaff, goRecruit = () => {}, goTrain = () => {} }) {
   const panel = new ScrollPanel({
     getRect: () => {
       const t = topBar.rect();
@@ -44,9 +45,16 @@ export function createRosterScreen({ layout, assets, team, garage, topBar, goSta
       return { x: sr.x + 24, y, w: sr.w - 48, h: sr.y + sr.h - 24 - y };
     },
   });
+  const headButton = (i, w) => ({ x: i * ((w - 24) / 2 + 24), y: 140, w: (w - 24) / 2, h: 120 });
   const cardRect = (i, w) => ({ x: 0, y: HEAD + i * (STAFF_CARD_HEIGHT + GAP), w, h: STAFF_CARD_HEIGHT });
 
   const screen = {
+    // Screen rect of the Hire (0) / Train (1) button (tests).
+    headRect(i) {
+      const r = panel.getRect();
+      const b = headButton(i, r.w);
+      return { x: r.x + b.x, y: r.y + b.y - panel.scrollY, w: b.w, h: b.h };
+    },
     // Screen rect of a staff member's card (tests).
     cardRectOf(id) {
       const i = team.roster.findIndex((s) => s.id === id);
@@ -77,6 +85,8 @@ export function createRosterScreen({ layout, assets, team, garage, topBar, goSta
       if (!panel.contains(p)) return;
       const q = panel.toContent(p);
       const w = panel.getRect().w;
+      if (hitRect(q, headButton(0, w))) return goRecruit();
+      if (hitRect(q, headButton(1, w))) return goTrain();
       const i = team.roster.findIndex((_, k) => {
         const c = cardRect(k, w);
         return q.y >= c.y && q.y <= c.y + c.h;
@@ -88,7 +98,9 @@ export function createRosterScreen({ layout, assets, team, garage, topBar, goSta
       panel.contentHeight = HEAD + team.roster.length * (STAFF_CARD_HEIGHT + GAP);
       panel.begin(ctx);
       text(ctx, 'Your team', 8, 12, { size: S.title, bold: true });
-      text(ctx, `${team.roster.length} people · tap someone for their details`, 8, 96, { size: S.small, color: C.textMuted, baseline: 'middle' });
+      text(ctx, `${team.roster.length} of ${team.recruitment.staffCap()} people · tap someone for their details`, 8, 96, { size: S.small, color: C.textMuted, baseline: 'middle' });
+      drawButton(ctx, headButton(0, w), 'Hire', { accent: C.good });
+      drawButton(ctx, headButton(1, w), 'Train', { accent: C.progress });
       team.roster.forEach((s, i) => drawStaffCard(ctx, cardRect(i, w), rosterView(s, { team, garage }), assets));
       panel.end(ctx);
       topBar.render(ctx);

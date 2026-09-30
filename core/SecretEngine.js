@@ -15,6 +15,13 @@
 //     A `where` test can carry its own kind (e.g. "250 units" inside "a robot that sold 250 units") and is eased
 //     the same way; by: 'field' counts distinct values of that field instead (e.g. "across 2 purposes").
 //   { all: [cond] }  "all of these happened"      { any: [cond] }  "any of these"
+// Added for DEVWORKS (Milestone 28), all optional:
+//   op 'between', value [lo, hi]                     a number inside a range, both ends included (a year range)
+//   { fact, op: 'consecutive', where, value }        the longest unbroken run of items in a list fact that pass every
+//     `where` test must reach `value` (e.g. 3 games in a row reviewed 80+; 6 months in a row in profit)
+//   { fact, op: 'sequence', value: [a, b, …] }       a list fact holds these values in this order (others may come
+//     between): an ordered history
+//   clue stage minMet: { share: 0.9 }                 reached when that share of the rule's conditions is done
 // Facts are read by name only, from a registry the game fills (FactRegistry below): run facts, account facts,
 // and the trigger event's own payload. An unknown fact is simply not met.
 //
@@ -86,8 +93,25 @@ const OPS = {
   lte: (a, b) => typeof a === 'number' && a <= b,
   in: (a, b) => Array.isArray(b) && b.includes(a),
   has: (a, b) => (Array.isArray(a) || a instanceof Set ? [...a].includes(b) : !!a && typeof a === 'object' && b in a),
+  between: (a, b) => typeof a === 'number' && Array.isArray(b) && a >= b[0] && a <= b[1],
 };
-export const SECRET_OPS = [...Object.keys(OPS), 'countOf'];
+// Longest unbroken run of items passing every test.
+function longestRun(list, test) {
+  let best = 0;
+  let cur = 0;
+  for (const item of list) {
+    cur = test(item) ? cur + 1 : 0;
+    best = Math.max(best, cur);
+  }
+  return best;
+}
+// How many of `want` appear in `list` in order (the first k of them).
+function inOrder(list, want) {
+  let k = 0;
+  for (const item of list) if (k < want.length && item === want[k]) k++;
+  return k;
+}
+export const SECRET_OPS = [...Object.keys(OPS), 'countOf', 'consecutive', 'sequence'];
 
 // Rounding precision for an eased threshold: the condition's own `precision`, else the value's decimals — with at
 // least one decimal for small "at least" scales (a 9.0 review → 7.6, not 7; Quality 85 → 72).
@@ -100,7 +124,7 @@ const ceilTo = (v, d) => Math.ceil(v * 10 ** d - 1e-9) / 10 ** d;
 export function easeValue(cond, rules = { countFactor: 0.5, thresholdPct: 15 }) {
   const v = cond.value;
   if (typeof v !== 'number') return v;
-  const op = cond.op === 'countOf' ? cond.cmp ?? 'gte' : cond.op;
+  const op = cond.op === 'countOf' || cond.op === 'consecutive' ? cond.cmp ?? 'gte' : cond.op;
   if (cond.kind === 'count') return op === 'lt' || op === 'lte' ? v : Math.ceil(v * rules.countFactor);
   if (cond.kind === 'threshold') {
     const d = cond.precision ?? decimals(v);
@@ -204,10 +228,22 @@ export class SecretEngine {
       value = cond.by ? new Set(hits.map((item) => readPath(item, cond.by))).size : hits.length;
       if (eased) whereNeeds = where.filter((w) => w.need !== w.value).map((w) => ({ field: w.field, need: w.need, base: w.value }));
       ok = OPS[cond.cmp ?? 'gte'](value, need);
+    } else if (cond.op === 'consecutive') {
+      const list = value == null ? [] : Array.isArray(value) ? value : Object.values(value);
+      const where = (cond.where ?? []).map((w) => ({ ...w, need: eased ? easeValue(w, this.easing) : w.value }));
+      value = longestRun(list, (item) => where.every((w) => OPS[w.op]?.(readPath(item, w.field), w.need) ?? false));
+      ok = OPS[cond.cmp ?? 'gte'](value, need);
+    } else if (cond.op === 'sequence') {
+      const list = value == null ? [] : Array.isArray(value) ? value : [];
+      const want = Array.isArray(need) ? need : [];
+      value = inOrder(list, want);
+      ok = want.length > 0 && value === want.length;
+      if (!ok) bestNear = 0;
+      return { cond, ok, value, need: want.length, base: want.length, eased: false, whereNeeds, known: this.facts.has(cond.fact), partial: ok ? 1 : want.length ? Math.min(0.99, value / want.length) : 0 };
     } else ok = value !== undefined && (OPS[cond.op]?.(value, need) ?? false);
     // How far along it is (0–1), for clue stages only: done = 1; a number on its way = its share of the need.
     let partial = ok ? 1 : 0;
-    if (!ok && typeof value === 'number' && typeof need === 'number' && need > 0 && ['gte', 'gt', 'countOf'].includes(cond.op)) partial = Math.min(0.99, (value + bestNear) / need);
+    if (!ok && typeof value === 'number' && typeof need === 'number' && need > 0 && ['gte', 'gt', 'countOf', 'consecutive'].includes(cond.op)) partial = Math.min(0.99, (value + bestNear) / need);
     return { cond, ok, value, need, base: cond.value, eased: eased && (need !== cond.value || whereNeeds.length > 0), whereNeeds, known: this.facts.has(cond.fact), partial };
   }
 
@@ -252,8 +288,9 @@ export class SecretEngine {
     const stages = rule.clueStages ?? [];
     let stage = this.run.clues[rule.id] ?? 0;
     for (const [i, s] of stages.entries()) {
-      let need = s.minMet === 'allButOne' ? res.total - 1 : s.minMet ?? 1;
-      if (res.total <= 1) need = s.minMet === 'allButOne' ? 0.8 : Math.min(need, 0.5);
+      const share = typeof s.minMet === 'object' && s.minMet ? s.minMet.share : null;
+      let need = share != null ? res.total * share : s.minMet === 'allButOne' ? res.total - 1 : s.minMet ?? 1;
+      if (res.total <= 1 && share == null) need = s.minMet === 'allButOne' ? 0.8 : Math.min(need, 0.5);
       need = Math.max(need, i ? 0.5 : 0);
       if (!(res.progress >= need && res.ng.ok)) break;
       stage = Math.max(stage, i + 1);

@@ -215,11 +215,11 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
       } else if (ctx) {
         drawPanel(ctx, r, { fill: C.panelDim, stroke: C.line, radius: THEME.panel.radius });
         text(ctx, `Slot ${i + 1} · empty`, 32, y + 40, { size: S.body, bold: true, color: C.textFaint });
-        text(ctx, 'Hire more staff to fill it (later milestones)', 32, y + 90, { size: S.small, color: C.textFaint });
+        text(ctx, 'Hire more staff to fill it (Staff → Hire)', 32, y + 90, { size: S.small, color: C.textFaint });
       }
       y += slotH + 12;
     }
-    const free = team.roster.filter((s) => !teamIds.includes(s.id));
+    const free = team.roster.filter((s) => !teamIds.includes(s.id) && !team.training.trainingOf(s.id)); // Milestone 12: not away on a course
     if (free.length) {
       if (ctx) text(ctx, 'Available', 8, y + 6, { size: S.body, bold: true, color: C.textMuted });
       y += 56;
@@ -305,7 +305,7 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
       parts = partsOf('clubHatch');
       budget = 'balanced';
       openList = null;
-      teamIds = team.roster.map((s) => s.id).slice(0, PROJECT.teamSlots); // the three starters, ready to go
+      teamIds = team.roster.filter((s) => !team.training.trainingOf(s.id)).map((s) => s.id).slice(0, PROJECT.teamSlots); // everyone here (not on a course), ready to go
       panel.scrollY = 0;
     },
     onDragStart: (p) => panel.beginDrag(p),

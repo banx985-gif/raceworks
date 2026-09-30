@@ -18,6 +18,10 @@
 // and walls are one cached picture (core/CachedLayer), redrawn only when a wing opens: the Starter Garage, the Bay
 // Extension (Rank D), and the higher wings as greyed floor.
 //
+// Milestone 12: hires walk in through the door to their idle spot and work by their role (data/garage.js routineFor);
+// someone let go leaves the floor; someone on a training course walks to the course's station and stays there until it
+// ends (their day counts as training: no Energy used), then goes back to work.
+//
 // Plan space (grid, pathing, positions) is flat; only drawing and tapping go through the IsoProjection.
 import { THEME, font } from '../../../../core/Theme.js';
 import { Grid } from '../../../../core/Grid.js';
@@ -30,7 +34,7 @@ import { characterPose, drawCharacter } from '../../../../core/CharacterMotion.j
 import { Agent } from '../../../../core/Agent.js';
 import { Selection } from '../../../../core/Selection.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
-import { GARAGE, GARAGE_LOOK, REST_STATION, WALK, ROUTINES, WORKER_STATE_TEXT } from '../../data/garage.js';
+import { GARAGE, GARAGE_LOOK, REST_STATION, WALK, ROUTINES, WORKER_STATE_TEXT, routineFor } from '../../data/garage.js';
 import { STARTER_AREA, EXPANSIONS, ENTRANCE, PHASE_STATIONS, BUILD_TEXT } from '../../data/facilities.js';
 import { REST } from '../../data/balance.js';
 import { statusIconsOf } from '../ui/statusIcons.js';
@@ -178,7 +182,9 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     a.placeAtTile(grid, c.col, c.row);
     return a;
   };
-  const buildWorkers = () => team.roster.filter((s) => ROUTINES[s.id]).map((s) => makeWorker(s.id, ROUTINES[s.id]));
+  // Everyone on the team (Milestone 12: hires too — the n-th hire takes the n-th hire idle spot).
+  const routineOfStaff = (s) => routineFor(s, team.roster.filter((x) => !ROUTINES[x.id]).indexOf(s));
+  const buildWorkers = () => team.roster.map((s) => makeWorker(s.id, routineOfStaff(s)));
   let workers = [];
   const workerById = (id) => workers.find((a) => a.staffId === id);
   const LEAD = 'MEC01'; // Tessa: the Milestone 1 loop (the M1 checks follow her; she is on every starting team)
@@ -228,6 +234,12 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
   // On the car's team (Milestone 10, style guide §5): long stints at the station for this phase — the phase's stations
   // (PHASE_STATIONS) in turn, in slot order, skipping any not built; the Pit Bay when none are. Resting comes first.
   function routineOf(a) {
+    // On a training course (Milestone 12): the course's station until it ends.
+    const t = team.training?.trainingOf(a.staffId);
+    if (t) {
+      const at = team.training.stationFor(t.courseId, (id) => !!stationById(id));
+      if (at) return { ...a.routine, idleSec: 0.3, stops: [{ at, spot: at === 'F12' ? 0 : 1, sec: Infinity, activity: 'training', training: t.courseId }] };
+    }
     const job = team.cars.active;
     const i = job ? job.slots.indexOf(a.staffId) : -1;
     if (i < 0) return a.routine;
@@ -242,7 +254,13 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     const s = staffOf(a);
     if (!s) return;
     const r = routineOf(a);
-    if (a.phase === 'idle' && a.stateTime >= r.idleSec) {
+    const trainStop = r.stops[0]?.training ? r.stops[0] : null;
+    if (a.phase === 'arriving') return; // a new hire's first walk in (it sets them idle at the end)
+    if (trainStop && !(a.stop?.training && (a.phase === 'toTrain' || a.phase === 'training'))) {
+      goTo(a, trainStop, 'toTrain', 'training'); // a course started: off to it at once
+    } else if (!trainStop && (a.phase === 'toTrain' || a.phase === 'training')) {
+      goBack(a); // the course is over: back to work
+    } else if (a.phase === 'idle' && a.stateTime >= r.idleSec) {
       if (s.energy < REST.goBelowEnergy) {
         goTo(a, { at: REST_STATION, spot: r.restSpot, activity: 'resting', untilRested: true }, 'toRest', 'resting');
       } else {
@@ -262,6 +280,32 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     }
   }
 
+  const arrivalPhase = (walk) => ({ toWork: 'working', toRest: 'resting', toTrain: 'training' })[walk];
+  const walkPhase = (at) => ({ working: 'toWork', resting: 'toRest', training: 'toTrain' })[at];
+
+  // Milestone 12: a hire walks in through the door to their idle spot; someone let go leaves the floor.
+  bus.on('staff:hired', ({ staff: s }) => {
+    if (workerById(s.id)) return;
+    assets.ensure?.([s.art]);
+    const a = makeWorker(s.id, routineOfStaff(s));
+    const door = fs.isOpenCell(ENTRANCE.col, ENTRANCE.row) ? ENTRANCE : (fs.nearestOpen(ENTRANCE.col, ENTRANCE.row) ?? ENTRANCE);
+    a.placeAtTile(grid, door.col, door.row);
+    workers.push(a);
+    selection.add(a);
+    setPhase(a, 'arriving');
+    const c = idleCell(a);
+    a.walkTo(grid, c.col, c.row, () => {
+      a.stop = null;
+      setPhase(a, 'idle');
+    });
+  });
+  bus.on('staff:removed', ({ staff: s }) => {
+    const a = workerById(s.id);
+    if (!a) return;
+    selection.remove(a);
+    workers = workers.filter((x) => x !== a);
+  });
+
   // After a layout change: anyone now standing inside a facility steps to the nearest free cell; anyone walking sets
   // off again round the new layout; anyone at a station that moved (or went) walks to its new place (or back).
   function repathWorkers() {
@@ -271,13 +315,13 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
         const n = fs.nearestOpen(t.col, t.row);
         if (n) a.placeAtTile(grid, n.col, n.row);
       }
-      if ((a.phase === 'toWork' || a.phase === 'toRest') && a.stop) goTo(a, a.stop, a.phase, a.phase === 'toRest' ? 'resting' : 'working');
-      else if (a.phase === 'back') goBack(a);
-      else if ((a.phase === 'working' || a.phase === 'resting') && a.stop) {
+      if ((a.phase === 'toWork' || a.phase === 'toRest' || a.phase === 'toTrain') && a.stop) goTo(a, a.stop, a.phase, arrivalPhase(a.phase));
+      else if (a.phase === 'back' || a.phase === 'arriving') goBack(a);
+      else if ((a.phase === 'working' || a.phase === 'resting' || a.phase === 'training') && a.stop) {
         const c = cellFor(a.stop);
         const here = a.tile(grid);
         if (!c) goBack(a);
-        else if (!here || c.col !== here.col || c.row !== here.row) goTo(a, a.stop, a.phase === 'resting' ? 'toRest' : 'toWork', a.phase);
+        else if (!here || c.col !== here.col || c.row !== here.row) goTo(a, a.stop, walkPhase(a.phase), a.phase);
       }
     }
   }
@@ -315,13 +359,16 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
   // What the daily tick counts them as doing (core/StaffSystem planActivity).
   const activityOf = (staffId) => {
     const a = workerById(staffId);
+    if (team.training?.trainingOf(staffId)) return 'training'; // on a course: no Energy used (Milestone 12)
     return a?.phase === 'working' ? 'working' : a?.phase === 'resting' ? 'resting' : 'idle';
   };
   const stateText = (staffId) => {
     const a = workerById(staffId);
     if (!a) return '';
     const place = a.stop ? (fac.defs[a.stop.at]?.name ?? '') : '';
-    return WORKER_STATE_TEXT[a.phase].replace('{place}', place);
+    const course = team.training?.courseOf(staffId);
+    const days = team.training?.daysLeft(staffId) ?? 0;
+    return (WORKER_STATE_TEXT[a.phase] ?? '').replace('{place}', place).replace('{course}', course?.name ?? 'a course').replace('{days}', `${days} day${days === 1 ? '' : 's'}`);
   };
 
   // Save / load: where everyone is and what they are doing. Someone who was walking sets off again from there.
@@ -346,9 +393,9 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
         const c = idleCell(a);
         a.placeAtTile(grid, c.col, c.row);
       }
-      if ((w.phase === 'toWork' || w.phase === 'toRest') && a.stop) goTo(a, a.stop, w.phase, w.phase === 'toRest' ? 'resting' : 'working');
-      else if (w.phase === 'back') goBack(a);
-      else if ((w.phase === 'working' || w.phase === 'resting') && a.stop) {
+      if ((w.phase === 'toWork' || w.phase === 'toRest' || w.phase === 'toTrain') && a.stop) goTo(a, a.stop, w.phase, arrivalPhase(w.phase));
+      else if (w.phase === 'back' || w.phase === 'arriving') goBack(a);
+      else if ((w.phase === 'working' || w.phase === 'resting' || w.phase === 'training') && a.stop) {
         a.setState(w.phase);
         a.stateTime = w.stateTime ?? 0;
       } else {

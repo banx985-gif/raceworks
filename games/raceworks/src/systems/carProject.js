@@ -18,6 +18,7 @@
 // createCarProjects({ bus, rng, staff, isResting, today, stationIds, perkOf, facilities }) → { projects, assignments, cars, … helpers }
 //   perkOf(staff) → the founder perk ({ stat, pct, extras }) when that person is the founder, else null.
 //   stationIds() → staff with a garage station duty: they count as assigned (working) even when not on a car.
+//   busyElsewhere(id) → why this person can't join a car's team now (Milestone 12: away on a course), or null.
 import { ProjectSystem } from '../../../../core/ProjectSystem.js';
 import { AssignmentSystem } from '../../../../core/AssignmentSystem.js';
 import { JobHistory } from '../../../../core/JobHistory.js';
@@ -55,9 +56,10 @@ export function finalCar({ classId, parts, dev = {}, faults = [], innovation = 0
   return { stats, classFit, rating: Math.round(clamp(classFit, 0, 999)), developmentScore, quality, faults: open.length };
 }
 
-export function createCarProjects({ bus, rng, staff, isResting = () => false, today = () => 0, stationIds = () => [], perkOf = () => null, facilities = () => null }) {
+export function createCarProjects({ bus, rng, staff, isResting = () => false, today = () => 0, stationIds = () => [], perkOf = () => null, facilities = () => null, busyElsewhere = () => null }) {
   let projects = null;
-  const assignments = new AssignmentSystem({ staff, getJobs: () => projects.jobs, bus, otherBusyIds: stationIds });
+  // busyElsewhere(id) → reason | null (Milestone 12: someone away on a training course can't join the car's team).
+  const assignments = new AssignmentSystem({ staff, getJobs: () => projects.jobs, bus, otherBusyIds: stationIds, busyElsewhere });
   const cars = new JobHistory({ bus });
 
   const budgetOf = (job) => BUDGETS[job.data.budget];

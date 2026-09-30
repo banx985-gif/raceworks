@@ -20,8 +20,10 @@
 //   revealReputation           + Reputation when a finished car is revealed
 //   researchSpeedPct.<branch>  +% research speed on that branch's nodes (Milestone 11: CFD Station AER, Engine Lab PWR)
 //   forecast                   + race forecast accuracy — STORED: forecasts arrive with weather (later milestone)
-//   unlock.<feature>           1 = that feature is open — STORED: Auto Training / manual drills (staff training,
-//                              Milestone 13) and the sponsor portfolio (sponsors, later milestone) switch on then.
+//   unlock.<feature>           1 = that feature is open: Auto Training (Milestone 12: staff training needs it) — STORED:
+//                              manual drills (Milestone 14) and the sponsor portfolio (sponsors, later milestone).
+//   trainingSeats.<slot>       Milestone 12: training capacity — simulator = people on the Driver Simulator course at
+//                              once; study = extra training places for the other courses (data/training.js)
 
 export const FACILITIES = [
   {
@@ -107,9 +109,9 @@ export const FACILITIES = [
   {
     id: 'F12', name: 'Driver Simulator', role: 'Rest/Training', unlock: {}, cost: 1800,
     effectText: 'Unlocks Auto Training and manual drills',
-    effects: [{ key: 'unlock.autoTraining', value: 1 }, { key: 'unlock.manualDrills', value: 1 }],
+    effects: [{ key: 'unlock.autoTraining', value: 1 }, { key: 'unlock.manualDrills', value: 1 }, { key: 'trainingSeats.simulator', value: 1 }],
     art: 'facility_f12', size: { w: 2, h: 2 }, draw: { width: 1.08, drop: 0.3 },
-    purpose: 'Laps on screen: drivers test the car here, and training opens with it (staff training comes later).',
+    purpose: 'Laps on screen: drivers test the car here, and it opens staff training (one person on the simulator at a time).',
   },
   {
     id: 'F13', name: 'Parts Rack', role: 'Support', unlock: {}, cost: 900,

@@ -3,7 +3,7 @@
 //
 // A menu is plain data the game builds when it opens (and again every frame while open, so numbers stay live):
 //   { title, subtitle, art (image key), accent,
-//     sections: [ { title?, lines?: [text], buttons?: [{ id, label, sub?, icon?, disabled?, locked?, badge?, accent?, onTap }],
+//     sections: [ { title?, lines?: [text], buttons?: [{ id, label, sub?, icon?, iconCrop?, disabled?, locked?, badge?, accent?, onTap }],
 //                   columns? (buttons per row, default 2) } ],
 //     tabs?: [{ id, label, badge?, sections }] }   locked (Milestone DEVWORKS-3): greyed like disabled, faded icon and a
 //                                                  padlock on the right; not tappable   tabs inside the sheet (Milestone 21): a row of tabs under the header,
@@ -12,6 +12,16 @@
 //     bars: [{ label, value, max = 100, color?, text? }]   one row each: label · a filled bar · text (default the value)
 //   Header extras (CAREWORKS Milestone 3; optional): badge (image key) — a small round badge on the picture's corner
 //   (e.g. a role badge); tag: { text, color? } — a chip beside the title (e.g. FOUNDER)
+//   Button extra (CAREWORKS Milestone 5; optional): iconBadge (image key) — a small round badge on the button's icon
+//   corner (e.g. a role badge on a roster portrait)
+//   A section may also hold lanes (CAREWORKS Milestone 7; optional, drawn after its bars, before its buttons): columns side
+//   by side, each a header button and a stack of small portrait cards (e.g. a roster's shifts):
+//     lanes: [{ id, title, sub?, accent?, selected?, onTap?, empty? (a faint line when it has no cards),
+//               items: [{ id, label, sub?, icon?, iconCrop?, iconBadge?, tag? (a small chip, e.g. AGENCY), accent?,
+//                         selected?, disabled?, onTap }] }]
+//     Every header and card is a button (buttonRect(id) finds it; a tap calls its onTap).
+//   Section title extra (CAREWORKS Milestone 8; optional): titleDot (a colour) — a round dot after the title (e.g. amber
+//   for a care plan due for review)
 // A MenuRegistry maps what was tapped (a station type, 'worker', 'floor'…) to the function that builds its menu.
 //   sheet.open(builder) — builder() → menu        sheet.close()        sheet.active
 //   sheet.handleInput(hook, p) → true when the sheet used it (tap a button, tap above it to close, drag to scroll)
@@ -49,6 +59,8 @@ const GAP = 18;
 const TAB_H = 110;
 const TAB_GAP = 20; // under the tab row
 const BAR_ROW = 58; // one bar row in a section's bars
+const LANE_HEAD_H = 124; // a lane's header button
+const LANE_CARD_H = 214; // one portrait card in a lane
 
 export class BottomSheet {
   constructor({ layout, assets, maxFrac = 0.66, onClose = null }) {
@@ -231,7 +243,7 @@ export class BottomSheet {
     let y = 0;
     for (const sec of this.sections) {
       if (sec.title) {
-        items.push({ kind: 'title', text: sec.title, y });
+        items.push({ kind: 'title', text: sec.title, y, dot: sec.titleDot ?? null });
         y += lineH(S.heading, 1.3);
       }
       for (const line of sec.lines ?? []) {
@@ -247,6 +259,7 @@ export class BottomSheet {
         y += BAR_ROW;
       }
       if (sec.bars?.length) y += 8;
+      if (sec.lanes?.length) y = this._layoutLanes(sec.lanes, items, y, w);
       const cols = sec.columns ?? 2;
       const btns = sec.buttons ?? [];
       const bw = (w - GAP * (cols - 1)) / cols;
@@ -368,13 +381,32 @@ export class BottomSheet {
         ctx.font = font(S.heading, true);
         ctx.textBaseline = 'top';
         ctx.fillText(it.text, 0, it.y + 4, b.w);
+        if (it.dot) {
+          const dx = Math.min(b.w - 20, ctx.measureText(it.text).width + 30);
+          ctx.fillStyle = it.dot;
+          ctx.strokeStyle = C.outline;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(dx, it.y + 4 + S.heading * 0.55, 13, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
       } else if (it.kind === 'line') {
         ctx.fillStyle = it.color;
         ctx.font = font(S.body);
         ctx.textBaseline = 'top';
         ctx.fillText(it.text, 0, it.y, b.w);
       } else if (it.kind === 'bar') this._bar(ctx, it.bar, it.y, b.w);
-      else this._button(ctx, it.button, it.rect);
+      else if (it.kind === 'laneHead') this._laneHead(ctx, it.button, it.rect);
+      else if (it.kind === 'laneCard') this._laneCard(ctx, it.button, it.rect);
+      else if (it.kind === 'laneEmpty') {
+        ctx.fillStyle = C.textFaint;
+        ctx.font = font(S.small);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(it.text, it.x, it.y, it.w);
+        ctx.textAlign = 'left';
+      } else this._button(ctx, it.button, it.rect);
     }
     ctx.restore();
     if (this.maxScroll > 0) {
@@ -384,6 +416,102 @@ export class BottomSheet {
       ctx.fillRect(r.x + r.w - 16, barY, 8, barH);
     }
     ctx.restore();
+  }
+
+  // Lanes side by side: a header button each, then their cards stacked. Returns the y under the tallest lane.
+  _layoutLanes(lanes, items, y, w) {
+    const n = lanes.length;
+    const lw = (w - GAP * (n - 1)) / n;
+    let bottom = y;
+    lanes.forEach((lane, i) => {
+      const x = i * (lw + GAP);
+      const head = { x, y, w: lw, h: LANE_HEAD_H };
+      this.rects.push({ id: lane.id, rect: head, button: lane });
+      items.push({ kind: 'laneHead', button: lane, rect: head });
+      let ly = y + LANE_HEAD_H + GAP;
+      if (!lane.items?.length && lane.empty) {
+        items.push({ kind: 'laneEmpty', text: lane.empty, x: x + lw / 2, y: ly + 10, w: lw - 12 });
+        ly += 60;
+      }
+      for (const it of lane.items ?? []) {
+        const rect = { x, y: ly, w: lw, h: LANE_CARD_H };
+        this.rects.push({ id: it.id, rect, button: it });
+        items.push({ kind: 'laneCard', button: it, rect });
+        ly += LANE_CARD_H + GAP;
+      }
+      bottom = Math.max(bottom, ly);
+    });
+    return bottom + 8;
+  }
+
+  _laneHead(ctx, lane, rect) {
+    const C = THEME.color;
+    const S = THEME.size;
+    drawButton(ctx, rect, '', { accent: lane.accent ?? C.progress, selected: !!lane.selected, disabled: !!lane.disabled });
+    const cy = rect.y + (rect.h - 8) / 2;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = lane.selected ? C.textOnDark : C.textOnAction;
+    ctx.font = font(S.small + 4, true);
+    ctx.fillText(lane.title, rect.x + rect.w / 2, lane.sub ? cy - 18 : cy, rect.w - 16);
+    if (lane.sub) {
+      ctx.font = font(S.small);
+      ctx.fillText(lane.sub, rect.x + rect.w / 2, cy + 20, rect.w - 16);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  _laneCard(ctx, it, rect) {
+    const C = THEME.color;
+    const S = THEME.size;
+    const off = !!it.disabled;
+    drawButton(ctx, rect, '', { accent: it.accent, selected: !!it.selected, disabled: off });
+    const iconS = Math.min(rect.w - 40, 110);
+    const ir = { x: rect.x + (rect.w - iconS) / 2, y: rect.y + 12, w: iconS, h: iconS };
+    if (it.icon) {
+      if (it.iconCrop && this.assets.drawCrop) this.assets.drawCrop(ctx, it.icon, it.iconCrop, ir);
+      else this.assets.drawContained(ctx, it.icon, ir);
+      if (it.iconBadge) {
+        const bs = Math.round(iconS * 0.46);
+        const bx = ir.x + ir.w - bs + 14;
+        const by = ir.y + ir.h - bs + 4;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.strokeStyle = C.outline;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(bx + bs / 2, by + bs / 2, bs / 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        this.assets.drawContained(ctx, it.iconBadge, { x: bx + 4, y: by + 4, w: bs - 8, h: bs - 8 });
+      }
+    }
+    if (it.tag) {
+      ctx.font = font(S.small, true);
+      const tw = Math.min(rect.w - 16, ctx.measureText(it.tag).width + 20);
+      ctx.fillStyle = C.gold;
+      ctx.strokeStyle = C.outline;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(rect.x + 8, rect.y + 8, tw, 38, 19);
+      else ctx.rect(rect.x + 8, rect.y + 8, tw, 38);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = C.outline;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(it.tag, rect.x + 8 + tw / 2, rect.y + 28, tw - 8);
+    }
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = off ? C.textFaint : it.selected ? C.textOnDark : C.textOnAction;
+    ctx.font = font(S.small, true);
+    const ty = ir.y + iconS + 26;
+    ctx.fillText(it.label, rect.x + rect.w / 2, ty, rect.w - 16);
+    if (it.sub) {
+      ctx.font = font(S.small);
+      ctx.fillText(it.sub, rect.x + rect.w / 2, ty + 34, rect.w - 16);
+    }
+    ctx.textAlign = 'left';
   }
 
   // One bar row: the label on the left, the bar in the middle, its value on the right.
@@ -436,7 +564,23 @@ export class BottomSheet {
     let x = rect.x + 20;
     if (bt.icon) {
       if (bt.locked) ctx.globalAlpha = 0.4;
-      this.assets.drawContained(ctx, bt.icon, { x, y: rect.y + (rect.h - 8 - iconS) / 2, w: iconS, h: iconS });
+      const ir = { x, y: rect.y + (rect.h - 8 - iconS) / 2, w: iconS, h: iconS };
+      // iconCrop (DEVWORKS Milestone 14, optional): { x, y, w, h } fractions of the picture, e.g. a portrait's head.
+      if (bt.iconCrop && this.assets.drawCrop) this.assets.drawCrop(ctx, bt.icon, bt.iconCrop, ir);
+      else this.assets.drawContained(ctx, bt.icon, ir);
+      if (bt.iconBadge) {
+        const bs = Math.round(iconS * 0.5);
+        const bx = ir.x + ir.w - bs + 8;
+        const by = ir.y + ir.h - bs + 6;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.strokeStyle = C.outline;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(bx + bs / 2, by + bs / 2, bs / 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        this.assets.drawContained(ctx, bt.iconBadge, { x: bx + 4, y: by + 4, w: bs - 8, h: bs - 8 });
+      }
       ctx.globalAlpha = 1;
       x += iconS + 16;
     }

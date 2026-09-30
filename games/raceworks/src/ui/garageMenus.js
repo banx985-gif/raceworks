@@ -12,6 +12,8 @@
 // Milestone 11: the Research sheet — bottom-bar Research, the Strategy Desk and the research stations (CFD Station,
 //   Engine Lab) — RP, the node being researched (progress, days left, Stop), the locked second queue and "Research tree"
 //   (goResearch). A research station's sheet also shows its effect and Build Mode.
+// Milestone 12: the Staff sheet's Hire (goRecruit) and Train (goTrain); the Driver Simulator's Training; the Sponsor Wall
+//   (front desk) leads to Recruitment; a worker's sheet has Train (or their course and days left).
 import { MenuRegistry } from '../../../../core/ui/BottomSheet.js';
 import { THEME } from '../../../../core/Theme.js';
 import { STATIONS } from '../../data/garage.js';
@@ -36,7 +38,7 @@ export function staffLine(s) {
   return [ROLES[s.role].name, `Level ${s.level}`, TIERS[s.tier].name, ...status].join(' · ');
 }
 
-export function createGarageMenus({ garage, team, assets = null, open, close = () => {}, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null, goResearch = () => {} }) {
+export function createGarageMenus({ garage, team, assets = null, open, close = () => {}, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null, goResearch = () => {}, goRecruit = () => {}, goTrain = () => {} }) {
   const menus = new MenuRegistry();
   const fac = team.facilities;
   // What a facility does, for its sheets (bible §19): its effect, its role and what it cost.
@@ -66,13 +68,25 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
       { columns: 1, buttons: [{ id: 'queue2', label: 'Second queue', sub: q2.open ? 'Open' : q2.why, icon: RESEARCH_ICONS.tree, locked: !q2.open, onTap: () => {} }] },
     ];
   }
+  // Milestone 12: the Hire / Train buttons (Staff sheet, Driver Simulator, Sponsor Wall).
+  const hireButton = () => {
+    const rec = team.recruitment;
+    return { id: 'hire', label: 'Hire', sub: `${team.roster.length} of ${rec.staffCap()} · new faces in ${rec.freeInDays()} days`, icon: 'race_ui_02', accent: C.good, onTap: () => goRecruit() };
+  };
+  const trainButton = (id = null) => {
+    const tr = team.training;
+    const busy = tr.active.length;
+    return { id: 'train', label: 'Train', sub: !tr.open() ? tr.lockedText : busy ? `${busy} on a course now` : 'Seven courses · Credits and days', icon: 'race_ui_02', accent: C.progress, onTap: () => goTrain(id) };
+  };
+  const extraFor = { F12: () => [trainButton()], F15: () => [hireButton()] };
+
   for (const def of STATIONS) {
     if (def.id === 'F02') continue; // the Pit Bay's sheet is the car project's (below)
     if (def.research) {
       menus.register(def.id, () => ({ title: def.name, subtitle: def.purpose, art: def.art, sections: [...researchSections(), { lines: effectLines(def), columns: 1, buttons: [buildButton()] }] }));
       continue;
     }
-    menus.register(def.id, () => ({ title: def.name, subtitle: def.purpose, art: def.art ?? 'race_ui_02', sections: [{ lines: effectLines(def), columns: 1, buttons: [buildButton()] }] }));
+    menus.register(def.id, () => ({ title: def.name, subtitle: def.purpose, art: def.art ?? 'race_ui_02', sections: [...(extraFor[def.id] ? [{ columns: 1, buttons: extraFor[def.id]() }] : []), { lines: effectLines(def), columns: 1, buttons: [buildButton()] }] }));
   }
 
   // Build Mode (Milestone 10): a tapped station or prop — what it does, and Sell (half its price back) when it may go.
@@ -233,7 +247,10 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
             `Energy ${Math.round(s.energy)} · Morale ${Math.round(s.morale)}`,
           ],
           columns: 1,
-          buttons: [{ id: 'details', label: 'Details', sub: team.isDriver(s) ? 'Driver ratings, stats and traits' : 'Stats and traits', icon: ROLES[s.role].badge, onTap: () => goStaff(s.id) }],
+          buttons: [
+            { id: 'details', label: 'Details', sub: team.isDriver(s) ? 'Driver ratings, stats and traits' : 'Stats and traits', icon: ROLES[s.role].badge, onTap: () => goStaff(s.id) },
+            team.training.trainingOf(s.id) ? { id: 'train', label: 'On a course', sub: `${team.training.courseOf(s.id).name}: ${team.training.daysLeft(s.id)} days left`, icon: 'race_ui_02', accent: C.progress, onTap: () => goTrain(s.id) } : trainButton(s.id),
+          ],
         },
       ],
     };
@@ -262,9 +279,10 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
         ];
       }
       if (slot.id === 'staff') {
-        menu.subtitle = `${team.roster.length} people · ${slot.line}`;
+        menu.subtitle = `${team.roster.length} of ${team.recruitment.staffCap()} people · ${slot.line}`;
         menu.sections = [
           { columns: 1, buttons: [{ id: 'roster', label: 'Roster', sub: 'Everyone on the team', icon: slot.icon, onTap: goRoster }] },
+          { columns: 2, buttons: [hireButton(), trainButton()] }, // Milestone 12
           { buttons: team.roster.map((s) => ({ id: `staff_${s.id}`, label: s.name.split(' ')[0], sub: ROLES[s.role].name, icon: s.art, accent: C.progress, onTap: () => goStaff(s.id) })), columns: 3 },
         ];
       }

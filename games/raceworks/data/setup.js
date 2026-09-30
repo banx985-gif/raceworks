@@ -32,7 +32,8 @@ export const TEAM_COLOURS = [
 //   perk.stat: the work stat their "+6% contribution" boosts in car projects (core/ProjectSystem statModifier).
 //   perk.extras: the rest of the perk. live: false = its system is not built yet; it switches on in that milestone.
 //   suppressCandidate: normally an early hiring candidate (bible §11 "Start candidate"): as a founder they start
-//   employed and must never appear again as a candidate (recruitment, Milestone 12, reads team.noCandidates).
+//   employed and must never appear again as a candidate (Milestone 12 recruitment: nobody employed is ever a card, and
+//   the founder never is — even after leaving; team.noCandidates stays in the save as the record of who started).
 export const FOUNDERS = [
   {
     id: 'DRV01',

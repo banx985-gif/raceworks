@@ -49,6 +49,13 @@ export const ASSETS = {
   m0Missing: 'assets/m0-missing-test.png',
 };
 
+// Milestone 12: the portraits recruitment can show (each role's rows 01–08: named candidates and the faces generic staff
+// wear). Registered at boot, loaded only when a board or a hire needs one (the Legendary / Secret 09–10 never are yet).
+const STARTER_ART = new Set(STAFF.map((s) => s.art));
+export const STAFF_PORTRAITS = Object.fromEntries(
+  ['drv', 'mec', 'eng', 'aer', 'str'].flatMap((r) => [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `staff_${r}${String(n).padStart(2, '0')}`)).filter((k) => !STARTER_ART.has(k)).map((k) => art('staff', k)),
+);
+
 // Milestone 9: every car family's two pictures and every part icon (about 17 MB in all). Registered at boot and loaded
 // a few at a time behind the game (main.js), so the first screen never waits for them; a picture still on its way
 // draws nothing for a moment and pops in.
