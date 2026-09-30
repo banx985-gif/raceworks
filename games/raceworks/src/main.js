@@ -9,6 +9,8 @@
 // −20,000 / +20,000 Credits (a forced-negative test), To next month and +100 Rep; a car screen has Damage −30.
 // Milestone 11: the Research screen has +500 RP, Finish now, Branch and All 36.
 // Milestone 12: Recruitment (Staff → Hire, the Sponsor Wall) and Training (Staff → Train, the Driver Simulator).
+// Milestone 14: optional driver drills (Training → Play Drill / Drills · Medals); with ?debug=1 the drill intro has
+// Force Bronze / Silver / Gold / Fail and the medal history has Practise and Reset records.
 import { THEME, font } from '../../../core/Theme.js';
 import { EventBus } from '../../../core/EventBus.js';
 import { Rng } from '../../../core/Rng.js';
@@ -60,6 +62,10 @@ import { drawResearchBanner, researchBannerHeight } from './ui/researchBanner.js
 import { createRecruitScreen } from './screens/RecruitScreen.js';
 import { createTrainScreen } from './screens/TrainScreen.js';
 import { checkStaffData } from './systems/staffCheck.js';
+import { createDrillScreen } from './screens/DrillScreen.js';
+import { createMedalsScreen } from './screens/MedalsScreen.js';
+import { createDrillRecords } from './systems/drills.js';
+import { DRILL_SETTINGS } from '../data/drills.js';
 const COL = THEME.color;
 
 const W = 1080;
@@ -68,11 +74,12 @@ const MAX_H = 2640; // up to 9:22 fills edge to edge; taller still gets thin bar
 const START_SCREEN = new URLSearchParams(window.location.search).get('screen') === 'test' ? 'test' : 'menu';
 const MENU_SCREENS = ['slots', 'setup']; // screens off the main menu: Back returns towards it
 const TEST_SCREENS = ['test', 'route']; // the Milestone 0 screens: pause button, full debug box
-const GAME_SCREENS = ['garage', 'roster', 'staff', 'carBuilder', 'car', 'cars', 'weekend', 'raceIntro', 'race', 'raceResult', 'research', 'recruit', 'train'];
+const GAME_SCREENS = ['garage', 'roster', 'staff', 'carBuilder', 'car', 'cars', 'weekend', 'raceIntro', 'race', 'raceResult', 'research', 'recruit', 'train', 'medals'];
 const RACE_SCREENS = ['weekend', 'raceIntro', 'race', 'raceResult']; // Milestone 6: the garage calendar waits while a race is on // the game's screens: P pauses the game clock here
+const CALENDAR_WAITS = [...RACE_SCREENS, 'drill']; // Milestone 14: … and while a drill is played (its course must not end mid-drill)
 // Screens opened from the garage (or from each other). A back stack remembers the way in (with each screen's
 // params: which person, which car), so the back button and the phone's Back retrace it one step at a time.
-const SUB_SCREENS = { roster: 'Roster', staff: 'Details', carBuilder: 'New car', car: 'Car', cars: 'Car Garage', weekend: 'Weekend', raceIntro: 'Race', race: 'Race', raceResult: 'Result', research: 'Research', recruit: 'Hire', train: 'Training' };
+const SUB_SCREENS = { roster: 'Roster', staff: 'Details', carBuilder: 'New car', car: 'Car', cars: 'Car Garage', weekend: 'Weekend', raceIntro: 'Race', race: 'Race', raceResult: 'Result', research: 'Research', recruit: 'Hire', train: 'Training', medals: 'Drills', drill: 'Drill' };
 const BACK_LABEL = { garage: 'Garage', ...SUB_SCREENS };
 const trail = []; // [{ name, params }] — the screens under the current one, oldest first
 let hereParams = {}; // the current sub-screen's params (so it can be returned to exactly)
@@ -307,7 +314,19 @@ const carDebug = {
 // Race weekends (Milestone 7): Compete → Race weekend → Practice → Setup → Qualifying → Race → Result. The M6 Test
 // Race (straight to the grid) stays for ?debug=1 only.
 // This device's settings (core/Settings): the race camera the player chose last (bible §24.4).
-const settings = new Settings({ key: 'raceworks:settings', defaults: { raceCamera: 'overview' } });
+// Milestone 14: the drill settings (steering sensitivity, aids, reduced motion / flashes) live here too.
+const settings = new Settings({ key: 'raceworks:settings', defaults: { raceCamera: 'overview', ...DRILL_SETTINGS } });
+// Milestone 14: the driver drill records — the account's (they survive New Game+, slot deletes and reloads).
+const drillRecords = createDrillRecords({
+  bus,
+  load: async () => (slots ? ((await slots.loadAccount()).drills ?? null) : null),
+  save: async (block) => {
+    if (!slots) return;
+    const acc = await slots.loadAccount();
+    await slots.saveAccount({ ...acc, drills: block });
+  },
+});
+team.training.setDrillRecords(drillRecords);
 function goWeekend() {
   const r = team.races.createWeekend();
   if (!r.ok) return toast(r.reason);
@@ -346,8 +365,8 @@ function raceFinished(sim) {
 // The garage calendar pauses while a race screen is open and carries on at its old speed afterwards.
 let speedBeforeRace = null;
 bus.on('screen:change', ({ from, to }) => {
-  const inRace = RACE_SCREENS.includes(to);
-  const wasRace = RACE_SCREENS.includes(from);
+  const inRace = CALENDAR_WAITS.includes(to);
+  const wasRace = CALENDAR_WAITS.includes(from);
   if (inRace && !wasRace) {
     speedBeforeRace = clock.speed;
     clock.pause();
@@ -486,6 +505,9 @@ function back() {
   else if (router.currentName === 'garage' && garage.buildMode) garage.setBuildMode(false);
   else if (router.currentName === 'race') leaveRace();
   else if (router.currentName === 'raceResult') router.go('garage');
+  else if (router.currentName === 'drill' && drillScreen.onBack()) {
+    /* the drill handles it (hand back / done) */
+  }
   else if (SUB_SCREENS[router.currentName]) {
     const prev = trail.pop() ?? { name: 'garage', params: {} };
     hereParams = prev.params;
@@ -547,7 +569,14 @@ const garage = createGarageScreen({ renderer, layout, assets, bus, sheet, openMe
 const rosterScreen = createRosterScreen({ layout, assets, team, garage, topBar: screenBar, goStaff, goRecruit: () => goRecruit(), goTrain: () => goTrain() });
 const staffScreen = createStaffDetailScreen({ layout, assets, team, garage, topBar: screenBar, debugEnabled: debug.enabled, goTrain: (id) => goTrain(id), confirm: (o) => dialog.confirm(o), toast: (a, b) => toast(a, b), afterLetGo: () => back() });
 const recruitScreen = createRecruitScreen({ layout, assets, team, topBar: screenBar, toast: (a, b) => toast(a, b), goStaff, debugEnabled: debug.enabled }); // Milestone 12 (Milestone 13: ?debug=1 spawns on the Special tab)
-const trainScreen = createTrainScreen({ layout, assets, team, topBar: screenBar, toast: (a, b) => toast(a, b) }); // Milestone 12
+const trainScreen = createTrainScreen({ layout, assets, team, topBar: screenBar, toast: (a, b) => toast(a, b), goDrill: (p) => goSub('drill', p), goMedals: () => goSub('medals') }); // Milestone 12 (14: drills)
+// Milestone 14: a drill, and the medal history. A finished drill returns to where it was opened from.
+const drillScreen = createDrillScreen({ renderer, layout, assets, team, bus, settings, records: drillRecords, debugEnabled: debug.enabled, toast: (a, b) => toast(a, b), onDone: (p, result) => {
+  back();
+  if (result?.medal) toast(`${result.medal[0].toUpperCase()}${result.medal.slice(1)} medal!`, result.pct ? `+${result.pct}% on this course` : 'Saved in your medal history');
+  team.save();
+} });
+const medalsScreen = createMedalsScreen({ layout, assets, topBar: screenBar, records: drillRecords, settings, debugEnabled: debug.enabled, goPractice: (drillId) => goSub('drill', { drillId, practice: true }), toast: (a, b) => toast(a, b) });
 // The car screens (Milestone 4): the builder, one finished car, the Car Garage.
 const carBuilderScreen = createCarBuilderScreen({
   layout,
@@ -600,6 +629,7 @@ async function startSlots() {
   const moved = await slots.adoptLegacy({ key: 'team', into: 1 });
   debug.log(`slots ready (${adapter.kind})${moved.adopted ? ', the old team moved into slot 1' : ''}`);
   await refreshSlots();
+  await drillRecords.load(); // Milestone 14
 }
 async function refreshSlots() {
   slotList = await slots.list();
@@ -749,7 +779,7 @@ const setupScreen = createTeamSetupScreen({
   onBack: () => router.go(setupFrom, setupFrom === 'slots' ? { mode: slotsScreen.mode } : {}),
 });
 
-if (debug.enabled) window.__rw = { slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, researchNews, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, taps: [] };
+if (debug.enabled) window.__rw = { slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, researchNews, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, drillScreen, medalsScreen, drillRecords, taps: [] };
 
 router
   .register('boot', bootScreen)
@@ -769,6 +799,8 @@ router
   .register('research', researchScreen)
   .register('recruit', recruitScreen)
   .register('train', trainScreen)
+  .register('drill', drillScreen)
+  .register('medals', medalsScreen)
   .register('test', createTestScreen({ renderer, layout, assets, openSheet: () => sheet.open(testSheet), onTapLogged: (p) => window.__rw?.taps.push({ x: p.x, y: p.y }) }))
   .register('route', createRouteTestScreen({ renderer, layout, onBack: back }));
 router.go('boot');

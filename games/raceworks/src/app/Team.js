@@ -79,6 +79,9 @@ export const SAVE_MIGRATIONS = {
   //   6 → 7 (Milestone 13): career records. Nothing to change here — Team.load() rebuilds them for a save without them
   //   (the founder's history, the Car Garage's teams, the race history, days since each person was hired).
   6: (record) => record,
+  //   7 → 8 (Milestone 14): each running course's drill choice and bonus (training.drills). Nothing to change here —
+  //   a save without it has none (every course carries on as Auto Train).
+  7: (record) => record,
 };
 
 export class Team {

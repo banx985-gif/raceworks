@@ -4,6 +4,7 @@ import { PROPS, START_LAYOUT } from './facilities.js';
 
 const START_IDS = new Set(START_LAYOUT.map((p) => p.def));
 import { STAFF, ALL_STAFF, ROLES } from './staff.js';
+import { DRILL_ART } from './drills.js';
 import { CLASSES, PARTS, START_PARTS, BUILD_ART, CAR_FAMILIES } from './cars.js';
 import { BOTTOM_SLOTS, TOP_BAR } from './home.js';
 import { T01 } from './tracks/T01.js';
@@ -44,6 +45,8 @@ export const ASSETS = {
   ...Object.fromEntries(Object.values(TOP_BAR.icons).map((k) => art('rewards', k))),
   // Research (Milestone 11): the Research Token (RP).
   ...Object.fromEntries([RESEARCH_ICONS.rp].map((k) => art('rewards', k))),
+  // Driver drills (Milestone 14): the Driver Drill button and the Training Medal (tinted per medal in code).
+  ...Object.fromEntries(Object.values(DRILL_ART).map((k) => art('ui', k))),
   // Milestone 0 loader test (?screen=test): one real file and one deliberately missing one.
   m0Real: 'assets/branding/pwa/icon-512.png',
   m0Missing: 'assets/m0-missing-test.png',

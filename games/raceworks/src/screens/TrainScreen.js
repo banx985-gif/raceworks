@@ -3,19 +3,24 @@
 // course now with the days left. Then the team as portrait chips (pick someone; someone away shows their course), and
 // the seven courses for them: days, cost, the gain (clamped to their tier cap: "DRV 89 → 98"), and Start or why not
 // (no Driver Simulator, the seat is taken, no free place, on the car's team, at the cap, Credits).
+// Milestone 14: a driver's course with matching drills shows Auto Train (one tap; +12% once Mastered) and Play Drill
+// (the drill choices; the course starts, then the drill opens). "Drills · Medals" at the top opens the medal history.
 import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { drawButton, drawPadlock, hitRect } from '../../../../core/ui/Button.js';
 import { text, para, card } from '../../../../core/ui/Kit.js';
 import { ROLES } from '../../data/staff.js';
 import { pressedLook } from '../ui/pressable.js';
+import { DRILL_ART, DRILLS, MEDAL_NAMES } from '../../data/drills.js';
+import { drawMedal } from '../ui/medal.js';
 
 const C = THEME.color;
 const S = THEME.size;
 const PAD = 24;
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
 
-export function createTrainScreen({ layout, assets, team, topBar, toast = () => {} }) {
+export function createTrainScreen({ layout, assets, team, topBar, toast = () => {}, goDrill = () => {}, goMedals = () => {} }) {
+  let openDrills = null; // the course whose drill choices are open
   const tr = team.training;
   const panel = new ScrollPanel({
     getRect: () => {
@@ -98,10 +103,17 @@ export function createTrainScreen({ layout, assets, team, topBar, toast = () => 
     return Math.ceil(team.roster.length / per) * (ch + gap);
   }
 
+  // Milestone 14: a driver's course with matching drills shows Auto Train (one tap, the default — +12% once Mastered)
+  // beside Play Drill, which opens the drill choices under it.
   function courseCard(ctx, y, w, o) {
     const c = o.course;
+    const s = person();
+    const drills = s ? tr.drillChoices(c.id, s.id) : [];
+    const mastered = !!tr.drillRecords?.courseMastered(c.id);
+    const open = drills.length && openDrills === c.id && o.ok;
     const gains = o.preview.length ? o.preview.map((g) => `${g.key} ${g.from} → ${g.from + g.max}${g.max < c.effect.max ? ' (cap)' : ''}`).join(' · ') : c.gainText;
-    const h = PAD * 2 + 60 + 50 + 50 + 124;
+    const extraH = drills.length ? 56 + (open ? drills.length * 130 : 0) : 0;
+    const h = PAD * 2 + 60 + 50 + 50 + 124 + extraH;
     if (ctx) {
       card(ctx, { x: 0, y, w, h }, o.ok ? 'normal' : 'locked');
       if (!tr.open()) drawPadlock(ctx, w - PAD - 20, y + PAD + 26, 34, C.textFaint);
@@ -109,18 +121,57 @@ export function createTrainScreen({ layout, assets, team, topBar, toast = () => 
       text(ctx, `${c.days} days · ${fmt(c.cost)} Cr`, w - PAD - (tr.open() ? 0 : 60), y + PAD + 4, { size: S.small, bold: true, align: 'right', color: C.actionDark });
       text(ctx, `Gain: ${c.gainText}`, PAD, y + PAD + 60, { size: S.small, color: C.textMuted, maxWidth: w - PAD * 2 });
       text(ctx, gains, PAD, y + PAD + 110, { size: S.small, bold: true, color: C.good, maxWidth: w - PAD * 2 });
+      if (drills.length) text(ctx, mastered ? 'Drill Mastered: Auto Train gets +12%. Or play for up to +25%.' : 'Optional: play a drill for up to +25% (a fail still trains).', PAD, y + PAD + 160, { size: S.small, color: C.purple, bold: true, maxWidth: w - PAD * 2 });
     }
-    const b = { x: PAD, y: y + h - PAD - 114, w: w - PAD * 2, h: 114 };
-    if (ctx) drawButton(ctx, b, o.ok ? `Start · ${fmt(c.cost)} Credits` : o.why, { disabled: !o.ok });
+    const by = y + PAD + 160 + (drills.length ? 56 : 0);
+    const bw = drills.length ? (w - PAD * 2 - 16) * 0.58 : w - PAD * 2;
+    const b = { x: PAD, y: by, w: bw, h: 114 };
+    const autoLabel = drills.length ? `Auto Train${mastered ? ' +12%' : ''} · ${fmt(c.cost)}` : `Start · ${fmt(c.cost)} Credits`;
+    if (ctx) drawButton(ctx, b, o.ok ? autoLabel : o.why, { disabled: !o.ok });
     hits.push({ rect: b, id: `start_${c.id}`, onTap: () => (o.ok ? start(c.id) : toast(o.why)) });
+    if (drills.length) {
+      const pb = { x: PAD + bw + 16, y: by, w: w - PAD * 2 - bw - 16, h: 114 };
+      if (ctx) {
+        drawButton(ctx, pb, open ? 'Close' : 'Play Drill', { disabled: !o.ok, accent: C.purple, active: open });
+        if (o.ok) assets.drawContained(ctx, DRILL_ART.button, { x: pb.x + 8, y: pb.y + 8, w: 60, h: pb.h - 16 });
+      }
+      hits.push({ rect: pb, id: `drills_${c.id}`, onTap: () => (o.ok ? (openDrills = open ? null : c.id) : toast(o.why)) });
+      if (open) {
+        let dy = by + 114 + 16;
+        for (const d of drills) {
+          const r = tr.drillRecords?.of(d.id);
+          const db = { x: PAD, y: dy, w: w - PAD * 2, h: 114 };
+          if (ctx) drawButton(ctx, db, `${d.name}${r?.mastered ? ' ★' : ''}${r?.best ? ` · best ${r.best}` : ''}`, { accent: C.purple });
+          hits.push({ rect: db, id: `play_${d.id}`, onTap: () => playDrill(c.id, d.id) });
+          dy += 130;
+        }
+      }
+    }
     return h;
+  }
+  function playDrill(courseId, drillId) {
+    const s = person();
+    const r = tr.start(courseId, s.id, { mode: 'drill', drillId });
+    if (!r.ok) return toast(r.reason);
+    openDrills = null;
+    goDrill({ drillId, staffId: s.id, courseId });
   }
 
   function layoutPage(ctx, w) {
     hits = [];
     let y = 0;
-    if (ctx) text(ctx, 'Training', 8, y, { size: S.title, bold: true });
-    y += 84;
+    if (ctx) text(ctx, 'Training', 8, y, { size: S.title, bold: true, maxWidth: w - 420 });
+    // Milestone 14: Driver Drills — medal history, settings, and (?debug=1) any drill.
+    const mb = { x: w - 400, y: -6, w: 400, h: 110 };
+    if (ctx) {
+      drawButton(ctx, mb, 'Drills · Medals', { accent: C.purple });
+      // the best medal earned in any drill (the plain picture, faded, until one is earned)
+      const recs = tr.drillRecords;
+      const best = recs ? ['gold', 'silver', 'bronze'].find((m) => DRILLS.some((d) => recs.of(d.id).medals[m] > 0)) ?? null : null;
+      drawMedal(ctx, assets, best, { x: mb.x + 6, y: mb.y + 10, w: 70, h: mb.h - 20 });
+    }
+    hits.push({ rect: mb, id: 'medals', onTap: () => goMedals() });
+    y += 124;
     y += capacityCard(ctx, y, w) + 24;
     if (ctx) text(ctx, 'Who trains?', 8, y, { size: S.heading, bold: true, color: C.actionDark });
     y += 70;
@@ -132,6 +183,17 @@ export function createTrainScreen({ layout, assets, team, topBar, toast = () => 
     const lh = para(null, line, 0, 0, w - 16, { size: S.body });
     if (ctx) para(ctx, line, 8, y, w - 16, { size: S.body, bold: !!t, color: t ? C.progress : C.text });
     y += lh + 20;
+    // Milestone 14: the running course's drill result (its medal and bonus) or the Auto Train bonus.
+    const b = t ? tr.bonusOf(s.id) : null;
+    if (b && (b.mode === 'drill' || b.pct)) {
+      const words = b.mode === 'auto' ? `Auto Train, Mastered: +${b.pct}% on this course` : b.pending ? 'Drill not played: base gain' : b.medal ? `${MEDAL_NAMES[b.medal]} medal: +${b.pct}% on this course` : 'Drill played, no medal: base gain';
+      if (ctx) {
+        card(ctx, { x: 0, y, w, h: 130 }, b.medal ? 'secret' : 'info');
+        drawMedal(ctx, assets, b.medal, { x: 16, y: y + 10, w: 110, h: 110 });
+        text(ctx, words, 140, y + 44, { size: S.body, bold: true, color: b.pct ? C.good : C.textMuted, maxWidth: w - 160 });
+      }
+      y += 150;
+    }
     for (const o of tr.options(s.id)) y += courseCard(ctx, y, w, o) + 20;
     return y + 40;
   }
