@@ -16,6 +16,8 @@
 // Milestone 23: events and the Inbox (src/systems/events.js): a major event is a card (src/ui/eventCard.js) that pauses
 // the calendar, a minor one a strip under the top bar; never on a race screen; the top bar's Inbox has the unread badge.
 // ?debug=1&events=0 mutes them for the older browser checks (no rolled events; major cards go straight to the Inbox).
+// Milestone 24: the Secret Condition Engine (src/systems/secrets.js). The published game has no rules yet (M25 adds the
+// 34); ?debug=1 loads the four synthetic test rules, and the Rumour Archive / Inbox get the why-false inspector.
 import { THEME, font } from '../../../core/Theme.js';
 import { EventBus } from '../../../core/EventBus.js';
 import { Rng } from '../../../core/Rng.js';
@@ -70,6 +72,7 @@ import { drawResearchBanner, researchBannerHeight } from './ui/researchBanner.js
 import { createEventCard } from './ui/eventCard.js'; // Milestone 23
 import { NODE } from './systems/research.js';
 import { comboById } from '../data/combos.js';
+import { SYNTHETIC_RULES } from '../data/secrets.js'; // Milestone 24 (?debug=1 only)
 import { createRecruitScreen } from './screens/RecruitScreen.js';
 import { createTrainScreen } from './screens/TrainScreen.js';
 import { checkStaffData } from './systems/staffCheck.js';
@@ -184,7 +187,7 @@ debug.log(`seeded rng check: ${rng.int(0, 9999)} (same every reload)`);
 // ---------------------------------------------------------------------------
 // The team (Milestone 3): the calendar, the three starters and the save (src/app/Team.js). The top bar's
 // Pause / 1× / 2× / 4× drive its core Clock, which now ticks days.
-const team = new Team({ bus, seed: 'raceworks' });
+const team = new Team({ bus, seed: 'raceworks', secretRules: debug.enabled ? SYNTHETIC_RULES : [] });
 const clock = team.clock;
 let teamReady = false;
 bus.on('clock:speed', ({ speed }) => debug.log(speed ? `speed ${speed}×` : 'game paused'));
@@ -355,6 +358,8 @@ const comboRecords = createComboRecords({
   save: (block) => saveAccountBlock('combos', block),
 });
 team.combos.setRecords(comboRecords);
+// Milestone 24: the secret engine's account half (found secrets, cross-run facts) lives in the account save too
+team.secrets.setAccount({ load: async () => (slots ? ((await slots.loadAccount()).secrets ?? null) : null), save: (block) => saveAccountBlock('secrets', block) });
 team.training.setDrillRecords(drillRecords);
 bus.on('stint:done', ({ record }) => drillRecords.recordStint(record)); // Milestone 18: Drive Stints on the account records
 // Milestone 20: the championship ladder — enter one (the fee on the ledger), race its next round (its race weekend).
@@ -802,6 +807,8 @@ async function playSlot(n) {
     const data = await slots.load(n);
     if (!data) throw new Error('This slot is empty.');
     team.useSlot(slots.slot(n));
+    await accountChain; // (Milestone 24: any account write still on its way lands first)
+    await team.secrets.loadAccount();
     team.load(data);
   } catch (err) {
     debug.log(`slot ${n} would not load: ${err.message}`);
@@ -817,6 +824,8 @@ async function startNewTeam(setup, n) {
   await leaveTeam();
   await slots.remove(n);
   team.useSlot(slots.slot(n));
+  await accountChain;
+  await team.secrets.loadAccount(); // Milestone 24
   team.newGame(setup);
   debug.log(`new team in slot ${n}: ${team.setup.teamName}, founder ${team.founder.id}`);
   await team.save();

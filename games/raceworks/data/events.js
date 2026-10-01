@@ -168,6 +168,9 @@ export const EVENTS = [
   { id: 'EV_CLUE', cls: 'secret', size: 'minor', trigger: { type: 'fact', fact: 'clue' }, cooldownDays: 0, title: 'A rumour in the paddock', text: '{clue}', effects: [] },
   { id: 'EV_OFFERS', cls: 'financial', size: 'minor', trigger: { type: 'calendar', on: 'month' }, cooldownDays: 0, title: 'New offers', text: '{offers}', effects: [] },
   { id: 'EV_RESCUE', cls: 'financial', size: 'minor', trigger: { type: 'fact', fact: 'debt' }, cooldownDays: 0, title: 'Rescue job offered', text: 'Cash is below 0. A rescue job is on the contract board (Money → Contracts): it lets you build one car.', effects: [] },
+  // Milestone 24: the secret engine's clue stages (a rumour) and a secret found (its exact recipe)
+  { id: 'EV_SECRET_CLUE', cls: 'secret', size: 'minor', trigger: { type: 'fact', fact: 'secretClue' }, cooldownDays: 0, title: 'A rumour in the paddock', text: '{clue}', effects: [] },
+  { id: 'EV_SECRET_FOUND', cls: 'secret', size: 'minor', trigger: { type: 'fact', fact: 'secretFound' }, cooldownDays: 0, title: 'Secret discovered: {name}', text: '{clue}', effects: [] },
   { id: 'EV_SEASON', cls: 'race', size: 'minor', trigger: { type: 'calendar', on: 'year' }, cooldownDays: 0, title: 'Year {year} begins', text: 'A new racing year. The calendar, the sponsors and the rivals start again.', effects: [] },
 ];
 

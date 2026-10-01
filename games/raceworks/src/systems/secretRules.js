@@ -26,7 +26,7 @@ const ACCESSIBILITY = /^(settings?|aids?|accessibility)\.|reducedMotion|reducedF
 
 // "run.recentWins" → "run recent wins": so camelCase can't hide a forbidden word.
 const words = (s) => String(s).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[._:-]+/g, ' ');
-const forbidden = (s) => FORBIDDEN_WORDING.find((re) => re.test(words(s)));
+const forbidden = (s) => FORBIDDEN_WORDING.find((re) => re.test(String(s)) || re.test(words(s)));
 
 function checkValue(op, v, where) {
   if (NUMERIC.has(op) || LIST_OPS.has(op)) return Number.isFinite(v) ? null : `${where}: "${op}" needs a number (missing threshold)`;

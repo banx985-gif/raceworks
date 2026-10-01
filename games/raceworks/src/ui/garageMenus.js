@@ -435,7 +435,41 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
       subtitle: 'Near-miss clues and the recipes you have found',
       art: 'race_ui_03',
       accent: C.progress,
-      sections: [{ lines: list.length ? list.map((x) => ({ text: `${x.kind === 'recipe' ? 'Recipe' : 'Rumour'}: ${x.text}`, color: x.kind === 'recipe' ? C.good : C.text })) : ['Nothing yet. Build cars: a combination that almost works starts a rumour.'] }],
+      sections: [
+        { title: 'Combos', lines: list.length ? list.map((x) => ({ text: `${x.kind === 'recipe' ? 'Recipe' : 'Rumour'}: ${x.text}`, color: x.kind === 'recipe' ? C.good : C.text })) : ['Nothing yet. Build cars: a combination that almost works starts a rumour.'] },
+        // Milestone 24: the secrets — each one's newest clue stage (1 vague … 3 nearly explicit), a found one's exact recipe
+        ...(team.secrets?.rules.length ? [{ title: 'Secrets', lines: secretLines() }] : []),
+        ...(debug ? [{ columns: 1, buttons: [secretInspectorButton()] }] : []),
+      ],
+    };
+  });
+  // Milestone 24: the secret lines (the Rumour Archive) and the ?debug=1 why-false inspector.
+  const STAGE_WORD = ['', 'Rumour', 'Hint', 'Almost', 'Found'];
+  function secretLines() {
+    const r = team.secrets.rumours();
+    return r.length ? r.map((x) => ({ text: `${STAGE_WORD[x.stage]}: ${x.text}`, color: x.found ? C.good : x.stage >= 3 ? C.actionDark : C.text })) : ['No whispers yet.'];
+  }
+  const secretInspectorButton = () => ({ id: 'secretInspector', label: 'Debug: secret inspector', sub: `${team.secrets.rules.length} rules · why each is not met`, icon: 'race_ui_28', accent: C.purple, onTap: () => open('secretInspector') });
+  menus.register('secretInspector', () => {
+    const S = team.secrets;
+    return {
+      title: 'Secret inspector',
+      subtitle: `${S.rules.length} rules · facts live · first failing condition in red`,
+      art: 'race_ui_28',
+      accent: C.purple,
+      sections: S.rules.length
+        ? S.rules.map((r) => {
+            const w = S.whyFalse(r.id);
+            return {
+              title: `${r.id} · ${r.name} · stage ${w.stage} of 4 · ${r.scope}${w.found ? ' · found' : ''}`,
+              lines: [
+                w.ok || w.found ? { text: w.found ? 'Found' : 'All conditions met (waits for its trigger)', color: C.good } : { text: `First failing: ${w.firstFail}`, color: C.bad },
+                ...w.rows.map((x) => ({ text: `${x.ok ? '✓' : '✗'} ${x.kind === 'any' ? '(one of) ' : x.kind === 'forbid' ? '(never) ' : ''}${x.text}`, color: x.ok ? C.good : C.text })),
+                { text: `Checked on: ${w.triggers.join(', ')}`, color: C.textMuted },
+              ],
+            };
+          })
+        : [{ lines: ['No rules loaded (the synthetic test rules load with ?debug=1; the real 34 are Milestone 25).'] }],
     };
   });
 
@@ -460,6 +494,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
           columns: 2,
           buttons: [
             { id: 'inboxRumours', label: 'Rumour Archive', sub: `${team.combos.rumours().length} rumours`, icon: 'race_ui_28', accent: C.progress, onTap: () => open('rumourArchive') },
+            ...(debug ? [secretInspectorButton()] : []),
             { id: 'inboxReadAll', label: 'Mark all read', sub: ev.unread ? `${ev.unread} unread` : 'All read', icon: 'race_ui_13', accent: C.progress, onTap: () => ev.markAllRead() },
           ],
         },

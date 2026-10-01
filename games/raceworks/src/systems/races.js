@@ -498,7 +498,9 @@ export function createRaces({ bus, team }) {
         if (reputation) team.money.reputation.add(reputation, `Race result: P${me.pos} at ${where}`);
       }
       const swingWin = race.kind === 'weekend' ? api.strategySwing(me) : null;
-      const entry = { champ: race.champ ?? null, swingWin, wet: !!result.weather?.wet, n: race.n, kind: race.kind, trackId: race.trackId, laps: race.laps, day: team.clock.totalDays, carNumber: race.carNumber, seed: race.seed, result, wear, prize, reputation, grid: race.grid, quali: race.quali ?? null, setupScore: race.quali?.setupScore ?? null, crew: race.crew ?? [], sponsors: race.sponsors ?? [], telemetry: !!race.telemetry, eff: race.entries.find((e) => e.isPlayer)?.car?.EFF ?? null, fuelStart: race.entries.find((e) => e.isPlayer)?.fuel ?? null }; // (Milestone 21: sponsor / contract facts)
+      // Milestone 24: the race modes used — manual = any command of yours other than switching Auto on; drive = a Drive Stint
+      const modes = { manual: (sim.commands ?? []).some((c) => c.id === me?.id && !(c.type === 'auto' && c.value)), drive: (race.stints?.length ?? 0) > 0 };
+      const entry = { champ: race.champ ?? null, swingWin, wet: !!result.weather?.wet, n: race.n, kind: race.kind, trackId: race.trackId, laps: race.laps, day: team.clock.totalDays, carNumber: race.carNumber, seed: race.seed, result, wear, prize, reputation, grid: race.grid, quali: race.quali ?? null, setupScore: race.quali?.setupScore ?? null, crew: race.crew ?? [], sponsors: race.sponsors ?? [], telemetry: !!race.telemetry, eff: race.entries.find((e) => e.isPlayer)?.car?.EFF ?? null, fuelStart: race.entries.find((e) => e.isPlayer)?.fuel ?? null, modes, stints: (race.stints ?? []).length }; // (Milestone 21: sponsor / contract facts)
       api.history.push(entry);
       if (api.history.length > HISTORY_KEEP) api.history.shift();
       api.current = null;

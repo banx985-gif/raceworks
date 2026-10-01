@@ -34,6 +34,9 @@
 // Milestone 22: team.combos (src/systems/combos.js) — the 20 combos, checked when a car finishes (and on a wet setup);
 //   discoveries and clues live on the ACCOUNT record (main.js gives it; tests get an in-memory one). Nothing new in the
 //   slot save: a car's combos travel in its own record, and its visual family is derived (src/systems/carVisual.js).
+// Milestone 24: team.secrets (src/systems/secrets.js) — the Secret Condition Engine on core/SecretEngine: run / account
+//   facts, trigger indexing, clue stages 0–4, once-only rewards; rules = new Team({ secretRules }) (main.js gives the
+//   synthetic test rules only with ?debug=1; M25 adds the real ones). team.runId names this run for cross-run facts.
 // Milestone 23: team.events (src/systems/events.js) — the data-driven events (data/events.js), the one-card queue, the
 //   Inbox and the milestone moments; its timed modifiers join the one effect query (team.facilities.bonus(key)).
 import { Clock } from '../../../../core/Clock.js';
@@ -63,6 +66,7 @@ import { contractTerms, attachContractProgress } from '../systems/contracts.js';
 import { createCombos } from '../systems/combos.js';
 import { ENDURANCE } from '../../data/training.js';
 import { createEvents } from '../systems/events.js';
+import { createSecrets } from '../systems/secrets.js';
 
 // A new game's setup when none is given (tests, and saves from before Milestone 4b).
 export const DEFAULT_SETUP = { teamName: 'RACEWORKS', principal: 'Principal', colour: 'red', founderId: 'MEC01' };
@@ -127,12 +131,17 @@ export const SAVE_MIGRATIONS = {
   //   15 → 16 (Milestone 23): events and the Inbox. Nothing to change here — events.load() gives a save without them an
   //   empty Inbox and marks the milestone moments whose facts already came true (first garage, car, race …) as fired.
   15: (record) => record,
+  //   16 → 17 (Milestone 24): the secret engine's run state and records, and the run id. Nothing to change here —
+  //   Team.load() gives a save without them a new run id and records rebuilt from its cars and race history.
+  16: (record) => record,
 };
 
 const blankContractRecords = () => ({ partEvents: {}, facts: {} });
+// Milestone 24: a run's id (cross-run facts are kept per run, so a reload can never count one twice).
+const newRunId = () => `run-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e8).toString(36)}`;
 
 export class Team {
-  constructor({ bus, seed = 'raceworks' }) {
+  constructor({ bus, seed = 'raceworks', secretRules = [] }) {
     this.bus = bus;
     this.rng = new Rng(seed);
     this.clock = new Clock({ bus, speeds: TOP_BAR.speeds, ...CLOCK });
@@ -181,6 +190,8 @@ export class Team {
     this.contractRecords = blankContractRecords(); // Milestone 21
     attachContractProgress({ bus, team: this }); // Milestone 21: race weekends and drills count for their contracts
     this.events = createEvents({ bus, team: this, seed }); // Milestone 23 (last: its day runs after every other system's)
+    this.secrets = createSecrets({ bus, team: this, rules: secretRules }); // Milestone 24 (after everything: facts are committed first)
+    this.runId = null;
     this.recruitment.extraBusy = (id) => {
       const t = this.training.trainingOf(id);
       return t ? `Away on a course (${t.days - t.daysDone} day${t.days - t.daysDone === 1 ? '' : 's'} left)` : null;
@@ -242,6 +253,8 @@ export class Team {
     this.contractRecords = blankContractRecords();
     this.money.firstOffers(); // Milestone 21: three contract offers the team can meet (the garage and research are set now)
     this.events.newGame(); // Milestone 23: an empty Inbox, then Opening the First Garage
+    this.runId = newRunId();
+    this.secrets.newGame(); // Milestone 24
   }
 
   // Milestone 21: a development contract paid — its rewards beyond Credits / RP / Reputation (bible §29): sponsor
@@ -298,6 +311,7 @@ export class Team {
     const u = this._unlocks ?? (this._unlocks = { research: [], events: [], secrets: [] });
     u.facilities = this.facilities?.builtIds() ?? [];
     u.research = this.research?.doneIds() ?? [];
+    u.secrets = this.secrets?.unlockedIds() ?? []; // Milestone 24: the secrets found (this run; account ones from any run)
     return u;
   }
 
@@ -398,6 +412,8 @@ export class Team {
       sponsors: this.sponsors.serialize(), // Milestone 21
       contractRecords: JSON.parse(JSON.stringify(this.contractRecords)), // Milestone 21
       events: this.events.serialize(), // Milestone 23
+      runId: this.runId, // Milestone 24
+      secrets: this.secrets.serialize(), // Milestone 24
     };
   }
 
@@ -427,6 +443,8 @@ export class Team {
     this.contractRecords = { ...blankContractRecords(), ...JSON.parse(JSON.stringify(data.contractRecords ?? {})) };
     if (!data.sponsors) this.money.firstOffers(); // before Milestone 21: three fresh contract offers
     this.events.load(data.events ?? null); // none before Milestone 23: an empty Inbox, past milestones counted as fired
+    this.runId = data.runId ?? newRunId(); // none before Milestone 24
+    this.secrets.load(data.secrets ?? null); // none before Milestone 24: no rule state, records rebuilt from the save
   }
 
   // A team saved before Milestone 5 had no money: it gets the §30.2 starting state today, and each car it already

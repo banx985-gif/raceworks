@@ -204,6 +204,8 @@ export function createEvents({ bus, team, seed = 'raceworks' }) {
     fireNow('EV_OFFERS', { offers: `${bits.join(' and ')} on the board (Money).` });
   });
   bus.on('clock:year', ({ year }) => fireNow('EV_SEASON', { year }));
+  // Milestone 24: a secret's new clue stage, or a secret found
+  bus.on('secret:rumour', ({ found, name, text }) => text && fireNow(found ? 'EV_SECRET_FOUND' : 'EV_SECRET_CLUE', { clue: text, name: name ?? '' }));
 
   // --- the day ----------------------------------------------------------------------------------------------------
   bus.on('clock:day', () => {

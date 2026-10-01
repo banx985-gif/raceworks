@@ -174,6 +174,12 @@ export function createRecruitScreen({ layout, assets, team, topBar, toast = () =
     }
     y += chH + 24;
     if (why && channel === 'special' && debugEnabled) return debugSpawns(ctx, y, w);
+    // Milestone 24: a secret's special arrival is hireable on the Special tab in normal play
+    if (why && channel === 'special') {
+      const arrivals = rec.cardsOf('special').filter((c) => c.arrival);
+      for (const c of arrivals) y += candidate(ctx, y, w, c) + 24;
+      return y + 40;
+    }
     if (why) return y + 40;
     // Refresh buttons.
     const bw = (w - 2 * 16) / 3;

@@ -69,10 +69,10 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
     return why;
   }
   function whyNot(p, ch = null) {
-    if (RECRUIT.neverInPools.includes(p.tier) && !p.debug) return 'Arrives only as a special arrival';
+    if (RECRUIT.neverInPools.includes(p.tier) && !p.debug && !p.arrival) return 'Arrives only as a special arrival';
     if (p.personId === team.founder?.id) return 'The founder is already part of the team story';
     if (employed(p.personId)) return 'Already on the team';
-    if (p.debug) return null; // a ?debug=1 spawn: any of the 50, for testing
+    if (p.debug || p.arrival) return null; // a ?debug=1 spawn (any of the 50, for testing) or a secret's special arrival (Milestone 24)
     const tr = RECRUIT.tierRank[p.tier];
     if (tr === undefined) return 'Not an ordinary candidate';
     if (!hasRank(tr)) return `${TIERS[p.tier].name} staff need Rank ${tr}`;
@@ -249,6 +249,19 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
     bus.emit('recruit:refresh', { channel: 'special', reason: 'debug' });
     return { ok: true, card };
   }
+  // Milestone 24: a secret's reward — this person arrives on the Special tab for `days` game days (bible §36: "arrives
+  // for 56 game days"), then leaves if not hired. Once per person while the card is up. → { ok, card } or { ok: false, reason }
+  function specialArrival(personId, days = 56) {
+    const d = staffDefById(personId);
+    if (!d) return { ok: false, reason: `No one called ${personId}` };
+    if (employed(d.id)) return { ok: false, reason: 'Already on the team' };
+    if (allCards().some((c) => c.personId === d.id)) return { ok: false, reason: 'Already on a board' };
+    const card = { ...cardOfDef(d), id: `arrival:${d.id}`, channel: 'special', arrival: true, untilDay: today() + days };
+    state.debugCards.push(card);
+    bus.emit('recruit:refresh', { channel: 'special', reason: 'arrival' });
+    bus.emit('recruit:arrival', { card });
+    return { ok: true, card };
+  }
   // Can this card be hired now? → { ok, why, fee, card }
   function hireCheck(cardId) {
     const f = findCard(cardId);
@@ -306,6 +319,12 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
 
   // --- the day --------------------------------------------------------------------------------------------------------
   bus.on('clock:day', () => {
+    // (Milestone 24) a special arrival not hired in time leaves
+    const gone = state.debugCards.filter((c) => c.arrival && today() > c.untilDay);
+    if (gone.length) {
+      state.debugCards = state.debugCards.filter((c) => !gone.includes(c));
+      bus.emit('recruit:refresh', { channel: 'special', reason: 'arrivalLeft' });
+    }
     if (freeInDays() > 0) return;
     state.lastFreeDay = today();
     for (const ch of BOARD_CHANNELS) if (chOpen(ch)) draw(ch.id, 'free');
@@ -322,6 +341,7 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
     isOpen: (id) => chOpen(channelById(id)),
     cardsOf: (id) => (id === 'special' ? state.debugCards : (boards[id]?.cards ?? [])),
     debugSpawn,
+    specialArrival, // Milestone 24
     get cards() {
       return allCards();
     },

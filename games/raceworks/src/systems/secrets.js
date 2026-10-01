@@ -99,14 +99,19 @@ export function createSecrets({ bus, team, rules = [] }) {
     return s >= CLUE.discovered ? s : Math.min(CLUE.discovered - 1, s + (postEnding && s >= 0 ? CLUE.postEndingBonus : 0));
   };
   const textOf = (rule, st) => (st >= CLUE.discovered ? rule.recipe : rule.clueStages?.[st - 1]?.text ?? '');
+  // Stages are recorded one by one, in order: a jump from 0 to 3 logs 1, 2 and 3 (each a Rumour Archive line).
+  const lastLogged = (id) => Math.max(0, ...rumourLog.filter((r) => r.id === id).map((r) => r.stage));
+  function logUpTo(rule, st) {
+    for (let s = lastLogged(rule.id) + 1; s <= st; s++) rumourLog.push({ id: rule.id, stage: s, day: team.clock.totalDays });
+  }
   bus.on('secret:clue', ({ rule, stage: st }) => {
-    if (!byId[rule.id]) return;
-    rumourLog.push({ id: rule.id, stage: st, day: team.clock.totalDays });
+    if (!byId[rule.id] || st <= lastLogged(rule.id)) return;
+    logUpTo(rule, st);
     bus.emit('secret:rumour', { id: rule.id, stage: st, text: textOf(rule, stage(rule.id)) });
   });
   bus.on('secret:unlocked', ({ rule }) => {
     if (!byId[rule.id]) return;
-    rumourLog.push({ id: rule.id, stage: CLUE.discovered, day: team.clock.totalDays });
+    logUpTo(rule, CLUE.discovered);
     saveAccount();
     bus.emit('secret:rumour', { id: rule.id, stage: CLUE.discovered, text: rule.recipe, found: true, name: rule.name });
   });
@@ -171,8 +176,15 @@ export function createSecrets({ bus, team, rules = [] }) {
     sponsorSigned: () => first('firstSponsor'),
     rankUp: ({ rank }) => rank?.id && first(`rank${rank.id}`),
   };
+  // This run's part of the cross-run facts (set, never added: a reload can't count it twice); saved to the account
+  // whenever it changes.
   function notify(trigger, payload = {}) {
-    engine.setRunFact('titles', team.championships.titles());
+    const titles = team.championships.titles();
+    const was = engine.account.facts.titles?.[team.runId];
+    if (team.runId && JSON.stringify(was ?? []) !== JSON.stringify([...new Set(titles)])) {
+      engine.setRunFact('titles', titles);
+      saveAccount();
+    }
     return engine.notify(trigger, payload);
   }
   for (const t of TRIGGERS) {
@@ -188,7 +200,7 @@ export function createSecrets({ bus, team, rules = [] }) {
     const rule = byId[id];
     if (!rule) return null;
     const res = engine.evaluate(rule, { event: 'inspect', payload: {} });
-    const row = (p, kind) => ({ kind, label: p.cond.label ?? p.cond.fact, fact: p.cond.fact, op: p.cond.op, value: p.value, need: p.need, ok: kind === 'forbid' ? !p.ok : p.ok, text: `${p.cond.label ?? p.cond.fact} — now ${show(p.value)}, needs ${kind === 'forbid' ? 'never' : show(p.need)}` });
+    const row = (p, kind) => ({ kind, label: p.cond.label ?? p.cond.fact, fact: p.cond.fact, op: p.cond.op, value: p.value, need: p.need, ok: kind === 'forbid' ? !p.ok : p.ok, text: kind === 'forbid' ? `${p.cond.label ?? p.cond.fact} — now ${show(p.value)} (must never reach ${show(p.need)})` : `${p.cond.label ?? p.cond.fact} — now ${show(p.value)}, needs ${show(p.need)}` });
     const rows = [...res.all.map((p) => row(p, 'all')), ...res.any.map((p) => row(p, 'any')), ...res.forbids.map((p) => row(p, 'forbid'))];
     let firstFail = null;
     if (!res.ng.ok) firstFail = `Needs NG+${res.ng.need} (now NG+${res.ng.value})`;
