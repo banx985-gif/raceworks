@@ -34,6 +34,10 @@
 //   race.telemetry (the car carries a telemetry part — data/cars.js telemetry: the Telemetry Suite — or the garage's effect
 //   query says telemetry: the Telemetry Room). The history entry
 //   keeps them with your car's EFF and start fuel / energy target (the sponsor and contract facts, src/systems/sponsorFacts.js).
+// Milestone 22: the car's combos in the race (src/systems/combos.js): Data Car's +20% Setup Knowledge (on the staff part of
+//   practice, race.comboKnowledgePct), Rain Runner's wet stats when the weekend's weather has rain, Project Zero's race
+//   stats — fixed into the race when it's made. A wet setup (Intermediate / Wet) is checked for Rain Runner when it is set
+//   and when the setup locks.
 import { Rng } from '../../../../core/Rng.js';
 import { raceCrew, crewPeople, effectSum } from './staffTraits.js';
 import { createRaceSim, runQualifying, pitServiceTime, mechanicSecs } from '../race/raceSim.js';
@@ -112,8 +116,18 @@ export function createRaces({ bus, team }) {
     // Milestone 17: the weekend's weather timeline, fixed now from the seed (a reload never rerolls it). The debug Test
     // Race stays dry.
     const weather = kind === 'weekend' ? makeWeather(seed, laps, track.rainChance ?? 0, track.weatherProfile ?? null) : dryWeather(); // Milestone 19: the track's own odds
+    // Milestone 22: combo effects on your car (weekends only)
+    let comboKnowledgePct = 0;
+    if (kind === 'weekend' && team.combos) {
+      comboKnowledgePct = team.combos.knowledgePct(rec);
+      const rainy = weather.start !== 'dry' || (weather.changes ?? []).some((x) => x.to !== 'dry'); // any rain in the weekend's timeline
+      const add = { ...(rainy ? team.combos.wetStats(rec) : {}) };
+      const all = team.combos.raceStats(rec);
+      for (const k of Object.keys(player.car)) if (all) add[k] = (add[k] ?? 0) + all;
+      for (const [k, v] of Object.entries(add)) player.car[k] = (player.car[k] ?? 0) + v;
+    }
     // (crewKnowledge, Milestone 19: + Street Package on street circuits, + Balance Artist on technical tracks)
-    return { n, kind, seed, trackId: track.id, laps, entries, grid, carNumber: rec.number, createdDay: team.clock.totalDays, state: null, status: 'ready', crew: crew.map((s) => s.id), crewKnowledge: trait('setupKnowledge') + (track.walls ? trait('setupKnowledgeStreet') : 0) + (WEEKEND.technicalProfiles.includes(track.profile) ? trait('setupKnowledgeTechnical') : 0), forecast, weather, raceType: config.raceType ?? 'standard', stints: [], sponsors, prizePct: kind === 'weekend' ? team.facilities?.bonus('prizePct') ?? 0 : 0, telemetry: (rec.result?.parts ?? []).some((id) => PARTS[id]?.telemetry) || (team.facilities?.bonus('telemetry') ?? 0) > 0 }; // Milestone 18: the race type (stint length and cap) and the stints driven
+    return { n, kind, seed, trackId: track.id, laps, entries, grid, carNumber: rec.number, createdDay: team.clock.totalDays, state: null, status: 'ready', crew: crew.map((s) => s.id), crewKnowledge: trait('setupKnowledge') + (track.walls ? trait('setupKnowledgeStreet') : 0) + (WEEKEND.technicalProfiles.includes(track.profile) ? trait('setupKnowledgeTechnical') : 0), forecast, weather, raceType: config.raceType ?? 'standard', stints: [], comboKnowledgePct, sponsors, prizePct: kind === 'weekend' ? team.facilities?.bonus('prizePct') ?? 0 : 0, telemetry: (rec.result?.parts ?? []).some((id) => PARTS[id]?.telemetry) || (team.facilities?.bonus('telemetry') ?? 0) > 0 }; // Milestone 18: the race type (stint length and cap) and the stints driven
   }
 
   // Milestone 15: the setup locks (qualifying): the repair priority is paid through the ledger (Credits, and the Lead
@@ -132,6 +146,7 @@ export function createRaces({ bus, team }) {
       bus.emit('car:repaired', { record: rec, cost: q.cost });
     }
     me.condition = rec?.condition ?? me.condition;
+    team.combos?.checkSetup(w); // Milestone 22: the setup as it locks (an Auto Setup's tyre too)
     const unrepaired = me.condition < 100 && !paid;
     if (unrepaired) me.failureMult = r3((me.failureMult ?? 1) * REPAIR.skipFailureX);
     w.repair = { choice: w.setup.repair, from: q.condition, to: me.condition, cost: paid, energy: paid ? q.energy : 0, mechanicId: paid ? q.mechanic?.id ?? null : null, unrepaired };
@@ -188,7 +203,7 @@ export function createRaces({ bus, team }) {
     knowledgeSources(w = cur()) {
       const technical = WEEKEND.technicalProfiles.includes(TRACKS[w.trackId]?.profile);
       return {
-        staff: api.practiceValue(),
+        staff: api.practiceValue() * (1 + (w.comboKnowledgePct ?? 0) / 100), // (Milestone 22: Data Car)
         facilities: team.facilities?.bonus('setupKnowledge') ?? 0,
         technical: technical ? team.facilities?.bonus('setupKnowledge.technical') ?? 0 : 0,
         traits: w.crewKnowledge ?? 0,
@@ -300,6 +315,7 @@ export function createRaces({ bus, team }) {
       const w = cur();
       if (!api.setupOpen || !team.research.tyreOpen(id)) return false;
       w.setup.tyre = id;
+      team.combos?.checkSetup(w); // Milestone 22: Rain Runner on a wet setup
       bus.emit('race:progress', {});
       return true;
     },

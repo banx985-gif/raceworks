@@ -14,6 +14,7 @@ import { Rng } from '../../../../core/Rng.js';
 import { text, para, panel as drawPanel, tabRects, drawTabs, listRow, listRowHeight } from '../../../../core/ui/Kit.js';
 import { pressedLook } from '../ui/pressable.js';
 import { liveryKey, teamColourId } from '../ui/livery.js';
+import { structuralCombos } from '../systems/combos.js'; // Milestone 22
 import { CLASSES, CLASS_ORDER, PARTS, SLOTS, BUDGETS, BUDGET_ORDER, PHASES, PROJECT, CAR_STATS } from '../../data/cars.js';
 import { ROLES } from '../../data/staff.js';
 import { partsOf, leadRole, finalCar } from '../systems/carProject.js';
@@ -104,9 +105,9 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
 
     // --- class ---
     heading('Class');
-    const vis = visualFamily({ classId, parts });
+    const vis = visualFamily({ classId, parts, combos: structuralCombos({ classId, parts }) }); // Milestone 22: the resolver
     const chosen = {
-      art: liveryKey(assets, vis.showcase, teamColourId(team)),
+      art: liveryKey(assets, vis.showcase, teamColourId(team), team.sponsors?.decals() ?? []),
       title: cls.name,
       lines: [
         { text: `Weights · ${CAR_STATS.map((k) => `${k} ${cls.weights[k]}`).join(' · ')}`, size: S.small, color: C.textMuted },

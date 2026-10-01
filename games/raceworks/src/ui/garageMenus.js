@@ -12,6 +12,9 @@
 // Milestone 11: the Research sheet — bottom-bar Research, the Strategy Desk and the research stations (CFD Station,
 //   Engine Lab) — RP, the node being researched (progress, days left, Stop), the locked second queue and "Research tree"
 //   (goResearch). A research station's sheet also shows its effect and Build Mode.
+// Milestone 22: the Research sheet's Parts Archive → Combo Archive (discovered: name, recipe, reward; else ??? and its
+//   clue once a near-miss happened) and Rumour Archive (clues and recipes); the Compete sheet's "Your car" card (the
+//   resolved visual family in the team colour with its sponsors).
 // Milestone 12: the Staff sheet's Hire (goRecruit) and Train (goTrain); the Driver Simulator's Training; the Sponsor Wall
 //   (front desk) leads to Recruitment; a worker's sheet has Train (or their course and days left).
 // Milestone 21: the Sponsor Wall's sheet also has Sponsors — the 'sponsors' sheet (src/ui/sponsorMenu.js, the same as the
@@ -28,6 +31,11 @@ import { FOUNDER_FLAG } from '../../data/setup.js';
 import { COSTS } from '../../data/economy.js';
 import { moneyMenu, fmt } from './moneyMenu.js';
 import { sponsorSections } from './sponsorMenu.js'; // Milestone 21
+import { carArtKey } from './livery.js'; // Milestone 22
+import { familyOfCar } from '../systems/carVisual.js';
+import { FAMILY_NAMES, PARTS, SLOTS } from '../../data/cars.js';
+import { COMBOS, comboById } from '../../data/combos.js';
+import { unlockContext, partState } from '../systems/carCatalog.js';
 import { BUILD_TEXT } from '../../data/facilities.js';
 import { liveryKey, teamColourId } from './livery.js';
 import { RESEARCH_ICONS } from '../../data/research.js';
@@ -72,6 +80,8 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
       { lines, bars },
       { columns: 1, buttons },
       { columns: 1, buttons: [{ id: 'queue2', label: 'Second queue', sub: q2.open ? 'Open' : q2.why, icon: RESEARCH_ICONS.tree, locked: !q2.open, onTap: () => {} }] },
+      // Milestone 22: the archives
+      { columns: 1, buttons: [{ id: 'partsArchive', label: 'Parts Archive', sub: `Parts and combos · ${COMBOS.filter((c) => team.combos.discovered(c.id)).length} of 20 combos found`, icon: 'race_ui_03', accent: C.progress, onTap: () => open('partsArchive') }] },
     ];
   }
   // Milestone 12: the Hire / Train buttons (Staff sheet, Driver Simulator, Sponsor Wall).
@@ -311,6 +321,14 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
         const next = CH?.nextRound() ?? null;
         if (next) menu.art = TRACKS[next.trackId]?.artKey; // the next round's scenery as the sheet's backdrop
         const champSections = [];
+        // Milestone 22: your car — the one in the race / championship, else the newest — as it looks (resolved family,
+        // team colour, sponsors)
+        const yourCar = team.cars.cars.get(cur?.carNumber ?? season?.carNumber) ?? team.cars.cars.latest();
+        if (yourCar && assets) {
+          const fam = familyOfCar(yourCar, team);
+          const cbs = (yourCar.result.combos ?? []).map((id) => comboById(id)?.name).filter(Boolean);
+          champSections.push({ columns: 1, buttons: [{ id: 'yourCar', label: `Your car: ${yourCar.name}`, sub: `${FAMILY_NAMES[fam.id]} (${fam.id})${cbs.length ? ` · ${cbs.join(', ')}` : ''}`, icon: carArtKey(assets, team, yourCar, 'showcase', cur?.sponsors ?? team.sponsors.decals()), accent: C.progress, onTap: () => goCarGarage() }] });
+        }
         if (season) {
           const def = champById(season.id);
           const me = CH.standings().find((r) => r.isPlayer);
@@ -368,6 +386,57 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
       return menu;
     });
   }
+  // Milestone 22: the Parts Archive (the open parts by slot) → the Combo Archive and the Rumour Archive.
+  menus.register('partsArchive', () => {
+    const ctx = unlockContext(team);
+    const found = COMBOS.filter((c) => team.combos.discovered(c.id)).length;
+    return {
+      title: 'Parts Archive',
+      subtitle: 'Every part you can fit, and the combinations you have found',
+      art: 'race_ui_03',
+      accent: C.progress,
+      sections: [
+        {
+          columns: 2,
+          buttons: [
+            { id: 'comboArchive', label: 'Combo Archive', sub: `${found} of 20 found · ${Object.keys(team.combos.records.data.clues).length} clues`, icon: 'race_ui_03', accent: C.action, onTap: () => open('comboArchive') },
+            { id: 'rumourArchive', label: 'Rumour Archive', sub: `${team.combos.rumours().length} rumours`, icon: 'race_ui_03', accent: C.progress, onTap: () => open('rumourArchive') },
+          ],
+        },
+        ...SLOTS.map((sl) => {
+          const all = Object.keys(PARTS).filter((id) => PARTS[id].slot === sl.id && !PARTS[id].secret);
+          const open = all.filter((id) => partState(id, ctx).open);
+          return { title: `${sl.name} · ${open.length} of ${all.length}`, lines: [open.map((id) => `${id} ${PARTS[id].name}`).join(' · ') || 'None yet'] };
+        }),
+      ],
+    };
+  });
+  menus.register('comboArchive', () => {
+    const rows = team.combos.archive();
+    return {
+      title: 'Combo Archive',
+      subtitle: `${rows.filter((r) => r.discovered).length} of 20 combos found (for every team on this device)`,
+      art: 'race_ui_03',
+      accent: C.progress,
+      sections: rows.map((r) => ({
+        title: `${r.id} · ${r.name}`,
+        lines: r.discovered
+          ? [{ text: `Recipe: ${r.recipe}`, color: C.actionDark }, `Reward: ${r.reward}`, { text: `${r.tier[0].toUpperCase()}${r.tier.slice(1)} combo · found by ${r.when.team}${r.when.car ? ` (${r.when.car})` : ''}`, color: C.textMuted }]
+          : [r.clue ? { text: `Clue: ${r.clue}`, color: C.actionDark } : { text: 'Not found yet', color: C.textMuted }],
+      })),
+    };
+  });
+  menus.register('rumourArchive', () => {
+    const list = [...team.combos.rumours()].reverse();
+    return {
+      title: 'Rumour Archive',
+      subtitle: 'Near-miss clues and the recipes you have found',
+      art: 'race_ui_03',
+      accent: C.progress,
+      sections: [{ lines: list.length ? list.map((x) => ({ text: `${x.kind === 'recipe' ? 'Recipe' : 'Rumour'}: ${x.text}`, color: x.kind === 'recipe' ? C.good : C.text })) : ['Nothing yet. Build cars: a combination that almost works starts a rumour.'] }],
+    };
+  });
+
   // Milestone 20: the championship sub-sheets (they replace the Compete sheet; Back returns to it)
   const CH = team.championships;
   if (CH) {

@@ -9,7 +9,8 @@ import { Rng } from '../../../../core/Rng.js';
 import { RIVAL_TEAMS, PRIVATEERS, FIELD_CAP, PRIVATEER_TIERS } from '../../data/rivals.js';
 import { CHAMP_BANDS, bandIndex, champById } from '../../data/championships.js';
 import { RACE } from '../../data/race.js';
-import { CLASSES, familyOfArt } from '../../data/cars.js';
+import { CLASSES } from '../../data/cars.js';
+import { familyOfCar } from '../systems/carVisual.js'; // Milestone 22
 import { TEAM_COLOURS } from '../../data/setup.js';
 
 const SIX = ['qualifying', 'racecraft', 'wet', 'tyreCare', 'consistency', 'feedback'];
@@ -40,7 +41,7 @@ export function playerEntry(team, rec) {
     team: team.setup.teamName,
     isPlayer: true,
     // the car's own visual family (Milestone 9: saved with the car; older cars: from their showcase picture)
-    sprite: rec.result.raceArt ?? familyOfArt(rec.result.art)?.top ?? CLASSES[rec.result.classId]?.raceArt ?? 'car_v01_top',
+    sprite: familyOfCar(rec, team).top, // Milestone 22: the resolved family (derived from the car, never saved)
     colour: colour.main,
     ratings: Object.fromEntries(SIX.map((k) => [k, clampRating(r[k])])),
     car: { ...rec.result.stats },

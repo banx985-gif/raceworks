@@ -24,12 +24,17 @@
 // Milestone 21: each phase's development gain is kept (job.data.devByPhase: its points and its breakthroughs' extra), and
 //   the finished car carries devByPhase and aeroShare — the Chassis & Aero phase's share of the project's development gain
 //   (AeroForge's obligation, bible §29). The facilities' flat devBonus at the end is not a phase's gain and isn't counted.
+// Milestone 22: combosFor(job, prelim) (src/systems/combos.js forCar) — the combos the finished car makes, checked on the
+//   car before any combo bonus; their stat bonuses are added as development points (so the stat pipeline and its cap
+//   hold) and the car carries result.combos and result.comboNear (its near-misses, for the clues). The visual family comes
+//   from the resolver (src/systems/carVisual.js) with those combos; family / art / raceArt are kept on the record for
+//   older code and tests, but the screens derive the family each time (familyOfCar).
 import { ProjectSystem } from '../../../../core/ProjectSystem.js';
 import { AssignmentSystem } from '../../../../core/AssignmentSystem.js';
 import { JobHistory } from '../../../../core/JobHistory.js';
 import { CAR_STATS, CAR_STAT_MAX, PARTS, SLOTS, CLASSES, PHASES, BUDGETS, PROJECT } from '../../data/cars.js';
 import { partsCost, tierFor, checkCar, carCost } from './carCatalog.js';
-import { visualFamily } from './carVisual.js';
+import { resolveFamily } from './carVisual.js';
 import { ROLES, TRAITS } from '../../data/staff.js';
 import { phaseMult } from './staffTraits.js';
 
@@ -69,7 +74,7 @@ export function finalCar({ classId, parts, dev = {}, faults = [], innovation = 0
   return { stats, classFit, rating: Math.round(clamp(classFit, 0, 999)), developmentScore, quality, faults: open.length };
 }
 
-export function createCarProjects({ bus, rng, staff, isResting = () => false, today = () => 0, stationIds = () => [], perkOf = () => null, facilities = () => null, busyElsewhere = () => null }) {
+export function createCarProjects({ bus, rng, staff, isResting = () => false, today = () => 0, stationIds = () => [], perkOf = () => null, facilities = () => null, busyElsewhere = () => null, combosFor = null }) {
   let projects = null;
   // busyElsewhere(id) → reason | null (Milestone 12: someone away on a training course can't join the car's team).
   const assignments = new AssignmentSystem({ staff, getJobs: () => projects.jobs, bus, otherBusyIds: stationIds, busyElsewhere });
@@ -140,8 +145,14 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
       const sums = job.phaseSummaries;
       const avgScore = sums.length ? sums.reduce((t, p) => t + p.avgScore, 0) / sums.length : 0;
       for (const [k, v] of Object.entries(facilities()?.devBonus() ?? {})) if (v) job.data.dev[k] = (job.data.dev[k] ?? 0) + v;
-      const car = finalCar({ classId: job.data.classId, parts: job.data.parts, dev: job.data.dev, faults: job.data.faults, innovation: job.data.innovation, avgScore });
-      const vis = visualFamily({ classId: job.data.classId, parts: job.data.parts });
+      let car = finalCar({ classId: job.data.classId, parts: job.data.parts, dev: job.data.dev, faults: job.data.faults, innovation: job.data.innovation, avgScore });
+      // Milestone 22: the combos, on the car as it is; their stat bonuses go in as development points
+      const cb = combosFor?.(job, car) ?? { ids: [], stats: {}, near: [] };
+      if (Object.keys(cb.stats).length) {
+        for (const [k, v] of Object.entries(cb.stats)) job.data.dev[k] = (job.data.dev[k] ?? 0) + v;
+        car = finalCar({ classId: job.data.classId, parts: job.data.parts, dev: job.data.dev, faults: job.data.faults, innovation: job.data.innovation, avgScore });
+      }
+      const vis = resolveFamily({ classId: job.data.classId, parts: job.data.parts, combos: cb.ids });
       return {
         classId: job.data.classId,
         className: CLASSES[job.data.classId].name,
@@ -156,6 +167,9 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
         breakthroughs: job.data.breakthroughs,
         devByPhase: { ...(job.data.devByPhase ?? {}) }, // Milestone 21
         aeroShare: aeroShareOf(job.data.devByPhase),
+        combos: cb.ids, // Milestone 22
+        comboStats: cb.stats,
+        comboNear: cb.near,
         budgets: job.data.budgets,
         partsCost: partsCost(job.data.parts),
         baseCost: CLASSES[job.data.classId].baseCost,

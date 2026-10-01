@@ -70,6 +70,7 @@ import { checkStaffData } from './systems/staffCheck.js';
 import { createDrillScreen } from './screens/DrillScreen.js';
 import { createMedalsScreen } from './screens/MedalsScreen.js';
 import { createDrillRecords } from './systems/drills.js';
+import { createComboRecords } from './systems/combos.js'; // Milestone 22
 import { DRILL_SETTINGS } from '../data/drills.js';
 const COL = THEME.color;
 
@@ -322,15 +323,25 @@ const carDebug = {
 // Milestone 14: the drill settings (steering sensitivity, aids, reduced motion / flashes) live here too.
 const settings = new Settings({ key: 'raceworks:settings', defaults: { raceCamera: 'overview', ...DRILL_SETTINGS } });
 // Milestone 14: the driver drill records — the account's (they survive New Game+, slot deletes and reloads).
+// Milestone 22: account blocks are written one at a time (the drill and combo records share the account save).
+let accountChain = Promise.resolve();
+const saveAccountBlock = (name, block) =>
+  (accountChain = accountChain.then(async () => {
+    if (!slots) return;
+    const acc = await slots.loadAccount();
+    await slots.saveAccount({ ...acc, [name]: block });
+  }).catch((e) => debug.log(`account save failed: ${e?.message ?? e}`)));
 const drillRecords = createDrillRecords({
   bus,
   load: async () => (slots ? ((await slots.loadAccount()).drills ?? null) : null),
-  save: async (block) => {
-    if (!slots) return;
-    const acc = await slots.loadAccount();
-    await slots.saveAccount({ ...acc, drills: block });
-  },
+  save: (block) => saveAccountBlock('drills', block),
 });
+// Milestone 22: the combo discoveries, clues and rumours — account-wide like the drill records.
+const comboRecords = createComboRecords({
+  load: async () => (slots ? ((await slots.loadAccount()).combos ?? null) : null),
+  save: (block) => saveAccountBlock('combos', block),
+});
+team.combos.setRecords(comboRecords);
 team.training.setDrillRecords(drillRecords);
 bus.on('stint:done', ({ record }) => drillRecords.recordStint(record)); // Milestone 18: Drive Stints on the account records
 // Milestone 20: the championship ladder — enter one (the fee on the ledger), race its next round (its race weekend).
@@ -369,6 +380,7 @@ const debugTracks = {
   },
   secrets() {
     team.championships.debugSecrets = !team.championships.debugSecrets;
+    team.combos.debugSecrets = team.championships.debugSecrets; // Milestone 22: SYN20 and the secret families V17–V20 too
     openMenu('compete');
   },
   hundred() {
@@ -483,6 +495,14 @@ bus.on('staff:letGo', ({ id, name }) => debug.log(`let go: ${id} ${name}`));
 // Milestone 11: a finished research node gets the medium moment (one at a time; a run of them folds into "+N more").
 const researchNews = [];
 const RESEARCH_NEWS_LIFE = 3.6;
+// Milestone 22: a combo discovered gets the same medium moment; a new clue is a toast.
+bus.on('combo:discovered', ({ combo, rp }) => {
+  debug.log(`combo discovered: ${combo.id} ${combo.name}`);
+  if (!teamReady) return;
+  if (researchNews.length < 3) researchNews.push({ combo, rp, age: 0, more: 0 });
+  else researchNews[2].more++;
+});
+bus.on('combo:clue', ({ text }) => teamReady && toast('A rumour in the paddock', text));
 bus.on('research:complete', ({ node, fired }) => {
   debug.log(`research done: ${node.id} ${node.name} (${fired.map((a) => a.id).join(' ')})`);
   if (!teamReady) return;
@@ -723,6 +743,7 @@ async function startSlots() {
   debug.log(`slots ready (${adapter.kind})${moved.adopted ? ', the old team moved into slot 1' : ''}`);
   await refreshSlots();
   await drillRecords.load(); // Milestone 14
+  await comboRecords.load(); // Milestone 22
 }
 async function refreshSlots() {
   slotList = await slots.list();
@@ -872,7 +893,7 @@ const setupScreen = createTeamSetupScreen({
   onBack: () => router.go(setupFrom, setupFrom === 'slots' ? { mode: slotsScreen.mode } : {}),
 });
 
-if (debug.enabled) window.__rw = { slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, researchNews, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, drillScreen, medalsScreen, drillRecords, taps: [] };
+if (debug.enabled) window.__rw = { comboRecords, slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, researchNews, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, drillScreen, medalsScreen, drillRecords, taps: [] };
 
 router
   .register('boot', bootScreen)

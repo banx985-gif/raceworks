@@ -127,7 +127,7 @@ export function createDriveStintView({ renderer, layout, assets, team, bus, sett
           const p = sim.carPose(c, sim.alpha(), 1);
           return { x: p.x, y: p.y, h: p.heading, sprite: sim.byId[c.id].sprite, alpha: c.retired ? 0.45 : 1 };
         });
-      const sprite = liveryKey(assets, sim.byId.PLAYER.sprite, teamColourId(team));
+      const sprite = liveryKey(assets, sim.byId.PLAYER.sprite, teamColourId(team), team.races.current?.sponsors ?? []); // (Milestone 22: + the sponsors)
       camH = drawDriveWorld(ctx, { renderer, layout, assets, ctl, camH, reduced: opt('reducedMotion'), playerSprite: sprite, others, wet: sim.weather !== 'dry', finish: false });
       drawWeather(ctx, { x: 0, y: 0, w: renderer.width, h: renderer.height }, sim.weather);
       // the HUD

@@ -2,6 +2,8 @@
 // for a few seconds when a research node finishes — the node's name and the pictures of what it opened. It doesn't
 // pause the game or take taps. One at a time (main.js queues them; more than a few in a row fold into "+N more").
 //   researchBannerHeight() · drawResearchBanner(ctx, assets, { x, y, w }, item, life)   item: { node, fired, age, more }
+// Milestone 22: the same card for a combo discovered — item: { combo, rp, age, more }: 'Combo discovered!', its name, recipe
+// and the RP it paid.
 import { THEME } from '../../../../core/Theme.js';
 import { text, card } from '../../../../core/ui/Kit.js';
 import { PARTS } from '../../data/cars.js';
@@ -47,6 +49,13 @@ export function drawResearchBanner(ctx, assets, { x, y, w }, item, life) {
   assets.drawContained(ctx, RESEARCH_ICONS.rp, { x: r.x + 24, y: r.y + 24, w: 110, h: 110 });
   const tx = r.x + 156;
   const tw = r.w - 156 - 24;
+  if (item.combo) {
+    text(ctx, 'Combo discovered!', tx, r.y + 22, { size: S.heading, bold: true, color: C.actionDark, maxWidth: tw });
+    text(ctx, `${item.combo.name} · ${item.combo.requirementText}`, tx, r.y + 80, { size: S.body, bold: true, maxWidth: tw });
+    text(ctx, [`${item.combo.rewardText}`, item.rp ? `+${item.rp} RP` : '', item.more ? `+${item.more} more` : ''].filter(Boolean).join(' · '), tx, r.y + 150, { size: S.small, bold: true, color: C.textMuted, maxWidth: tw });
+    ctx.restore();
+    return;
+  }
   text(ctx, 'Research complete!', tx, r.y + 22, { size: S.heading, bold: true, color: C.actionDark, maxWidth: tw });
   text(ctx, `${item.node.name} · ${nodeLabel(item.node.id)}`, tx, r.y + 80, { size: S.body, bold: true, maxWidth: tw });
   const icons = (item.fired ?? []).map(iconOf).filter(Boolean).slice(0, 5);

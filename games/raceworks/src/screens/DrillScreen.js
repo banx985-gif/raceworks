@@ -26,6 +26,7 @@ import { TRACKS } from '../race/tracks.js';
 import { ReactionLights } from '../minigames/ReactionLights.js';
 import { drillById, MEDALS, MEDAL_NAMES, DRILL_BONUS, DRILL_SETTINGS, DRIVE } from '../../data/drills.js';
 import { CLASSES } from '../../data/cars.js';
+import { familyOfCar } from '../systems/carVisual.js'; // Milestone 22
 import { RIVAL_TEAMS } from '../../data/rivals.js';
 import { medalFor, bonusPct } from '../systems/drills.js';
 import { drawDriveWorld, drawDriveControls, DRIVE_GRASS as GRASS } from '../race/driveDraw.js';
@@ -72,7 +73,7 @@ export function createDrillScreen({ renderer, layout, assets, team, bus, setting
   };
   const handBackRect = () => ({ x: sr().x + sr().w - 324, y: sr().y + 24, w: 300, h: 116 });
   const driver = () => team.get(params.staffId) ?? team.roster.find((s) => s.role === 'driver') ?? team.roster[0];
-  const playerSprite = () => team.cars.cars.latest()?.result?.raceArt ?? CLASSES.clubHatch.raceArt;
+  const playerSprite = () => (team.cars.cars.latest() ? familyOfCar(team.cars.cars.latest(), team).top : CLASSES.clubHatch.raceArt); // (Milestone 22: the resolver)
   const aiSprites = Object.values(RIVAL_TEAMS).map((t) => t.sprite);
 
   function begin() {

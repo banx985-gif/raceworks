@@ -1,14 +1,20 @@
 // Team colour on Aaron's car art (Milestone 8, bible §41.1 livery anchors). The cars are never drawn in code: a
 // team-coloured copy of the real picture is made once per picture and colour, then used like any other image (so
 // the sprite cache sizes it for the screen as usual).
-//   liveryKey(assets, artKey, colourId)   the image key to draw: artKey itself when the picture needs no change (its
-//                                         family has no anchors, the team colour is the colour it is painted in, or the
-//                                         picture has not loaded yet), else '<artKey>~<colourId>'
+//   liveryKey(assets, artKey, colourId, sponsors)   the image key to draw: artKey itself when the picture needs no change
+//                                         (its family has no anchors, the team colour is the colour it is painted in and no
+//                                         sponsor is on the car, or the picture has not loaded yet), else
+//                                         '<artKey>~<colourId>' or, with sponsors, '<artKey>~<colourId>~SPN01+SPN06'
+//   Milestone 22: every family has anchors; sponsors (ids, slot order) put their symbol logos (logos/sponsor_logo_spnXX,
+//   data/sponsors.js) into the family's sponsorSlots for that view, scaled to fit (no new images). A logo that hasn't
+//   loaded yet leaves the plain team-colour copy for now (the sponsored copy is made on a later frame).
 //   teamColourId(team)                    the open team's colour id (Racing Red when there is none)
 // Inside each anchor polygon (CAR_FAMILIES[...].liveryAnchors) only the red body paint changes: its hue becomes the team
 // colour and its light and shade stay, so outlines, windows, lights, tyres and the white / yellow stripes are untouched.
 import { familyOfArt } from '../../data/cars.js';
 import { TEAM_COLOURS } from '../../data/setup.js';
+import { sponsorById } from '../../data/sponsors.js';
+import { familyOfCar } from '../systems/carVisual.js';
 
 const PAINT_HUE = { red: 4 }; // the paint's hue (degrees) per family `paint`
 const HUE_FULL = 14; // within this many degrees of the paint's hue a pixel takes the full team colour…
@@ -17,19 +23,61 @@ const MIN_SAT = 0.34; // greys, whites and near-blacks are never paint
 
 export const teamColourId = (team) => team?.setup?.colour ?? TEAM_COLOURS[0].id;
 
-export function liveryKey(assets, artKey, colourId) {
+export function liveryKey(assets, artKey, colourId, sponsors = []) {
   const fam = familyOfArt(artKey);
-  if (!fam?.liveryAnchors || !colourId || colourId === fam.paint) return artKey;
+  const ids = (sponsors ?? []).filter((id) => sponsorById(id));
+  if (!fam?.liveryAnchors || !colourId || (colourId === fam.paint && !ids.length)) return artKey;
+  const view = artKey === fam.showcase ? 'showcase' : 'race';
+  const slots = (fam.liveryAnchors.sponsorSlots ?? []).filter((sl) => sl.view === view);
+  const shown = ids.slice(0, slots.length);
+  const base = colourId === fam.paint ? artKey : tinted(assets, artKey, fam, view, colourId);
+  if (!shown.length || base === null) return base ?? artKey;
+  const key = `${artKey}~${colourId}~${shown.join('+')}`;
+  if (assets.images.has(key)) return key;
+  const logos = shown.map((id) => assets.get(sponsorById(id).logo));
+  const img = assets.get(base);
+  if (!img || logos.some((l) => !l) || typeof document === 'undefined') return base;
+  assets.images.set(key, decals(img, slots, logos));
+  return key;
+}
+
+// The team-colour copy ('<artKey>~<colourId>'), or null when it can't be made yet.
+function tinted(assets, artKey, fam, view, colourId) {
   const key = `${artKey}~${colourId}`;
   if (assets.images.has(key)) return key;
   const img = assets.get(artKey);
   const colour = TEAM_COLOURS.find((c) => c.id === colourId);
-  if (!img || !colour || typeof document === 'undefined') return artKey;
-  const polys = artKey === fam.showcase ? fam.liveryAnchors.showcase : fam.liveryAnchors.race;
-  const canvas = paint(img, polys ?? [], colour.main, PAINT_HUE[fam.paint] ?? 4);
-  if (!canvas) return artKey;
+  if (!img || !colour || typeof document === 'undefined') return null;
+  const canvas = paint(img, fam.liveryAnchors[view] ?? [], colour.main, PAINT_HUE[fam.paint] ?? 4);
+  if (!canvas) return null;
   assets.images.set(key, canvas);
   return key;
+}
+
+// A copy of img with each logo drawn into its slot (fractions of the picture), contained and centred, turned by the
+// slot's rotation (degrees).
+function decals(img, slots, logos) {
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const g = c.getContext('2d');
+  g.drawImage(img, 0, 0);
+  logos.forEach((logo, i) => {
+    const sl = slots[i];
+    const lw = logo.naturalWidth || logo.width;
+    const lh = logo.naturalHeight || logo.height;
+    const k = Math.min((sl.w * w) / lw, (sl.h * h) / lh);
+    g.save();
+    g.translate((sl.x + sl.w / 2) * w, (sl.y + sl.h / 2) * h);
+    if (sl.rotation) g.rotate((sl.rotation * Math.PI) / 180);
+    g.drawImage(logo, (-lw * k) / 2, (-lh * k) / 2, lw * k, lh * k);
+    g.restore();
+  });
+  c.naturalWidth = w;
+  c.naturalHeight = h;
+  return c;
 }
 
 // A copy of img with the paint inside the polygons turned to `hex`.
@@ -107,4 +155,12 @@ function rgb(h, s, l) {
     return v * 255;
   };
   return [f(h / 360 + 1 / 3), f(h / 360), f(h / 360 - 1 / 3)];
+}
+
+// Milestone 22: your car's picture, ready to draw — its resolved visual family (src/systems/carVisual.js, derived from the
+// car, never saved), in the team colour, with the sponsors on the car (default: the ones on it now; a race passes its
+// own). view: 'showcase' | 'race'.
+export function carArtKey(assets, team, rec, view = 'showcase', sponsors = team?.sponsors?.decals() ?? []) {
+  const fam = familyOfCar(rec, team);
+  return liveryKey(assets, view === 'race' ? fam.top : fam.showcase, teamColourId(team), sponsors);
 }

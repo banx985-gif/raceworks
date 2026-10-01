@@ -3,7 +3,7 @@
 import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { text, listRow, listRowHeight } from '../../../../core/ui/Kit.js';
-import { liveryKey, teamColourId } from '../ui/livery.js';
+import { carArtKey } from '../ui/livery.js';
 import { pressedLook } from '../ui/pressable.js';
 
 const C = THEME.color;
@@ -44,7 +44,7 @@ export function createCarGarageScreen({ layout, assets, team, topBar, goCar }) {
     const list = cars();
     if (!list.length && ctx) text(ctx, 'No cars yet — start one at the Pit Bay (Build → Pit Bay → New car).', 8, y, { size: S.body, color: C.textMuted, maxWidth: w - 16 });
     for (const rec of list) {
-      const row = { ...carRow(rec), art: liveryKey(assets, rec.result.art, teamColourId(team)) }; // in the team colour
+      const row = { ...carRow(rec), art: carArtKey(assets, team, rec) }; // its resolved family, in the team colour, with the sponsors (Milestone 22)
       const h = listRowHeight(w, row);
       const r = { x: 0, y, w, h };
       if (ctx) {

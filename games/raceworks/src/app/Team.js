@@ -31,6 +31,9 @@
 //   salaries, race bonuses, perks (added into team.facilities.bonus(key)) and obligations; the development contracts are
 //   the eight §29 types (src/systems/contracts.js: three offers a month, only what the team can meet now, at most 2 active)
 //   and team.contractRecords keeps what they pay beyond money: part-event progress and secret facts (flags only).
+// Milestone 22: team.combos (src/systems/combos.js) — the 20 combos, checked when a car finishes (and on a wet setup);
+//   discoveries and clues live on the ACCOUNT record (main.js gives it; tests get an in-memory one). Nothing new in the
+//   slot save: a car's combos travel in its own record, and its visual family is derived (src/systems/carVisual.js).
 import { Clock } from '../../../../core/Clock.js';
 import { Rng } from '../../../../core/Rng.js';
 import { StaffSystem } from '../../../../core/StaffSystem.js';
@@ -55,6 +58,7 @@ import { createCareers } from '../systems/careers.js';
 import { createChampionships } from '../systems/championships.js';
 import { createSponsors } from '../systems/sponsors.js';
 import { contractTerms, attachContractProgress } from '../systems/contracts.js';
+import { createCombos } from '../systems/combos.js';
 import { ENDURANCE } from '../../data/training.js';
 
 // A new game's setup when none is given (tests, and saves from before Milestone 4b).
@@ -155,11 +159,13 @@ export class Team {
       stationIds: () => this.staff.staff.map((s) => s.id), // Milestone 12: everyone has a garage routine (hires too)
       facilities: () => this.facilities,
       busyElsewhere: (id) => (this.training?.trainingOf(id) ? 'Away on a training course' : null),
+      combosFor: (job, prelim) => this.combos?.forCar(job, prelim) ?? null, // Milestone 22
     });
     this.money = createTeamMoney({ bus, seed, clock: this.clock, staff: this.staff, cars: this.cars, revealBonus: () => this.facilities.bonus('revealReputation'), generateOffer: (rng, taken) => contractTerms(this, rng, taken), onPaid: (c) => this.contractPaid(c) }); // (Milestone 21: the §29 contracts)
     // (Milestone 21: the sponsors' perks join the research bonuses in the one effect query)
     this.facilities = createGarageFacilities({ bus, money: this.money, research: () => new Set(this.unlocks.research), extraBonus: (key) => this.research.bonus(key) + (this.sponsors?.bonus(key) ?? 0), extraKeys: () => [...this.research.bonusKeys(), ...(this.sponsors?.bonusKeys() ?? [])] }); // Milestone 10
     this.research = createResearch({ bus, team: this }); // Milestone 11
+    this.combos = createCombos({ bus, team: this }); // Milestone 22 (after research: a discovery pays RP)
     this.races = createRaces({ bus, team: this }); // Milestone 6: the race being run (fixed seed) and the results
     this.recruitment = createRecruitment({ bus, team: this, seed }); // Milestone 12
     this.training = createTraining({ bus, team: this, seed }); // Milestone 12

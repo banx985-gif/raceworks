@@ -11,7 +11,7 @@ import { TRACKS } from '../race/tracks.js';
 import { raceClock } from './RaceScreen.js';
 import { CLASSES, CAR_FAMILIES } from '../../data/cars.js';
 import { RIVAL_TEAMS, PRIVATEERS } from '../../data/rivals.js';
-import { liveryKey, teamColourId } from '../ui/livery.js';
+import { liveryKey, teamColourId, carArtKey } from '../ui/livery.js';
 
 const C = THEME.color;
 const S = THEME.size;
@@ -31,7 +31,10 @@ export function createRaceResultScreen({ layout, assets, team, topBar, goGarage,
   // A row's car picture: the player's class, a rival team's family (by driver), or a privateer's.
   const familyOfRow = (r) => Object.values(RIVAL_TEAMS).find((t) => t.drivers.some((d) => d.id === r.id))?.family ?? PRIVATEERS.find((p) => p.id === r.id)?.family ?? null;
   const carPicture = (r, e) => {
-    if (r.isPlayer) return liveryKey(assets, team.cars.cars.get(e.carNumber)?.result.art ?? CLASSES.clubHatch.art, teamColourId(team));
+    if (r.isPlayer) {
+      const rec = team.cars.cars.get(e.carNumber);
+      return rec ? carArtKey(assets, team, rec, 'showcase', e.sponsors ?? []) : liveryKey(assets, CLASSES.clubHatch.art, teamColourId(team)); // Milestone 22: the race's own sponsors
+    }
     const fam = familyOfRow(r);
     return fam ? CAR_FAMILIES[fam].showcase : null;
   };

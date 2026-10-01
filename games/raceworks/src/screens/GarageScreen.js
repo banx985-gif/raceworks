@@ -41,7 +41,8 @@ import { statusIconsOf } from '../ui/statusIcons.js';
 import { createBuildShow } from '../ui/carBuildShow.js';
 import { PARTS, PROJECT_SPOTS, PHASES } from '../../data/cars.js';
 import { TEAM_COLOURS } from '../../data/setup.js';
-import { liveryKey, teamColourId } from '../ui/livery.js';
+import { liveryKey, teamColourId, carArtKey } from '../ui/livery.js';
+import { structuralCombos } from '../systems/combos.js'; // Milestone 22
 import { visualFamily } from '../systems/carVisual.js';
 
 const C = THEME.color;
@@ -343,16 +344,17 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
   };
   const showView = () => {
     const job = team.cars.active;
-    const vis = visualFamily({ classId: job?.data.classId ?? 'clubHatch', parts: job?.data.parts }); // the car this build becomes
+    const classId = job?.data.classId ?? 'clubHatch';
+    const vis = visualFamily({ classId, parts: job?.data.parts ?? [], combos: structuralCombos({ classId, parts: job?.data.parts ?? [] }) }); // the car this build becomes (Milestone 22: the resolver)
     const last = team.cars.cars.latest();
     return {
       job,
       fraction: job ? team.cars.fraction(job) : 0,
-      carKey: liveryKey(assets, vis.showcase, teamColourId(team)),
+      carKey: liveryKey(assets, vis.showcase, teamColourId(team), team.sponsors?.decals() ?? []), // (Milestone 22: + sponsors)
       partKeys: (job?.data.parts ?? []).map((id) => PARTS[id].art),
       at: bayFloor(),
       width: 300,
-      lastCar: last?.result?.art ? liveryKey(assets, last.result.art, teamColourId(team)) : null,
+      lastCar: last?.result ? carArtKey(assets, team, last) : null, // Milestone 22: its resolved family, colour, sponsors
     };
   };
 

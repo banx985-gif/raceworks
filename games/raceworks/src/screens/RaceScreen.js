@@ -280,7 +280,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     if (c0) {
       const pose = sim.carPose(c0, alpha, ws());
       const q = toScreen(v, pose.x, pose.y);
-      drawCar(ctx, assets, liveryKey(assets, sim.byId[PLAYER].sprite, teamColourId(team)), q.x, q.y, pose.heading, len + 6, { ring: sim.byId[PLAYER].colour });
+      drawCar(ctx, assets, liveryKey(assets, sim.byId[PLAYER].sprite, teamColourId(team), team.races.current?.sponsors ?? []), q.x, q.y, pose.heading, len + 6, { ring: sim.byId[PLAYER].colour }); // (Milestone 22: + the sponsors)
       ctx.fillStyle = C.chip;
       ctx.beginPath();
       ctx.roundRect(q.x - 44, q.y - len - 16, 88, 34, 12);
