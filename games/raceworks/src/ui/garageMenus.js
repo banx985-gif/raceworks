@@ -17,6 +17,8 @@
 //   resolved visual family in the team colour with its sponsors).
 // Milestone 12: the Staff sheet's Hire (goRecruit) and Train (goTrain); the Driver Simulator's Training; the Sponsor Wall
 //   (front desk) leads to Recruitment; a worker's sheet has Train (or their course and days left).
+// Milestone 23: the Inbox (top bar) — every event newest first (● unread), tap one to see its card again (a choice once
+//   made stays locked); Rumour Archive and Mark all read at the top.
 // Milestone 21: the Sponsor Wall's sheet also has Sponsors — the 'sponsors' sheet (src/ui/sponsorMenu.js, the same as the
 //   Money sheet's Sponsors tab): slots, deals, obligation progress and the offers.
 import { MenuRegistry } from '../../../../core/ui/BottomSheet.js';
@@ -434,6 +436,38 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
       art: 'race_ui_03',
       accent: C.progress,
       sections: [{ lines: list.length ? list.map((x) => ({ text: `${x.kind === 'recipe' ? 'Recipe' : 'Rumour'}: ${x.text}`, color: x.kind === 'recipe' ? C.good : C.text })) : ['Nothing yet. Build cars: a combination that almost works starts a rumour.'] }],
+    };
+  });
+
+  // Milestone 23: the Inbox
+  const INBOX_SHOWN = 60;
+  const dateOf = (day) => `Y${Math.floor(day / 336) + 1} M${Math.floor((day % 336) / 28) + 1} D${(day % 28) + 1}`;
+  menus.register('inbox', () => {
+    const ev = team.events;
+    const list = ev.inbox.slice(0, INBOX_SHOWN);
+    const status = (e) => {
+      if (e.answer) return e.answer.auto ? `Taken for you: ${e.answer.label}` : `You chose: ${e.answer.label}`;
+      if (e.kind === 'choice') return 'Waiting for your answer';
+      return e.body;
+    };
+    return {
+      title: 'Inbox',
+      subtitle: `${ev.unread} unread · ${ev.inbox.length} message${ev.inbox.length === 1 ? '' : 's'}`,
+      art: 'race_ui_13',
+      accent: C.progress,
+      sections: [
+        {
+          columns: 2,
+          buttons: [
+            { id: 'inboxRumours', label: 'Rumour Archive', sub: `${team.combos.rumours().length} rumours`, icon: 'race_ui_28', accent: C.progress, onTap: () => open('rumourArchive') },
+            { id: 'inboxReadAll', label: 'Mark all read', sub: ev.unread ? `${ev.unread} unread` : 'All read', icon: 'race_ui_13', accent: C.progress, onTap: () => ev.markAllRead() },
+          ],
+        },
+        list.length
+          ? { columns: 1, buttons: list.map((e) => ({ id: `inbox_${e.id}`, label: `${e.read ? '' : '● '}${e.title}`, sub: `${dateOf(e.day)} · ${ev.classOf(e.data?.cls).name} · ${status(e)}`, icon: e.art ?? e.icon, accent: e.read ? C.outline : e.level === 'major' ? C.action : C.progress, onTap: () => ev.reopen(e.id) })) }
+          : { lines: ['Nothing yet. News, offers, rumours and big moments will arrive here.'] },
+        ...(ev.inbox.length > INBOX_SHOWN ? [{ lines: [{ text: `The newest ${INBOX_SHOWN} are shown.`, color: C.textMuted }] }] : []),
+      ],
     };
   });
 

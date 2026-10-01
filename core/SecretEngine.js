@@ -22,6 +22,10 @@
 //   { fact, op: 'sequence', value: [a, b, …] }       a list fact holds these values in this order (others may come
 //     between): an ordered history
 //   clue stage minMet: { share: 0.9 }                 reached when that share of the rule's conditions is done
+// Added for RACEWORKS (Milestone 24), all optional:
+//   { fact, op: 'sameAcross', field, where, value }  staff continuity: of the items in a list fact (that pass every
+//     `where` test), the most that share one member of their list `field` (e.g. one person in 3 race crews)
+//   new SecretEngine({ discoveredStage: 4 })        the clue stage a found rule reports (default 3: clues 1–2, found 3)
 // Facts are read by name only, from a registry the game fills (FactRegistry below): run facts, account facts,
 // and the trigger event's own payload. An unknown fact is simply not met.
 //
@@ -111,7 +115,7 @@ function inOrder(list, want) {
   for (const item of list) if (k < want.length && item === want[k]) k++;
   return k;
 }
-export const SECRET_OPS = [...Object.keys(OPS), 'countOf', 'consecutive', 'sequence'];
+export const SECRET_OPS = [...Object.keys(OPS), 'countOf', 'consecutive', 'sequence', 'sameAcross'];
 
 // Rounding precision for an eased threshold: the condition's own `precision`, else the value's decimals — with at
 // least one decimal for small "at least" scales (a 9.0 review → 7.6, not 7; Quality 85 → 72).
@@ -135,7 +139,8 @@ export function easeValue(cond, rules = { countFactor: 0.5, thresholdPct: 15 }) 
 }
 
 export class SecretEngine {
-  constructor({ bus = null, rules = [], facts = new FactRegistry(), runner = null, ngPlus = () => 0, currencyTypes = ['currency'], easing = { countFactor: 0.5, thresholdPct: 15 }, now = () => ({}) }) {
+  constructor({ bus = null, rules = [], facts = new FactRegistry(), runner = null, ngPlus = () => 0, currencyTypes = ['currency'], easing = { countFactor: 0.5, thresholdPct: 15 }, now = () => ({}), discoveredStage = 3 }) {
+    this.discoveredStage = discoveredStage;
     this.bus = bus;
     this.rules = rules;
     this.byId = Object.fromEntries(rules.map((r) => [r.id, r]));
@@ -178,7 +183,7 @@ export class SecretEngine {
   }
 
   clueStage(id) {
-    return this.unlockedInRun(id) || this.account.history[id] ? 3 : this.run.clues[id] ?? 0;
+    return this.unlockedInRun(id) || this.account.history[id] ? this.discoveredStage : this.run.clues[id] ?? 0;
   }
 
   // Would the rule still be looked at on its events?
@@ -233,6 +238,16 @@ export class SecretEngine {
       const where = (cond.where ?? []).map((w) => ({ ...w, need: eased ? easeValue(w, this.easing) : w.value }));
       value = longestRun(list, (item) => where.every((w) => OPS[w.op]?.(readPath(item, w.field), w.need) ?? false));
       ok = OPS[cond.cmp ?? 'gte'](value, need);
+    } else if (cond.op === 'sameAcross') {
+      const list = value == null ? [] : Array.isArray(value) ? value : Object.values(value);
+      const where = (cond.where ?? []).map((w) => ({ ...w, need: eased ? easeValue(w, this.easing) : w.value }));
+      const counts = new Map();
+      for (const item of list) {
+        if (!where.every((w) => OPS[w.op]?.(readPath(item, w.field), w.need) ?? false)) continue;
+        for (const m of new Set([].concat(readPath(item, cond.field) ?? []))) counts.set(m, (counts.get(m) ?? 0) + 1);
+      }
+      value = Math.max(0, ...counts.values());
+      ok = OPS[cond.cmp ?? 'gte'](value, need);
     } else if (cond.op === 'sequence') {
       const list = value == null ? [] : Array.isArray(value) ? value : [];
       const want = Array.isArray(need) ? need : [];
@@ -243,7 +258,7 @@ export class SecretEngine {
     } else ok = value !== undefined && (OPS[cond.op]?.(value, need) ?? false);
     // How far along it is (0–1), for clue stages only: done = 1; a number on its way = its share of the need.
     let partial = ok ? 1 : 0;
-    if (!ok && typeof value === 'number' && typeof need === 'number' && need > 0 && ['gte', 'gt', 'countOf', 'consecutive'].includes(cond.op)) partial = Math.min(0.99, (value + bestNear) / need);
+    if (!ok && typeof value === 'number' && typeof need === 'number' && need > 0 && ['gte', 'gt', 'countOf', 'consecutive', 'sameAcross'].includes(cond.op)) partial = Math.min(0.99, (value + bestNear) / need);
     return { cond, ok, value, need, base: cond.value, eased: eased && (need !== cond.value || whereNeeds.length > 0), whereNeeds, known: this.facts.has(cond.fact), partial };
   }
 

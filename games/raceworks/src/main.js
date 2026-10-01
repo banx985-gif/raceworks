@@ -13,6 +13,9 @@
 // Force Bronze / Silver / Gold / Fail and the medal history has Practise and Reset records.
 // Milestone 15: the complete race weekend — up to 3 practice runs, the hint bands, fuel / energy and repair priority, and
 // the optional Qualifying Drive lap (the drill screen in its qualiLap mode; ?debug=1 adds an autopilot lap).
+// Milestone 23: events and the Inbox (src/systems/events.js): a major event is a card (src/ui/eventCard.js) that pauses
+// the calendar, a minor one a strip under the top bar; never on a race screen; the top bar's Inbox has the unread badge.
+// ?debug=1&events=0 mutes them for the older browser checks (no rolled events; major cards go straight to the Inbox).
 import { THEME, font } from '../../../core/Theme.js';
 import { EventBus } from '../../../core/EventBus.js';
 import { Rng } from '../../../core/Rng.js';
@@ -64,6 +67,9 @@ import { CHAMPIONSHIPS } from '../data/championships.js'; // Milestone 20
 import { WEATHER_NAMES } from '../data/race.js'; // Milestone 17 (the result's weather line)
 import { createResearchScreen } from './screens/ResearchScreen.js';
 import { drawResearchBanner, researchBannerHeight } from './ui/researchBanner.js';
+import { createEventCard } from './ui/eventCard.js'; // Milestone 23
+import { NODE } from './systems/research.js';
+import { comboById } from '../data/combos.js';
 import { createRecruitScreen } from './screens/RecruitScreen.js';
 import { createTrainScreen } from './screens/TrainScreen.js';
 import { checkStaffData } from './systems/staffCheck.js';
@@ -143,8 +149,10 @@ const loop = new FixedStepLoop({
     router.update(dt);
     sheet.update(dt);
     dialog.update(dt);
+    // Milestone 23: one event card at a time (nothing on the race screens; a card waits for a dialog or a car reveal)
+    if (teamReady) team.events.frame(dt, { screen: router.currentName, busy: dialog.active || textPrompt.active || !!pendingCar, reduced: !!settings.get('reducedMotion') });
+    eventCard.update(dt);
     for (const t of toasts) t.age += dt;
-    if (researchNews.length && router.currentName !== 'race' && (researchNews[0].age += dt) > RESEARCH_NEWS_LIFE) researchNews.shift();
     while (toasts.length && toasts[0].age > TOAST_LIFE) toasts.shift();
     backNav.sync();
   },
@@ -154,9 +162,11 @@ const loop = new FixedStepLoop({
     sheet.render(ctx);
     const onGame = GAME_SCREENS.includes(router.currentName);
     const tb = topBarRect(layout);
-    const news = onGame && router.currentName !== 'race' ? researchNews[0] : null; // Milestone 11: research done
-    if (news) drawResearchBanner(ctx, assets, { x: tb.x + 24, y: tb.y + tb.h + 16, w: tb.w - 48 }, news, RESEARCH_NEWS_LIFE);
-    if (toasts.length && onGame) drawToasts(ctx, toasts, { x: tb.x + 40, y: tb.y + tb.h + 16 + (news ? researchBannerHeight() + 16 : 0), w: tb.w - 80, life: TOAST_LIFE });
+    // Milestone 23: the minor event strip (research done / a combo keep Milestone 11's gold card), then the game's own
+    // short notes under it, then a major event card over everything but a dialog
+    const lane = onGame && teamReady ? drawEventToast(ctx, { x: tb.x + 24, y: tb.y + tb.h + 16, w: tb.w - 48 }) : 0;
+    if (toasts.length && onGame) drawToasts(ctx, toasts, { x: tb.x + 40, y: tb.y + tb.h + 16 + (lane ? lane + 16 : 0), w: tb.w - 80, life: TOAST_LIFE });
+    if (teamReady) eventCard.render(ctx);
     dialog.render(ctx);
     if (onTestScreen()) drawButton(ctx, pauseButton(), loop.paused ? 'RESUME' : 'PAUSE', { selected: loop.paused });
     if (loop.paused) drawPaused(ctx);
@@ -181,7 +191,7 @@ bus.on('clock:speed', ({ speed }) => debug.log(speed ? `speed ${speed}×` : 'gam
 // Autosave (core/Autosave): every game day and after any change, plus when the app goes to the background.
 const autosave = new Autosave({
   bus,
-  triggers: ['race:created', 'race:progress', 'race:finished', 'clock:day', 'team:changed', 'project:start', 'project:phase', 'project:complete', 'car:fault', 'car:fix', 'car:breakthrough', 'contract:accepted', 'contract:success', 'contract:failed', 'contract:progress', 'sponsor:signed', 'sponsor:met', 'sponsor:ended', 'sponsor:progress', 'car:repaired', 'economy:debt', 'facility:layout', 'research:start', 'research:stop', 'research:complete', 'staff:hired', 'staff:letGo', 'recruit:refresh', 'training:start', 'training:complete'],
+  triggers: ['race:created', 'race:progress', 'race:finished', 'clock:day', 'team:changed', 'project:start', 'project:phase', 'project:complete', 'car:fault', 'car:fix', 'car:breakthrough', 'contract:accepted', 'contract:success', 'contract:failed', 'contract:progress', 'sponsor:signed', 'sponsor:met', 'sponsor:ended', 'sponsor:progress', 'car:repaired', 'economy:debt', 'facility:layout', 'research:start', 'research:stop', 'research:complete', 'staff:hired', 'staff:letGo', 'recruit:refresh', 'training:start', 'training:complete', 'event:fired', 'event:resolved'],
   save: () => {
     if (router.currentName === 'race') raceScreen.exit(); // the race's exact state goes in the save too
     return team.save();
@@ -198,13 +208,14 @@ bus.on('autosave:failed', ({ error }) => debug.log(`save failed: ${error?.messag
 // app pauses too (core). P / Space: the game's Pause on the garage, the loop pause on the test screens.
 const pauseButton = () => layout.anchor('top-right', 240, THEME.button.minH, 80);
 // A dialog takes every tap while it is open (and never under the pause screen).
+// Milestone 23: an event card takes every tap too (under a dialog).
 router.modal = {
   get active() {
-    return loop.paused || dialog.active;
+    return loop.paused || dialog.active || (teamReady && eventCard.active);
   },
-  onTap: (p) => (loop.paused ? loop.resume('tap') : dialog.onTap(p)),
-  onDown: (p) => !loop.paused && dialog.onDown(p),
-  onUp: (p) => !loop.paused && dialog.onUp(p),
+  onTap: (p) => (loop.paused ? loop.resume('tap') : dialog.active ? dialog.onTap(p) : eventCard.onTap(p)),
+  onDown: (p) => !loop.paused && dialog.active && dialog.onDown(p),
+  onUp: (p) => !loop.paused && dialog.active && dialog.onUp(p),
 };
 // The pause button is asked first, then the open sheet, then the screen.
 router.layers.push(
@@ -228,7 +239,9 @@ router.layers.push(
 );
 window.addEventListener('keydown', (e) => {
   if ((e.key === 'p' || e.key === 'P' || e.key === ' ') && (GAME_SCREENS.includes(router.currentName) || onTestScreen())) {
-    if (GAME_SCREENS.includes(router.currentName) && !loop.paused) clock.togglePause();
+    if (GAME_SCREENS.includes(router.currentName) && !loop.paused) {
+      if (!eventCard.active) clock.togglePause(); // (Milestone 23: an event card holds the calendar until it closes)
+    }
     else loop.togglePause();
   }
   if ((e.key === 'b' || e.key === 'B') && debug.enabled) cycleDebugBadge();
@@ -492,23 +505,31 @@ bus.on('training:complete', ({ staff: s, course, gains }) => {
 });
 bus.on('staff:hired', ({ staff: s }) => debug.log(`hired: ${s.id} ${s.name} (${s.tier} ${s.role})`));
 bus.on('staff:letGo', ({ id, name }) => debug.log(`let go: ${id} ${name}`));
-// Milestone 11: a finished research node gets the medium moment (one at a time; a run of them folds into "+N more").
-const researchNews = [];
-const RESEARCH_NEWS_LIFE = 3.6;
-// Milestone 22: a combo discovered gets the same medium moment; a new clue is a toast.
-bus.on('combo:discovered', ({ combo, rp }) => {
-  debug.log(`combo discovered: ${combo.id} ${combo.name}`);
-  if (!teamReady) return;
-  if (researchNews.length < 3) researchNews.push({ combo, rp, age: 0, more: 0 });
-  else researchNews[2].more++;
-});
-bus.on('combo:clue', ({ text }) => teamReady && toast('A rumour in the paddock', text));
-bus.on('research:complete', ({ node, fired }) => {
-  debug.log(`research done: ${node.id} ${node.name} (${fired.map((a) => a.id).join(' ')})`);
-  if (!teamReady) return;
-  if (researchNews.length < 3) researchNews.push({ node, fired, age: 0, more: 0 });
-  else researchNews[2].more++;
-});
+// Milestone 11 / 22: a finished research node and a combo discovered get the gold medium moment, a clue a strip — since
+// Milestone 23 these are minor events (src/systems/events.js): one strip at a time, each also in the Inbox.
+bus.on('combo:discovered', ({ combo }) => debug.log(`combo discovered: ${combo.id} ${combo.name}`));
+bus.on('research:complete', ({ node, fired }) => debug.log(`research done: ${node.id} ${node.name} (${fired.map((a) => a.id).join(' ')})`));
+// Milestone 23: the event card, and the minor event strip (returns the height it used).
+const eventCard = createEventCard({ layout, assets, events: team.events, reduced: () => !!settings.get('reducedMotion') });
+bus.on('event:fired', ({ instance, def }) => debug.log(`event: ${def.id} (${def.cls ?? def.kind}) day ${instance.day}`));
+function drawEventToast(ctx, rect) {
+  const t = team.events.toast;
+  if (!t) return 0;
+  const life = team.events.toastLife;
+  const reduced = !!settings.get('reducedMotion');
+  // reduced motion (Milestone 14 setting): no slide, a short fade
+  const age = reduced ? Math.max(t.age, 0.25) : t.age;
+  const d = t.entry.data ?? {};
+  if (d.look === 'research' && NODE[d.nodeId]) {
+    drawResearchBanner(ctx, assets, rect, { node: NODE[d.nodeId], fired: d.fired ?? [], age, more: t.more }, life);
+    return researchBannerHeight();
+  }
+  if (d.look === 'combo' && comboById(d.comboId)) {
+    drawResearchBanner(ctx, assets, rect, { combo: comboById(d.comboId), rp: d.rp, age, more: t.more }, life);
+    return researchBannerHeight();
+  }
+  return drawToasts(ctx, [{ ...t, age }], { x: rect.x + 16, y: rect.y, w: rect.w - 32, life, drawIcon: (c, e, r) => e.icon && assets.drawContained(c, e.icon, r) });
+}
 
 // ---------------------------------------------------------------------------
 // The shared bars (core/ui), filled with RACEWORKS content.
@@ -529,6 +550,7 @@ const topBar = createTopBar({
   onStats: () => openMenu('money'),
   onInbox: () => openMenu('inbox'),
   onHelp: () => openMenu('help'),
+  inboxCount: () => (teamReady ? team.events.unread : 0), // Milestone 23
 });
 // The staff screens show the same bar with a back button (‹ Garage / ‹ Roster) instead of the long date.
 const screenBar = createTopBar({
@@ -548,6 +570,7 @@ const screenBar = createTopBar({
   onStats: () => fromScreen('money'),
   onInbox: () => fromScreen('inbox'),
   onHelp: () => fromScreen('help'),
+  inboxCount: () => (teamReady ? team.events.unread : 0), // Milestone 23
 });
 function fromScreen(kind) {
   router.go('garage');
@@ -588,6 +611,7 @@ bus.on('screen:change', () => sheet.close());
 // second test screen.
 function back() {
   if (dialog.active) dialog.onBack();
+  else if (teamReady && eventCard.active) eventCard.onBack(); // Milestone 23: a question must be answered; news closes
   else if (textPrompt.active) textPrompt.close();
   else if (sheet.active) sheet.close();
   else if (router.currentName === 'setup') {
@@ -611,7 +635,7 @@ function back() {
   return true;
 }
 const backNav = createBackNav({
-  depth: () => (dialog.active || MENU_SCREENS.includes(router.currentName) || sheet.active || router.currentName === 'route' || SUB_SCREENS[router.currentName] || (router.currentName === 'garage' && garage.buildMode) ? 1 : 0),
+  depth: () => (dialog.active || (teamReady && eventCard.active) || MENU_SCREENS.includes(router.currentName) || sheet.active || router.currentName === 'route' || SUB_SCREENS[router.currentName] || (router.currentName === 'garage' && garage.buildMode) ? 1 : 0),
   back,
 });
 
@@ -764,6 +788,7 @@ async function leaveTeam() {
 // Open a team in the garage (after team.load / team.newGame): the garage rebuilds its workers from the roster.
 async function openTeam(n) {
   activeSlot = n;
+  team.events.muted = debug.enabled && PARAMS.get('events') === '0'; // Milestone 23 (older browser checks)
   assets.ensure(team.roster.map((s) => s.art).filter((k) => assets.isPending(k))); // Milestone 12: hires' portraits
   garage.loadTeam();
   teamReady = true;
@@ -893,7 +918,7 @@ const setupScreen = createTeamSetupScreen({
   onBack: () => router.go(setupFrom, setupFrom === 'slots' ? { mode: slotsScreen.mode } : {}),
 });
 
-if (debug.enabled) window.__rw = { comboRecords, slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, researchNews, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, drillScreen, medalsScreen, drillRecords, taps: [] };
+if (debug.enabled) window.__rw = { comboRecords, slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, get events() { return team.events; }, eventCard, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, drillScreen, medalsScreen, drillRecords, taps: [] };
 
 router
   .register('boot', bootScreen)

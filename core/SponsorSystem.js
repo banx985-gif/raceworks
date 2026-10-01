@@ -113,6 +113,18 @@ export class SponsorSystem {
     return rec;
   }
 
+  // End the active deal early (the player cancels): the benefit stops now, it goes into the history as 'cancelled',
+  // with no renewal offer and no cooldown. (Added for CAREWORKS M23; games that never call it are unaffected.)
+  cancel(day) {
+    const a = this.active;
+    if (!a) return null;
+    const rec = { id: a.id, startDay: a.startDay, endDay: day, result: 'cancelled', renewals: a.renewals };
+    this.history.push(rec);
+    this.active = null;
+    this.bus?.emit('sponsor:ended', { record: rec, def: this.byId[a.id], renewal: null });
+    return rec;
+  }
+
   // Benefit total for an effect key (only while a deal runs).
   total(key) {
     const d = this.activeDef;

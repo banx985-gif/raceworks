@@ -12,6 +12,7 @@ import { TRACKS } from '../src/race/tracks.js';
 import { RIVAL_TEAMS, PRIVATEERS } from './rivals.js';
 import { TYRES, RACE_ICONS } from './race.js';
 import { RESEARCH_ICONS } from './research.js';
+import { EVENT_CLASSES, MILESTONES } from './events.js';
 
 const art = (folder, key) => [key, `assets/images/${folder}/${key}.png`];
 
@@ -50,6 +51,9 @@ export const ASSETS = {
   ...Object.fromEntries([RESEARCH_ICONS.rp].map((k) => art('rewards', k))),
   // Driver drills (Milestone 14): the Driver Drill button and the Training Medal (tinted per medal in code).
   ...Object.fromEntries(Object.values(DRILL_ART).map((k) => art('ui', k))),
+  // Milestone 23: the event class icons and the milestone moments' pictures (RE08 is in the data but never fires).
+  ...Object.fromEntries(EVENT_CLASSES.map((c) => art('ui', c.icon))),
+  ...Object.fromEntries(MILESTONES.filter((m) => !m.secret).map((m) => art('events', m.art))),
   // Milestone 0 loader test (?screen=test): one real file and one deliberately missing one.
   m0Real: 'assets/branding/pwa/icon-512.png',
   m0Missing: 'assets/m0-missing-test.png',

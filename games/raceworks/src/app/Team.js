@@ -34,6 +34,8 @@
 // Milestone 22: team.combos (src/systems/combos.js) — the 20 combos, checked when a car finishes (and on a wet setup);
 //   discoveries and clues live on the ACCOUNT record (main.js gives it; tests get an in-memory one). Nothing new in the
 //   slot save: a car's combos travel in its own record, and its visual family is derived (src/systems/carVisual.js).
+// Milestone 23: team.events (src/systems/events.js) — the data-driven events (data/events.js), the one-card queue, the
+//   Inbox and the milestone moments; its timed modifiers join the one effect query (team.facilities.bonus(key)).
 import { Clock } from '../../../../core/Clock.js';
 import { Rng } from '../../../../core/Rng.js';
 import { StaffSystem } from '../../../../core/StaffSystem.js';
@@ -60,6 +62,7 @@ import { createSponsors } from '../systems/sponsors.js';
 import { contractTerms, attachContractProgress } from '../systems/contracts.js';
 import { createCombos } from '../systems/combos.js';
 import { ENDURANCE } from '../../data/training.js';
+import { createEvents } from '../systems/events.js';
 
 // A new game's setup when none is given (tests, and saves from before Milestone 4b).
 export const DEFAULT_SETUP = { teamName: 'RACEWORKS', principal: 'Principal', colour: 'red', founderId: 'MEC01' };
@@ -121,6 +124,9 @@ export const SAVE_MIGRATIONS = {
   //   a save without sponsors empty slots and a fresh Sponsor board, and three fresh contract offers (an active Club Hatch
   //   contract carries on); careers and races read the new facts as 0 / absent.
   14: (record) => record,
+  //   15 → 16 (Milestone 23): events and the Inbox. Nothing to change here — events.load() gives a save without them an
+  //   empty Inbox and marks the milestone moments whose facts already came true (first garage, car, race …) as fired.
+  15: (record) => record,
 };
 
 const blankContractRecords = () => ({ partEvents: {}, facts: {} });
@@ -163,7 +169,7 @@ export class Team {
     });
     this.money = createTeamMoney({ bus, seed, clock: this.clock, staff: this.staff, cars: this.cars, revealBonus: () => this.facilities.bonus('revealReputation'), generateOffer: (rng, taken) => contractTerms(this, rng, taken), onPaid: (c) => this.contractPaid(c) }); // (Milestone 21: the §29 contracts)
     // (Milestone 21: the sponsors' perks join the research bonuses in the one effect query)
-    this.facilities = createGarageFacilities({ bus, money: this.money, research: () => new Set(this.unlocks.research), extraBonus: (key) => this.research.bonus(key) + (this.sponsors?.bonus(key) ?? 0), extraKeys: () => [...this.research.bonusKeys(), ...(this.sponsors?.bonusKeys() ?? [])] }); // Milestone 10
+    this.facilities = createGarageFacilities({ bus, money: this.money, research: () => new Set(this.unlocks.research), extraBonus: (key) => this.research.bonus(key) + (this.sponsors?.bonus(key) ?? 0) + (this.events?.bonus(key) ?? 0), extraKeys: () => [...this.research.bonusKeys(), ...(this.sponsors?.bonusKeys() ?? []), ...(this.events?.bonusKeys() ?? [])] }); // Milestone 10 (Milestone 23: + the events' timed modifiers)
     this.research = createResearch({ bus, team: this }); // Milestone 11
     this.combos = createCombos({ bus, team: this }); // Milestone 22 (after research: a discovery pays RP)
     this.races = createRaces({ bus, team: this }); // Milestone 6: the race being run (fixed seed) and the results
@@ -174,6 +180,7 @@ export class Team {
     this.sponsors = createSponsors({ bus, team: this, seed }); // Milestone 21 (after the championships: a round is scored first)
     this.contractRecords = blankContractRecords(); // Milestone 21
     attachContractProgress({ bus, team: this }); // Milestone 21: race weekends and drills count for their contracts
+    this.events = createEvents({ bus, team: this, seed }); // Milestone 23 (last: its day runs after every other system's)
     this.recruitment.extraBusy = (id) => {
       const t = this.training.trainingOf(id);
       return t ? `Away on a course (${t.days - t.daysDone} day${t.days - t.daysDone === 1 ? '' : 's'} left)` : null;
@@ -234,6 +241,7 @@ export class Team {
     this.sponsors.newGame(); // Milestone 21: empty slots and the first Sponsor board
     this.contractRecords = blankContractRecords();
     this.money.firstOffers(); // Milestone 21: three contract offers the team can meet (the garage and research are set now)
+    this.events.newGame(); // Milestone 23: an empty Inbox, then Opening the First Garage
   }
 
   // Milestone 21: a development contract paid — its rewards beyond Credits / RP / Reputation (bible §29): sponsor
@@ -389,6 +397,7 @@ export class Team {
       championships: this.championships.serialize(), // Milestone 20
       sponsors: this.sponsors.serialize(), // Milestone 21
       contractRecords: JSON.parse(JSON.stringify(this.contractRecords)), // Milestone 21
+      events: this.events.serialize(), // Milestone 23
     };
   }
 
@@ -417,6 +426,7 @@ export class Team {
     this.sponsors.load(data.sponsors ?? null); // none before Milestone 21: empty slots, a fresh Sponsor board
     this.contractRecords = { ...blankContractRecords(), ...JSON.parse(JSON.stringify(data.contractRecords ?? {})) };
     if (!data.sponsors) this.money.firstOffers(); // before Milestone 21: three fresh contract offers
+    this.events.load(data.events ?? null); // none before Milestone 23: an empty Inbox, past milestones counted as fired
   }
 
   // A team saved before Milestone 5 had no money: it gets the §30.2 starting state today, and each car it already
