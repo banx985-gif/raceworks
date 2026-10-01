@@ -37,6 +37,9 @@
 // Milestone 24: team.secrets (src/systems/secrets.js) — the Secret Condition Engine on core/SecretEngine: run / account
 //   facts, trigger indexing, clue stages 0–4, once-only rewards; rules = new Team({ secretRules }) (main.js gives the
 //   synthetic test rules only with ?debug=1; M25 adds the real ones). team.runId names this run for cross-run facts.
+// Milestone 25: the 34 real secrets (data/secrets.js SECRET_RULES; main.js loads them, the synthetic set only with
+//   ?debug=1&synthetic=1): their rewards open secret parts (car catalog), F34 / F35 and the Ghost Annex (facilities), C11 /
+//   C12 (championships), Ghostline in World-tier fields, V17–V20 (carVisual), staff arrivals, events and account switches.
 // Milestone 23: team.events (src/systems/events.js) — the data-driven events (data/events.js), the one-card queue, the
 //   Inbox and the milestone moments; its timed modifiers join the one effect query (team.facilities.bonus(key)).
 import { Clock } from '../../../../core/Clock.js';
@@ -134,6 +137,10 @@ export const SAVE_MIGRATIONS = {
   //   16 → 17 (Milestone 24): the secret engine's run state and records, and the run id. Nothing to change here —
   //   Team.load() gives a save without them a new run id and records rebuilt from its cars and race history.
   16: (record) => record,
+  //   17 → 18 (Milestone 25): the 34 real secrets — new run records (hires, the starting staff, who left, the BOTWORKS demo)
+  //   and account records (top speeds, Prestige Tokens, switches). Nothing to change here — secrets.load() fills in what a
+  //   save made before it lacks (records rebuilt from its cars and race history, the starting staff from its founder).
+  17: (record) => record,
 };
 
 const blankContractRecords = () => ({ partEvents: {}, facts: {} });
@@ -178,7 +185,7 @@ export class Team {
     });
     this.money = createTeamMoney({ bus, seed, clock: this.clock, staff: this.staff, cars: this.cars, revealBonus: () => this.facilities.bonus('revealReputation'), generateOffer: (rng, taken) => contractTerms(this, rng, taken), onPaid: (c) => this.contractPaid(c) }); // (Milestone 21: the §29 contracts)
     // (Milestone 21: the sponsors' perks join the research bonuses in the one effect query)
-    this.facilities = createGarageFacilities({ bus, money: this.money, research: () => new Set(this.unlocks.research), extraBonus: (key) => this.research.bonus(key) + (this.sponsors?.bonus(key) ?? 0) + (this.events?.bonus(key) ?? 0), extraKeys: () => [...this.research.bonusKeys(), ...(this.sponsors?.bonusKeys() ?? []), ...(this.events?.bonusKeys() ?? [])] }); // Milestone 10 (Milestone 23: + the events' timed modifiers)
+    this.facilities = createGarageFacilities({ bus, money: this.money, research: () => new Set(this.unlocks.research), secrets: () => new Set(this.secrets?.unlockedIds() ?? []), extraBonus: (key) => this.research.bonus(key) + (this.sponsors?.bonus(key) ?? 0) + (this.events?.bonus(key) ?? 0), extraKeys: () => [...this.research.bonusKeys(), ...(this.sponsors?.bonusKeys() ?? []), ...(this.events?.bonusKeys() ?? [])] }); // Milestone 10 (Milestone 23: + the events' timed modifiers)
     this.research = createResearch({ bus, team: this }); // Milestone 11
     this.combos = createCombos({ bus, team: this }); // Milestone 22 (after research: a discovery pays RP)
     this.races = createRaces({ bus, team: this }); // Milestone 6: the race being run (fixed seed) and the results

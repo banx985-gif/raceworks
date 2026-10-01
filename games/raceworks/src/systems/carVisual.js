@@ -5,8 +5,9 @@
 //   familyRules() → every rule in priority order (tests, the archive)
 // Every family that applies is listed; a priority resolver picks one, so a car never flickers between families:
 //   1. secret / prestige   V17 Hypercar X (SEC-CAR-01), V18 Electric Phantom (SEC-CAR-02 + SYN14), V19 Ghost Spec
-//                          (SEC-CAR-03), V20 Project Zero (SEC-CAR-04 or SYN20) — secret flags are always false until the
-//                          Secret Engine (Milestone 25); ?debug=1's override opens them for testing
+//                          (SEC-CAR-03), V20 Project Zero (SEC-CAR-04 or SYN20) — Milestone 25: each only on the cars it
+//                          suits (SECRET_FAMILY_CARS, PLACEHOLDER), so one found secret never restyles every car;
+//                          ?debug=1's override opens them for testing
 //   2. combo-unlocked      V05 Hot Hatch (SYN03), V13 Super Touring (SYN15), V14 GT Pro (SYN16), V15 Formula Pro (SYN17),
 //                          V16 Endurance Prototype (SYN18) — only on their own class
 //   3. tier                V03 Roadster (Lightweight on balanced early parts), V07 GT Sprint (GT mid), V09 Formula Regional
@@ -20,6 +21,11 @@ const FALLBACK = 'V01';
 //   early (balanced): every part Cx 2–3 and the six within 1 of each other · mid: the parts' average Cx ≥ 4
 export const FAMILY_TIERS = { earlyMin: 2, earlyMax: 3, earlySpread: 1, midAvg: 4 };
 
+// Milestone 25 (PLACEHOLDER, DECISIONS.md): the cars a secret family may dress. V17 Hypercar X: Prototype / Experimental;
+// V19 Ghost Spec: the top classes; V20 Project Zero: a car carrying at least one of the six secret parts. (V18 Electric
+// Phantom already needs SYN14, an electric recipe.)
+export const SECRET_FAMILY_CARS = { V17: ['prototype', 'experimental'], V19: ['gt', 'endurance', 'prototype', 'experimental'], V20secretParts: ['PU09', 'TR08', 'CH08', 'AE08', 'HB08', 'EL09'] };
+const secretPart = (parts) => parts.some((id) => SECRET_FAMILY_CARS.V20secretParts.includes(id));
 const cxs = (parts) => parts.map((id) => PARTS[id]?.cx ?? 1);
 const avg = (a) => (a.length ? a.reduce((t, v) => t + v, 0) / a.length : 0);
 const early = (parts) => {
@@ -30,10 +36,10 @@ const mid = (parts) => parts.length === 6 && avg(cxs(parts)) >= FAMILY_TIERS.mid
 
 // [level, family, rule words, test(car)] in priority order.
 const RULES = [
-  ['secret', 'V20', 'SEC-CAR-04 / SYN20', (c) => c.secret('SEC-CAR-04') || c.combos.includes('SYN20')],
-  ['secret', 'V17', 'SEC-CAR-01', (c) => c.secret('SEC-CAR-01')],
+  ['secret', 'V20', 'SEC-CAR-04 / SYN20 + a secret part', (c) => (c.secret('SEC-CAR-04') || c.combos.includes('SYN20')) && (c.debug || secretPart(c.parts))],
+  ['secret', 'V17', 'SEC-CAR-01 + Prototype / Experimental', (c) => c.secret('SEC-CAR-01') && (c.debug || SECRET_FAMILY_CARS.V17.includes(c.classId))],
   ['secret', 'V18', 'SEC-CAR-02 + SYN14', (c) => c.secret('SEC-CAR-02') && c.combos.includes('SYN14')],
-  ['secret', 'V19', 'SEC-CAR-03', (c) => c.secret('SEC-CAR-03')],
+  ['secret', 'V19', 'SEC-CAR-03 + a top class', (c) => c.secret('SEC-CAR-03') && (c.debug || SECRET_FAMILY_CARS.V19.includes(c.classId))],
   ['combo', 'V16', 'SYN18', (c) => c.combos.includes('SYN18') && c.classId === 'prototype'],
   ['combo', 'V15', 'SYN17', (c) => c.combos.includes('SYN17') && c.classId === 'formula'],
   ['combo', 'V14', 'SYN16', (c) => c.combos.includes('SYN16') && c.classId === 'gt'],
@@ -47,7 +53,7 @@ const RULES = [
 export const familyRules = () => RULES.map(([level, id, words]) => ({ level, id, words }));
 
 export function resolveFamily({ classId, parts = [], combos = [], secrets = null, debugSecrets = false } = {}) {
-  const car = { classId, parts, combos, secret: (f) => debugSecrets || !!secrets?.has?.(f) };
+  const car = { classId, parts, combos, debug: debugSecrets, secret: (f) => debugSecrets || !!secrets?.has?.(f) };
   const eligible = [];
   for (const [level, fam, words, ok] of RULES) {
     const id = fam ?? CLASSES[classId]?.family;

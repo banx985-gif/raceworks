@@ -406,7 +406,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
           ],
         },
         ...SLOTS.map((sl) => {
-          const all = Object.keys(PARTS).filter((id) => PARTS[id].slot === sl.id && !PARTS[id].secret);
+          const all = Object.keys(PARTS).filter((id) => PARTS[id].slot === sl.id && (!PARTS[id].secret || partState(id, ctx).open)); // (Milestone 25: a found secret part too)
           const open = all.filter((id) => partState(id, ctx).open);
           return { title: `${sl.name} · ${open.length} of ${all.length}`, lines: [open.map((id) => `${id} ${PARTS[id].name}`).join(' · ') || 'None yet'] };
         }),
@@ -438,7 +438,10 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
       sections: [
         { title: 'Combos', lines: list.length ? list.map((x) => ({ text: `${x.kind === 'recipe' ? 'Recipe' : 'Rumour'}: ${x.text}`, color: x.kind === 'recipe' ? C.good : C.text })) : ['Nothing yet. Build cars: a combination that almost works starts a rumour.'] },
         // Milestone 24: the secrets — each one's newest clue stage (1 vague … 3 nearly explicit), a found one's exact recipe
-        ...(team.secrets?.rules.length ? [{ title: 'Secrets', lines: secretLines() }] : []),
+        ...(team.secrets?.rules.length ? [{ title: `Secrets · ${team.secrets.foundCount()} of 34 found`, lines: secretLines() }] : []),
+        // Milestone 25: account-wide rewards — accolades and switches, Prestige Tokens, the final page
+        ...(team.secrets?.accolades().length || team.secrets?.prestigeTokens ? [{ title: 'Accolades', lines: [...team.secrets.accolades().map((a) => ({ text: a.text, color: C.good })), { text: `Prestige Tokens: ${team.secrets.prestigeTokens}`, color: C.actionDark }] }] : []),
+        ...(team.secrets?.finalPage ? [{ title: 'The final page', lines: [{ text: team.secrets.finalPage, color: C.actionDark }] }] : []),
         ...(debug ? [{ columns: 1, buttons: [secretInspectorButton()] }] : []),
       ],
     };
@@ -467,9 +470,11 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
                 ...w.rows.map((x) => ({ text: `${x.ok ? '✓' : '✗'} ${x.kind === 'any' ? '(one of) ' : x.kind === 'forbid' ? '(never) ' : ''}${x.text}`, color: x.ok ? C.good : C.text })),
                 { text: `Checked on: ${w.triggers.join(', ')}`, color: C.textMuted },
               ],
+              // Milestone 25: force this one secret (its rewards fire once; it sets the competitive-invalid flag)
+              ...(w.foundHere ? {} : { columns: 1, buttons: [{ id: `force:${r.id}`, label: `Debug: force ${r.id}`, sub: 'Rewards fire as if its facts held · sets the invalid flag', icon: 'race_ui_28', accent: C.purple, onTap: () => S.debugForce(r.id) }] }),
             };
           })
-        : [{ lines: ['No rules loaded (the synthetic test rules load with ?debug=1; the real 34 are Milestone 25).'] }],
+        : [{ lines: ['No rules loaded.'] }],
     };
   });
 
@@ -530,9 +535,10 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
       art: 'race_ui_27',
       accent: C.progress,
       sections: [
-        ...Object.entries(RIVAL_TEAMS).filter(([, t]) => !t.secret || CH.debugSecrets).map(([id, t]) => ({
+        // (Milestone 25: Ghostline once SEC-RIVAL-01 is found — it races in the World-tier championships)
+        ...Object.entries(RIVAL_TEAMS).filter(([, t]) => !t.secret || CH.debugSecrets || team.unlocks.secrets.includes(t.secret)).map(([id, t]) => ({
           title: t.name,
-          lines: [`${t.identity} · ${t.strength} · from ${champById(t.first)?.name ?? t.first}`],
+          lines: [`${t.identity} · ${t.strength} · from ${t.secret ? 'the World-tier championships (C08–C12)' : champById(t.first)?.name ?? t.first}`],
           columns: 1,
           buttons: [{ id: `rival_${id}`, label: t.drivers.map((d) => d.name).join(' · '), sub: t.drivers.map((d) => `${d.name.split(' ')[0]}: Q${d.ratings.qualifying} R${d.ratings.racecraft} W${d.ratings.wet} T${d.ratings.tyreCare} C${d.ratings.consistency} F${d.ratings.feedback}`).join(' · '), icon: t.logo, accent: C.outline, onTap: () => {} }],
         })),

@@ -9,6 +9,8 @@
 //   .toast → the minor strip on screen now ({ entry, age, more }) or null · .unread · .inbox (newest first)
 //   .bonus(key) / .bonusKeys() — the running timed modifiers, added into the garage's one effect query
 //   .flags → stored flags (technology_demo, hiddenInvitation …) · .milestoneFired(id)
+//   .fireSecret(id, params) — Milestone 25: a found secret's event (data/events.js EV_SPECIAL_ARRIVAL, EV_UNDERDOG …);
+//     params.art shows a picture of its own (a portrait); never rolled
 //
 // The flow — exactly one card on screen:
 //   • a major event (a milestone or a choice event) waits in the queue; a minor one is a toast (and both go in the Inbox);
@@ -159,7 +161,7 @@ export function createEvents({ bus, team, seed = 'raceworks' }) {
     const data = { uid: inst.uid, id: def.id, cls: def.cls, look: def.look ?? null };
     if (def.look === 'research') Object.assign(data, { nodeId: p.nodeId, fired: p.fired });
     if (def.look === 'combo') Object.assign(data, { comboId: p.comboId, rp: p.rp });
-    const msg = { kind: def.kind, day: inst.day, title: words(def.title, p), body: words(def.text, p), icon: classOf(def.cls).icon, art: def.art ?? null, data };
+    const msg = { kind: def.kind, day: inst.day, title: words(def.title, p), body: words(def.text, p), icon: classOf(def.cls).icon, art: def.art ?? p.art ?? null, data }; // (Milestone 25: p.art)
     if (def.size === 'major') notes.post({ ...msg, level: 'major', popup: !muted, toast: false });
     else notes.post({ ...msg, level: 'minor', toast: true });
     stats.peakQueue = Math.max(stats.peakQueue, notes.pending);
@@ -333,6 +335,7 @@ export function createEvents({ bus, team, seed = 'raceworks' }) {
     },
     classOf,
     milestoneFired: (id) => events.seen(id),
+    fireSecret: (id, params = {}) => (BY_ID[id] ? fireNow(id, params) : null), // Milestone 25
     markAllRead: () => notes.markAllRead(),
     bonus: (key) => events.total(key),
     bonusKeys: () => [...new Set(events.state.modifiers.map((m) => m.key))],

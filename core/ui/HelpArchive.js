@@ -6,6 +6,10 @@
 //   topics: [{ id, title, icon, art, paras: [..] }] (game data) · text: labels (HELP_TEXT) · fill(step) → the step with
 //   its run-specific words filled in (optional) · guide: core/GuideSystem (seenSteps, state.off, turnOn / turnOff)
 //   enter({ back, topic }) — topic: open straight on that page
+//   walkthroughs (optional, DEVWORKS M40d): a third tab listing each feature walkthrough with "Show me (again)" and,
+//     while it waits, "Dismiss": { list() → [{ id, title, line, status: 'new'|'later'|'done', icon }], more() → how many
+//     are still to open, show(id), dismiss(id) }; text: walksTab, noWalks, walksMore(n), showMe, showAgain, dismiss,
+//     walkStatus { new, later, done }
 //   icon: the Help picture (Robot Workshop's ui_icon_27 by default; DEVWORKS passes its own)
 import { THEME, font, lineH } from '../Theme.js';
 import { ScrollPanel } from './ScrollPanel.js';
@@ -19,16 +23,18 @@ const TABS_H = 110;
 const FOOT_H = 160;
 const GAP = 16;
 
-export function createHelpArchive({ renderer, layout, assets, router, guide, topics, text: T, fill = null, icon = 'ui_icon_27' }) {
+export function createHelpArchive({ renderer, layout, assets, router, guide, topics, text: T, fill = null, icon = 'ui_icon_27', walkthroughs = null }) {
   const W = renderer.width;
   let back = 'workshop';
   let tab = 'topics';
   let page = null; // an open topic
   let rows = [];
+  let walkHits = []; // the walkthrough buttons (content coordinates)
   const scroll = new ScrollPanel({ getRect: bodyRect, contentHeight: 0 });
   const TABS = [
     { id: 'topics', label: T.topicsTab },
     { id: 'seen', label: T.seenTab },
+    ...(walkthroughs ? [{ id: 'walks', label: T.walksTab ?? 'Walkthroughs' }] : []),
   ];
 
   const sr = () => layout.safeRect;
@@ -58,6 +64,20 @@ export function createHelpArchive({ renderer, layout, assets, router, guide, top
       return { x: b.x + r.r.x, y: b.y + r.r.y - scroll.scrollY, w: r.r.w, h: r.r.h };
     },
     tabRect: (id) => tabRects(tabsArea(), TABS.length)[TABS.findIndex((t) => t.id === id)],
+    // A walkthrough's button on screen: action 'show' | 'dismiss' (tests).
+    walkRect(id, action = 'show') {
+      const h = walkHits.find((x) => x.id === id && x.action === action);
+      if (!h) return null;
+      const b = bodyRect();
+      return { x: b.x + h.r.x, y: b.y + h.r.y - scroll.scrollY, w: h.r.w, h: h.r.h };
+    },
+    scrollToWalk(id) {
+      const h = walkHits.find((x) => x.id === id);
+      if (h) {
+        scroll.scrollY = Math.max(0, h.r.y - 200);
+        scroll.clamp?.();
+      }
+    },
     open(id) {
       page = topics.find((t) => t.id === id) ?? null;
       scroll.scrollY = 0;
@@ -87,6 +107,12 @@ export function createHelpArchive({ renderer, layout, assets, router, guide, top
           scroll.scrollY = 0;
           return;
         }
+      }
+      if (!page && tab === 'walks' && scroll.contains(p)) {
+        const q = scroll.toContent(p);
+        const h = walkHits.find((x) => hitRect(q, x.r));
+        if (h) h.action === 'dismiss' ? walkthroughs.dismiss(h.id) : walkthroughs.show(h.id);
+        return;
       }
       if (page || tab !== 'topics' || !scroll.contains(p)) return;
       const q = scroll.toContent(p);
@@ -123,7 +149,8 @@ export function createHelpArchive({ renderer, layout, assets, router, guide, top
           rows.push({ id: t.id, r });
           y += h + GAP;
         }
-      } else {
+      } else if (tab === 'walks') y = drawWalks(ctx, w);
+      else {
         const list = seen();
         if (!list.length) {
           const st = { art: icon, title: T.seenTab, text: T.noneSeen };
@@ -145,6 +172,50 @@ export function createHelpArchive({ renderer, layout, assets, router, guide, top
       drawButton(ctx, toggleRect(), guide.state.off ? T.guideOn : T.guideOff, { accent: C.progress, font: font(S.button, true) });
     },
   };
+
+  // The walkthroughs tab: one card each, with Show me (again) and, while it waits, Dismiss.
+  function drawWalks(ctx, w) {
+    let y = 0;
+    walkHits = [];
+    const list = walkthroughs.list();
+    if (!list.length) {
+      const st = { art: icon, title: T.walksTab ?? 'Walkthroughs', text: T.noWalks ?? '' };
+      const h = stateHeight(w, st);
+      emptyState(ctx, assets, { x: 0, y, w, h }, st);
+      y += h + GAP;
+    }
+    const BTN_H = 100;
+    for (const it of list) {
+      const waiting = it.status !== 'done';
+      const textW = w - 56 - (it.icon ? 110 : 0);
+      const tx = 28 + (it.icon ? 110 : 0);
+      const bodyH = para(null, it.line, 0, 0, textW, { size: S.small });
+      const h = 26 + lineH(S.button, 1.3) + lineH(S.small, 1.3) + bodyH + 20 + BTN_H + 26;
+      card(ctx, { x: 0, y, w, h });
+      if (it.icon && ctx) assets.drawContained(ctx, it.icon, { x: 24, y: y + 24, w: 90, h: 90 });
+      text(ctx, it.title, tx, y + 26, { size: S.button, bold: true, maxWidth: textW });
+      const stTxt = T.walkStatus?.[it.status] ?? it.status;
+      text(ctx, stTxt, tx, y + 26 + lineH(S.button, 1.3), { size: S.small, bold: true, color: waiting ? C.action : C.good, maxWidth: textW });
+      para(ctx, it.line, tx, y + 26 + lineH(S.button, 1.3) + lineH(S.small, 1.3), textW, { size: S.small, color: C.textMuted });
+      const by = y + h - 26 - BTN_H;
+      const bw = Math.min(380, (w - 56 - 20) / 2);
+      const show = { x: 28, y: by, w: bw, h: BTN_H };
+      drawButton(ctx, show, waiting ? T.showMe ?? 'Show me' : T.showAgain ?? 'Show me again', { accent: C.good, font: font(S.button, true) });
+      walkHits.push({ id: it.id, action: 'show', r: show });
+      if (waiting) {
+        const dis = { x: 28 + bw + 20, y: by, w: bw, h: BTN_H };
+        drawButton(ctx, dis, T.dismiss ?? 'Dismiss', { accent: C.progress, font: font(S.button, true) });
+        walkHits.push({ id: it.id, action: 'dismiss', r: dis });
+      }
+      y += h + GAP;
+    }
+    const more = walkthroughs.more?.() ?? 0;
+    if (more && T.walksMore) {
+      text(ctx, T.walksMore(more), 8, y + 10, { size: S.small, color: C.textMuted, maxWidth: w - 16 });
+      y += lineH(S.small, 1.3) + 30;
+    }
+    return y;
+  }
 
   // A topic page: its picture, then its paragraphs.
   function drawPage(ctx, w) {

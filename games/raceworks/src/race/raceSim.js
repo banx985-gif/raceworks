@@ -239,6 +239,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
         pitLat: 0,
         ...m16Car(e),
         ...m17Car(e),
+        ...m25Car(),
       };
     });
   }
@@ -249,6 +250,13 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
   //   you gained places in)
   function m17Car(e) {
     return { faults: e?.openFaults ?? 0, faultsFixed: 0, spins: 0, spinT: null, coldTo: INCIDENTS.coldLaps * L, weatherChanges: 0, neutralBenefits: 0 };
+  }
+  // Milestone 25 (the secrets' race facts; read only, never part of the race itself): damageHits (times the car took race
+  // damage: a damaging spin, contact or component failure) · damageRepairs (pit repairs done with race damage on the car) ·
+  // vmax (top speed, m/s, racing laps only) · saveUsed (the Conserve pace at any moment) · plannedStops (stops in the
+  // crew's first plan: the race's expected pit window)
+  function m25Car() {
+    return { damageHits: 0, damageRepairs: 0, vmax: 0, saveUsed: false, plannedStops: null };
   }
   // Milestone 17: the race's weather and incident state. weather (the state now) · wetSeen (any rain so far) · weatherInit
   // (the start's tyre calls made) · caution (the running one) · cautions [{ n, fromLap, toLap, laps, reason }] · incidents
@@ -345,7 +353,10 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     c.slowUntil = sim.t + I.spinSlowSecs;
     c.slowPct = I.spinSlowPct;
     const damage = rng.next() < I.spinDamageShare * (track.walls ? TE.wallsSpinDamageX : 1); // Milestone 19: walls
-    if (damage) c.damagePct += I.spinDamagePct;
+    if (damage) {
+      c.damagePct += I.spinDamagePct;
+      c.damageHits++;
+    }
     log('spin', [c.id], `${nameOf(c.id)} spins${damage ? ' — damage' : ''}`, { damage });
     if (damage && sim.weather !== 'dry') maybeCaution('spin', `${nameOf(c.id)} spun off`);
   }
@@ -479,6 +490,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     });
     plan.stopsAt = c.stops;
     c.plan = plan;
+    if (c.plannedStops == null) c.plannedStops = plan.stops ?? 0; // Milestone 25: the expected pit window (the first plan)
     if (plan.stops && !c.win && plan.window) c.win = { ...plan.window };
     if (c.auto) applyPlan(c);
   }
@@ -595,6 +607,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
       } else if (roll < I.contactRetireShare + I.contactDamageShare) {
         const hit = rng.next() < 0.5 ? c : o;
         hit.damagePct += I.contactDamagePct;
+        hit.damageHits++;
         log('contact', [c.id, o.id], `Contact: ${nameOf(c.id)} and ${nameOf(o.id)} — ${nameOf(hit.id)} damaged`, { damage: true, hit: hit.id });
         maybeCaution('contact', `contact between ${nameOf(c.id)} and ${nameOf(o.id)}`);
       } else log('contact', [c.id, o.id], `Contact: ${nameOf(c.id)} and ${nameOf(o.id)}`);
@@ -624,6 +637,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
       log('failure', [c.id], `${nameOf(c.id)}: a fault — must pit now`, { outcome: 'forcedPit' });
     } else if (kind === 'damage') {
       c.damagePct += f.damagePct;
+      c.damageHits++;
       c.fails.push('damage');
       log('failure', [c.id], `${nameOf(c.id)}: component damage`, { outcome: 'damage' });
     } else {
@@ -706,7 +720,8 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     if (!broken || !r.share) return 0;
     const running = c.failLapsLeft > 0 && r.clearsFault ? 1 : 0;
     const fixed = Math.min(c.faults, PIT_FAULT_FIX[id] ?? 0);
-    c.damagePct = Math.round(c.damagePct * (1 - r.share) * 100) / 100;
+    if (c.damagePct > 0) c.damageRepairs++; // Milestone 25: race damage repaired in a pit stop
+    c.damagePct =Math.round(c.damagePct * (1 - r.share) * 100) / 100;
     if (r.clearsFault) c.failLapsLeft = 0;
     c.faults -= fixed;
     c.faultsFixed += fixed + running;
@@ -864,6 +879,9 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
           c.lat = clamp(c.lat, -m, m);
         }
       }
+      // Milestone 25: top speed on a racing lap and any Conserve (the secrets' race facts; nothing reads them in the race)
+      if (!c.finished && !c.pit && c.lapsDone >= 0 && c.v > c.vmax) c.vmax = c.v;
+      if (!c.finished && c.pace === 'conserve') c.saveUsed = true;
       // the line
       if (!c.finished) {
         const kBefore = before >= 0 ? Math.floor(before / L) : -1;
@@ -1091,6 +1109,12 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
           // Milestone 18: your Drive Stints (each one's record) and the extra fuel / energy Push used
           drive: (c.driveLog ?? []).map((x) => ({ ...x })),
           stintFuel: c.stintFuel ?? 0,
+          // Milestone 25: the secrets' race facts (top speed in km/h)
+          damageHits: c.damageHits ?? 0,
+          damageRepairs: c.damageRepairs ?? 0,
+          topSpeed: Math.round((c.vmax ?? 0) * 3.6 * 10) / 10,
+          saveUsed: !!c.saveUsed,
+          plannedStops: c.plannedStops ?? 0,
         };
       }),
       // Milestone 17: the weather the race saw (start, every state, any rain), its cautions and incidents
@@ -1132,6 +1156,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
       const add17 = m17Car(byId[c.id]);
       if (c.faults === undefined) add17.coldTo = 0;
       for (const k of Object.keys(add17)) if (c[k] === undefined) c[k] = add17[k];
+      for (const [k, v] of Object.entries(m25Car())) if (c[k] === undefined) c[k] = v; // Milestone 25: a race saved before it
       delete c.manual; // Milestone 18: a stint never survives a reload (it counts as handed back — the save before it stands)
     }
     sim.events = s.events.slice();

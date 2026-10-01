@@ -34,7 +34,7 @@ import { characterPose, drawCharacter } from '../../../../core/CharacterMotion.j
 import { Agent } from '../../../../core/Agent.js';
 import { Selection } from '../../../../core/Selection.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
-import { GARAGE, GARAGE_LOOK, REST_STATION, WALK, ROUTINES, WORKER_STATE_TEXT, routineFor } from '../../data/garage.js';
+import { GARAGE, GARAGE_LOOK, REST_STATION, WALK, ROUTINES, WORKER_STATE_TEXT, routineFor, MASCOT } from '../../data/garage.js';
 import { STARTER_AREA, EXPANSIONS, ENTRANCE, PHASE_STATIONS, BUILD_TEXT } from '../../data/facilities.js';
 import { REST } from '../../data/balance.js';
 import { statusIconsOf } from '../ui/statusIcons.js';
@@ -69,12 +69,26 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
   // --- the room --------------------------------------------------------------
   // The building: the Starter Garage plus every wing that can be shown (open or greyed; the secret annex never).
   const shown = [{ col: 0, row: 0, w: STARTER_AREA.cols, h: STARTER_AREA.rows }, ...EXPANSIONS.filter((z) => !z.secret)];
-  const cols = Math.max(...shown.map((z) => z.col + z.w));
-  const rows = Math.max(...shown.map((z) => z.row + z.h));
+  const mainCols = Math.max(...shown.map((z) => z.col + z.w));
+  const mainRows = Math.max(...shown.map((z) => z.row + z.h));
+  // Milestone 25: the Ghost Annex (F35, SEC-FAC-02) is a room of its own below the building; the world grows to hold it
+  // only once it is open (measureWorld), so every other team's garage is exactly as before.
+  const ghostZone = EXPANSIONS.find((z) => z.secret) ?? null;
+  const ghostOpen = () => !!ghostZone && fs.isOwned(ghostZone.id);
+  let cols = mainCols;
+  let rows = mainRows;
+  let worldW = 0;
+  let worldH = 0;
+  function measureWorld() {
+    const extra = ghostOpen() ? [ghostZone] : [];
+    cols = Math.max(mainCols, ...extra.map((z) => z.col + z.w));
+    rows = Math.max(mainRows, ...extra.map((z) => z.row + z.h));
+    worldW = (cols + rows) * HW + margin * 2;
+    worldH = (cols + rows) * HH + wallH + margin * 2;
+  }
+  measureWorld();
   const grid = new Grid({ cols: fs.cols, rows: fs.rows, tileSize: CELL }); // pathing: the whole floor there can ever be
   const iso = new IsoProjection({ tileSize: CELL, halfW: HW, halfH: HH, originX: margin + rows * HW, originY: margin + wallH });
-  const worldW = (cols + rows) * HW + margin * 2;
-  const worldH = (cols + rows) * HH + wallH + margin * 2;
   const room = new CachedLayer({ width: worldW, height: worldH, draw: drawRoom });
 
   const camera = new Camera({ viewW: W, viewH: renderer.height, worldW, worldH });
@@ -135,8 +149,22 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     const now = [...fs.owned].sort().join();
     if (now !== roomOwned) {
       roomOwned = now;
+      relayoutWorld(); // Milestone 25: the Ghost Annex grows the world when it opens (or a team without it is loaded)
       room.invalidate();
     }
+  }
+  // Re-measure the world (Milestone 25): the building's corner moves right by the rows added, so the view keeps looking at
+  // the same spot; the cached floor keeps under MAX_ROOM_PIXELS.
+  function relayoutWorld() {
+    const was = { rows, x: iso.originX };
+    measureWorld();
+    if (rows === was.rows) return;
+    iso.originX = margin + rows * HW;
+    room.resize(worldW, worldH);
+    room.setPixelScale(Math.min(renderer.pixelScale * GARAGE.zoom.max, Math.sqrt(MAX_ROOM_PIXELS / (worldW * worldH))));
+    camera.setWorld(worldW, worldH);
+    camera.x += iso.originX - was.x;
+    camera.clamp();
   }
   bus.on('facility:layout', () => {
     syncStations();
@@ -345,7 +373,7 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
   const showView = () => {
     const job = team.cars.active;
     const classId = job?.data.classId ?? 'clubHatch';
-    const vis = visualFamily({ classId, parts: job?.data.parts ?? [], combos: structuralCombos({ classId, parts: job?.data.parts ?? [] }) }); // the car this build becomes (Milestone 22: the resolver)
+    const vis = visualFamily({ classId, parts: job?.data.parts ?? [], combos: structuralCombos({ classId, parts: job?.data.parts ?? [] }), secrets: new Set(team.unlocks?.secrets ?? []), debugSecrets: !!team.combos?.debugSecrets }); // the car this build becomes (Milestone 22: the resolver; Milestone 25: + found secret families)
     const last = team.cars.cars.latest();
     return {
       job,
@@ -505,6 +533,8 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
   let started = false;
 
   const screen = {
+    mascotNow: () => mascotNow(), // Milestone 25 (tests): the Ghost Cat's drawn rect, or null
+    ghostAnnexShown: () => ghostOpen(), // Milestone 25 (tests)
     camera,
     grid,
     iso,
@@ -785,9 +815,13 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
       drawSelectionMark(ctx);
       // Stations, props and workers, back to front.
       // Anything wholly off screen is skipped, and sprites are cached near the size they are drawn (a full garage stays cheap).
-      const items = [...stations, ...workers].sort((a, b) => depthOf(a) - depthOf(b));
+      const items = [...stations, ...workers, ...(team.secrets?.accountFlag?.('ghostCatMascot') != null ? [mascot] : [])].sort((a, b) => depthOf(a) - depthOf(b)); // (Milestone 25: + the Ghost Cat)
       assets.detail = detailFor(camera.zoom);
       for (const it of items) {
+        if (it.kind === 'mascot') {
+          drawMascot(ctx);
+          continue;
+        }
         if (it.kind === 'worker') {
           // style guide §5: a bob while walking, a small tilt while working, a breath while waiting (the art keeps
           // the way it was drawn: no flip). Everyone moves out of step (seeded by their place in the list).
@@ -822,14 +856,35 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
 
   const POSE = { bob: 0, tilt: 0, flip: 1 }; // reused every frame
 
+  // Milestone 25: the Ghost Cat (SEC-X-02) by the door — the secret paddock animation: a slow breath, a tail-flick tilt.
+  const mascot = { kind: 'mascot', get depth() { return (MASCOT.col + MASCOT.row) * CELL; } };
+  const mascotPose = { bob: 0, tilt: 0, flip: 1 };
+  function mascotRect() {
+    const w = MASCOT.width * HW * 2;
+    const h = w / (assets.aspect(MASCOT.art) || 1);
+    const p = iso.corner(MASCOT.col, MASCOT.row);
+    return { x: p.x - w / 2, y: p.y - h, w, h };
+  }
+  function drawMascot(ctx) {
+    const r = mascotRect();
+    if (!camera.isVisible(r)) return;
+    const t = simTime;
+    const k = t % MASCOT.flickEvery;
+    mascotPose.bob = Math.sin((t / MASCOT.breathSecs) * Math.PI * 2) * r.h * 0.012;
+    mascotPose.tilt = k < MASCOT.flickSecs ? Math.sin((k / MASCOT.flickSecs) * Math.PI) * 0.06 : 0;
+    drawCharacter(ctx, assets, MASCOT.art, r.x + r.w / 2, r.y + r.h, r.w, r.h, mascotPose);
+  }
+  // (tests / debug) where the cat is drawn now, or null when it isn't
+  const mascotNow = () => (team.secrets?.accountFlag?.('ghostCatMascot') != null ? mascotRect() : null);
+
   // --- drawing -------------------------------------------------------------------
   // Floor and the two back walls (with the team stripes) over the whole building, the door, and the wings not open yet
   // as greyed floor with their name — drawn once into the cached layer (world units), again only when a wing opens.
   function drawRoom(g) {
     const colour = TEAM_COLOURS.find((c) => c.id === team.setup?.colour);
     drawIsoRoom(g, iso, {
-      cols,
-      rows,
+      cols: mainCols,
+      rows: mainRows,
       wallH,
       look: { floorA: L.floorA, floorB: L.floorB, grout: L.grout, wallFace: L.wallFace, wallSide: L.wallSide, wallLine: C.line, wallCap: L.wallCap },
       bands: [
@@ -868,6 +923,26 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
       g.font = font(32);
       g.fillText(z.why, mid.x, mid.y + 22);
     }
+    if (ghostOpen()) drawGhostAnnex(g); // Milestone 25
+  }
+
+  // Milestone 25: the Ghost Annex once it is open — a dark room of its own (own floor, low back walls with a violet band,
+  // its own door), drawn into the same cached layer.
+  function drawGhostAnnex(g) {
+    const z = ghostZone;
+    const sub = new IsoProjection({ tileSize: CELL, halfW: HW, halfH: HH, originX: iso.originX + (z.col - z.row) * HW, originY: iso.originY + (z.col + z.row) * HH });
+    const h = wallH * 0.7;
+    drawIsoRoom(g, sub, { cols: z.w, rows: z.h, wallH: h, look: { floorA: L.ghostFloorA, floorB: L.ghostFloorB, grout: L.ghostGrout, wallFace: L.ghostWall, wallSide: L.ghostSide, wallLine: L.ghostCap, wallCap: L.ghostCap }, bands: [{ from: 0.42, to: 0.52, color: L.ghostStripe }] });
+    const e = z.entrance ?? { col: z.col, row: z.row };
+    diamond(g, wallPatch(sub, 'left', e.row - z.row + 0.08, e.row - z.row + 0.92, 0, h * 0.72));
+    g.fillStyle = L.door;
+    g.fill();
+    const mid = iso.cellCenter(z.col + z.w / 2 - 0.5, z.row + z.h / 2 - 0.5);
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillStyle = L.ghostText;
+    g.font = font(40, true);
+    g.fillText(z.name, mid.x, mid.y);
   }
 
   function line(g, a, b) {

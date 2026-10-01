@@ -8,7 +8,7 @@
 //   stats()      → [{ icon?, iconSize? (52), text, color?, gap? (12) }] the chip, left to right (the last one squeezes)
 //   statsBad()   → true draws the chip in the failure colours (e.g. in debt)
 //   onStats()    tap on the chip (e.g. open Finance)
-//   onInbox(), onHelp(), inboxCount() → unread number for the Inbox badge
+//   onInbox(), onHelp(), inboxCount() → unread number for the Inbox badge; helpCount() → a badge on Help (optional)
 //   home         true on the home screen (no back button, the long date)
 //   back         { label, onTap } replaces the default back button; onHome() + homeLabel are the default
 //   accent()     → a colour for a thin stripe along the top (looks only), or null
@@ -50,6 +50,7 @@ export function createTopBar({
   onInbox = null,
   onHelp = null,
   inboxCount = () => 0,
+  helpCount = () => 0,
   home = false,
   back = null,
   onHome = null,
@@ -198,7 +199,8 @@ export function createTopBar({
       if (n) text(ctx, n, dateX + dateW, r.y + ROW1.y + ROW1.h - 6, { size: S.small, bold: true, align: 'right', baseline: 'bottom', color: COL.good });
       const unread = inboxCount() ?? 0;
       drawButton(ctx, inboxRect(), 'Inbox', { accent: COL.progress, badge: unread ? (unread > 99 ? '99+' : unread) : null });
-      drawButton(ctx, helpRect(), 'Help', { accent: COL.progress });
+      const helpN = helpCount() ?? 0;
+      drawButton(ctx, helpRect(), 'Help', { accent: COL.progress, badge: helpN ? (helpN > 99 ? '99+' : helpN) : null });
       drawStats(ctx);
       for (const b of buttons()) {
         drawButton(ctx, b.rect, b.label, { active: b.active, locked: b.locked, accent: b.id === 'pause' ? COL.warn : b.id === 'home' ? COL.progress : COL.action, font: font(S.button, true) });

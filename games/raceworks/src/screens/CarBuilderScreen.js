@@ -105,7 +105,7 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
 
     // --- class ---
     heading('Class');
-    const vis = visualFamily({ classId, parts, combos: structuralCombos({ classId, parts }) }); // Milestone 22: the resolver
+    const vis = visualFamily({ classId, parts, combos: structuralCombos({ classId, parts }), secrets: new Set(team.unlocks?.secrets ?? []), debugSecrets: !!team.combos?.debugSecrets }); // Milestone 22: the resolver (Milestone 25: + the secret families found)
     const chosen = {
       art: liveryKey(assets, vis.showcase, teamColourId(team), team.sponsors?.decals() ?? []),
       title: cls.name,

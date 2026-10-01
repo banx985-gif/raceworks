@@ -23,6 +23,8 @@
 //     Every header and card is a button (buttonRect(id) finds it; a tap calls its onTap).
 //   Section title extra (CAREWORKS Milestone 8; optional): titleDot (a colour) — a round dot after the title (e.g. amber
 //   for a care plan due for review)
+//   Button extra (DEVWORKS Milestone 40b; optional): cost (text, e.g. '12,000 Cr' or 'Free') — a chip on the button's right
+//   so every option shows what it costs; buttons without one draw as before
 //   Line extra (CAREWORKS Milestone 13; optional): a line may be { text, color?, glyph } where glyph(ctx, x, y, size) draws
 //   a small code-drawn mark before its first row (e.g. a heart); the text moves over to make room
 // A MenuRegistry maps what was tapped (a station type, 'worker', 'floor'…) to the function that builds its menu.
@@ -606,6 +608,24 @@ export class BottomSheet {
       x += iconS + 16;
     }
     let w = rect.x + rect.w - 16 - x;
+    if (bt.cost != null && bt.cost !== '') {
+      // DEVWORKS Milestone 40b: the cost on the right.
+      ctx.font = font(S.small, true);
+      const tw = Math.min(ctx.measureText(String(bt.cost)).width, rect.w * 0.34);
+      const cw = tw + 28;
+      const ch = Math.min(56, rect.h - 36);
+      const cx = rect.x + rect.w - (bt.locked ? 76 : 16) - cw;
+      const cy0 = rect.y + (rect.h - 8 - ch) / 2;
+      ctx.fillStyle = off ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.88)';
+      ctx.beginPath();
+      ctx.roundRect(cx, cy0, cw, ch, ch / 2);
+      ctx.fill();
+      ctx.fillStyle = off ? C.textFaint : C.text;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(bt.cost), cx + cw / 2, cy0 + ch / 2, tw);
+      w -= cw + 12;
+    }
     if (bt.locked) {
       drawPadlock(ctx, rect.x + rect.w - 56, rect.y + (rect.h - 8) / 2, 32, C.textFaint);
       w -= 60;

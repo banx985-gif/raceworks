@@ -171,6 +171,36 @@ export const EVENTS = [
   // Milestone 24: the secret engine's clue stages (a rumour) and a secret found (its exact recipe)
   { id: 'EV_SECRET_CLUE', cls: 'secret', size: 'minor', trigger: { type: 'fact', fact: 'secretClue' }, cooldownDays: 0, title: 'A rumour in the paddock', text: '{clue}', effects: [] },
   { id: 'EV_SECRET_FOUND', cls: 'secret', size: 'minor', trigger: { type: 'fact', fact: 'secretFound' }, cooldownDays: 0, title: 'Secret discovered: {name}', text: '{clue}', effects: [] },
+  // Milestone 25: the secrets' events (fired by a found secret through events.fireSecret — never rolled; each once a run,
+  // or once ever for an account secret). PLACEHOLDER effects (DECISIONS.md, M25).
+  {
+    id: 'EV_SPECIAL_ARRIVAL', cls: 'staff', size: 'major', trigger: { type: 'fact', fact: 'secretArrival' }, cooldownDays: 0,
+    title: 'A special arrival: {name}', text: '{name} ({role}) has heard about {team}. They are on the Recruitment Special tab for {days} days — hire them before they go.',
+    effects: [], choices: [{ id: 'look', label: 'Brilliant', line: 'Recruit → Special', effects: [], default: true }, { id: 'later', label: 'Later', line: 'They wait on the Special tab', effects: [] }],
+  },
+  {
+    id: 'EV_UNDERDOG', cls: 'sponsor', size: 'major', trigger: { type: 'fact', fact: 'secretUnderdog' }, cooldownDays: 0,
+    title: 'The underdog story', text: 'Everyone saw the slower car win. A sponsor wants the photos: "the team that beat the odds".',
+    effects: [], choices: [
+      { id: 'shoot', label: 'Do the shoot', line: 'Sponsor reputation +10 · Reputation +10', effects: [{ type: 'sponsorRep', value: 10 }, { type: 'reputation', value: 10 }], default: true },
+      { id: 'focus', label: 'Stay focused', line: 'Team Morale +4', effects: [{ type: 'teamMorale', value: 4 }] },
+    ],
+  },
+  {
+    id: 'EV_RETRO_WEEKEND', cls: 'race', size: 'major', trigger: { type: 'fact', fact: 'secretRetro' }, cooldownDays: 0,
+    title: 'Retro Weekend', text: 'The old cars are back on track for one weekend. Crowds love the Heritage livery — the crew loves the stories.',
+    effects: [{ type: 'teamMorale', value: 6 }, { type: 'reputation', value: 20 }, { type: 'flag', key: 'retroWeekend' }], choices: [{ id: 'enjoy', label: 'Enjoy it', line: 'Team Morale +6 · Reputation +20', effects: [], default: true }, { id: 'photos', label: 'Sell the photos', line: '+600 Credits', effects: [{ type: 'credits', value: 600 }] }],
+  },
+  {
+    id: 'EV_NEON_MIDNIGHT', cls: 'race', size: 'major', trigger: { type: 'fact', fact: 'secretNeon' }, cooldownDays: 0,
+    title: 'Neon Midnight', text: 'An invitation-only race after midnight at Neon Harbor. Somewhere near the Ghostline transporter, a black cat watches.',
+    effects: [{ type: 'reputation', value: 25 }, { type: 'flag', key: 'neonMidnight' }], choices: [{ id: 'race', label: 'Race under the lights', line: 'Reputation +25', effects: [], default: true }, { id: 'watch', label: 'Watch the cat', line: 'Team Morale +3', effects: [{ type: 'teamMorale', value: 3 }] }],
+  },
+  {
+    id: 'EV_BOTWORKS_DEMO', cls: 'sponsor', size: 'major', trigger: { type: 'fact', fact: 'secretBotworks' }, cooldownDays: 0,
+    title: 'BOTWORKS: a robot in the pit lane', text: 'BOTWORKS Systems bring a pit-service robot to your garage for a demonstration. It changes a wheel faster than anyone expected.',
+    effects: [{ type: 'sponsorRep', value: 10 }, { type: 'flag', key: 'pitRobotCameo' }], choices: [{ id: 'host', label: 'Host the demo', line: 'Sponsor reputation +10', effects: [], default: true }, { id: 'study', label: 'Study the robot', line: '+30 RP', effects: [{ type: 'rp', value: 30 }] }],
+  },
   { id: 'EV_SEASON', cls: 'race', size: 'minor', trigger: { type: 'calendar', on: 'year' }, cooldownDays: 0, title: 'Year {year} begins', text: 'A new racing year. The calendar, the sponsors and the rivals start again.', effects: [] },
 ];
 

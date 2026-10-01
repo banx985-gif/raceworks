@@ -23,7 +23,9 @@ export const FACILITY_DEFS = Object.fromEntries([...FACILITIES, REST_SPOT, ...PR
 
 // research() → the finished research nodes (Milestone 11); extraBonus(key) / extraKeys() → effects from elsewhere (research
 // bonuses) added into bonus(key), so every system still asks the one query.
-export function createGarageFacilities({ bus, money, research = () => new Set(), extraBonus = () => 0, extraKeys = () => [] }) {
+// Milestone 25: secrets() → the secret ids found (team.unlocks.secrets): a secret facility (F34 / F35, unlock.secret) is in
+// the shop only once its secret is found, and the Ghost Annex (a secret room) opens with SEC-FAC-02.
+export function createGarageFacilities({ bus, money, research = () => new Set(), secrets = () => new Set(), extraBonus = () => 0, extraKeys = () => [] }) {
   const system = new FacilitySystem({
     bus,
     defs: FACILITY_DEFS,
@@ -31,7 +33,7 @@ export function createGarageFacilities({ bus, money, research = () => new Set(),
     zones: EXPANSIONS.map((z) => ({ ...z })),
     entrance: ENTRANCE,
     sellRefundPct: SELL_REFUND_PCT,
-    zoneShown: (z) => !z.secret,
+    zoneShown: (z) => !z.secret || secrets().has(z.secret), // (Milestone 25: a secret room once its secret is found)
     reasons: {
       outside: 'Outside the garage',
       locked: 'That floor is locked — it opens with a later expansion',
@@ -50,6 +52,7 @@ export function createGarageFacilities({ bus, money, research = () => new Set(),
     const opened = [];
     for (const z of EXPANSIONS) {
       if (z.openInM10 && z.rank && !system.isOwned(z.id) && hasRank(z.rank) && system.openZone(z.id)) opened.push(z);
+      if (z.secret && !system.isOwned(z.id) && secrets().has(z.secret) && system.openZone(z.id)) opened.push(z); // Milestone 25
     }
     return opened;
   }
@@ -89,6 +92,7 @@ export function createGarageFacilities({ bus, money, research = () => new Set(),
     // Why a facility can't be bought yet (null = it can), from its unlock rule.
     lockReason(defId) {
       const u = FACILITY_DEFS[defId]?.unlock ?? {};
+      if (u.secret && !secrets().has(u.secret)) return 'Secret'; // Milestone 25
       if (u.rank && !hasRank(u.rank)) return `Needs Rank ${u.rank}`;
       if (u.research && !research().has(u.research)) return `Needs ${nodeLabel(u.research)} research`;
       return null;
@@ -103,13 +107,15 @@ export function createGarageFacilities({ bus, money, research = () => new Set(),
     // The shop: every bible facility here (F01–F15, Milestone 11 adds the ones research opens), ready ones first, then
     // locked, then the ones already built.
     shopList: () =>
-      FACILITIES.map((f) => api.status(f.id)).sort((a, b) => a.owned - b.owned || a.locked - b.locked || a.def.cost - b.def.cost || a.def.id.localeCompare(b.def.id)),
+      FACILITIES.filter((f) => !f.unlock.secret || secrets().has(f.unlock.secret)) // (Milestone 25: a secret one only once found)
+        .map((f) => api.status(f.id)).sort((a, b) => a.owned - b.owned || a.locked - b.locked || a.def.cost - b.def.cost || a.def.id.localeCompare(b.def.id)),
 
     // Buy one: placed on the free spot nearest `near` (a cell), then paid through the ledger. Move it after in Build Mode.
     buy(defId, near = null) {
       const s = api.status(defId);
       if (!s?.ok) return { ok: false, reason: s?.why ?? 'Unknown facility' };
-      const spot = system.findSpot(defId, 0, near);
+      const room = s.def.secretRoom && system.isOwned(s.def.secretRoom) ? EXPANSIONS.find((z) => z.id === s.def.secretRoom) : null;
+      const spot = (room && system.findSpot(defId, 0, { col: room.col + 1, row: room.row + 1 })) || system.findSpot(defId, 0, near); // (Milestone 25: F35 in its annex)
       if (!spot) return { ok: false, reason: BUILD_TEXT.noSpot };
       const r = system.place(defId, spot.col, spot.row);
       if (!r.ok) return { ok: false, reason: r.reason };

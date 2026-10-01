@@ -3,6 +3,7 @@
 //
 // node (plain data): { id, name, cost, requires: ['nodeId', …], condition: <game rule> | null, actions: [{ type, id }, …] }
 //   cost      research currency paid when the node is started; the same number is the work needed to finish it
+//             (unless the game's workOf hook says otherwise, e.g. a work time in days — GOALWORKS Milestone 13)
 //   requires  nodes that must be done first (the tree must have no loops — DataValidator.noCycles checks it)
 //   condition anything else the game wants first (a rank, a facility…), checked by conditionMet(rule)
 //   hidden    a secret topic: never counted in doneCount or the milestones (the visible tree stays the tree)
@@ -15,6 +16,7 @@
 //   conditionMet(rule) → bool,  workerStat(staff, node) → number,  bonusPerDay(node) → number,  speedPct(node) → number
 //   (bonusPerDay / speedPct get the node being researched, e.g. a lab that speeds up one branch; they may ignore it)
 //   costPct() → % change on node costs (e.g. New Game+),  busyElsewhere(staffId) → reason | null (e.g. on a project)
+//   workOf(node) → the work needed to finish it, in the same units as perDay (default: its cost)
 //   onComplete(node, { staffId }) after the actions have fired
 //   extraCostBlock(node) → reason | null, payExtraCost(node): a second price paid on the first start (e.g. prestige)
 // A worker can be on one queue only, and never while busyElsewhere says they are busy.
@@ -83,6 +85,12 @@ export class ResearchSystem {
   costOf(nodeOrId) {
     const n = typeof nodeOrId === 'string' ? this.byId[nodeOrId] : nodeOrId;
     return Math.max(1, Math.round(n.cost * (1 + (this.hooks.costPct?.() ?? 0) / 100)));
+  }
+
+  // Work needed to finish a node (its cost, unless the game's workOf hook gives a separate work amount).
+  workOf(nodeOrId) {
+    const n = typeof nodeOrId === 'string' ? this.byId[nodeOrId] : nodeOrId;
+    return this.hooks.workOf?.(n) ?? this.costOf(n);
   }
 
   queueOf(nodeId) {
@@ -219,12 +227,12 @@ export class ResearchSystem {
     const q = this.queues[i];
     const rate = this.perDay(i);
     if (!q?.nodeId || rate <= 0) return Infinity;
-    return Math.ceil((this.costOf(q.nodeId) - (this.progress[q.nodeId] ?? 0)) / rate);
+    return Math.ceil((this.workOf(q.nodeId) - (this.progress[q.nodeId] ?? 0)) / rate);
   }
 
   fraction(id) {
     if (this.isDone(id)) return 1;
-    return Math.min(1, (this.progress[id] ?? 0) / this.costOf(id));
+    return Math.min(1, (this.progress[id] ?? 0) / this.workOf(id));
   }
 
   // One day of research on every open queue.
@@ -234,7 +242,7 @@ export class ResearchSystem {
       const rate = this.perDay(i);
       if (rate <= 0) return;
       this.progress[q.nodeId] = (this.progress[q.nodeId] ?? 0) + rate;
-      if (this.progress[q.nodeId] >= this.costOf(q.nodeId)) this.complete(q.nodeId);
+      if (this.progress[q.nodeId] >= this.workOf(q.nodeId)) this.complete(q.nodeId);
     });
   }
 

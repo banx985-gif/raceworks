@@ -35,7 +35,19 @@ export const GARAGE_LOOK = {
   doorway: 'rgba(242,178,51,0.35)',
   okFill: 'rgba(46,170,90,0.35)',
   badFill: 'rgba(216,53,42,0.38)',
+  // Milestone 25: the Ghost Annex (F35's secret room) — a dark room of its own below the building
+  ghostFloorA: '#3D424D',
+  ghostFloorB: '#363B45',
+  ghostGrout: '#2A2E36',
+  ghostWall: '#4E5464',
+  ghostSide: '#454B59',
+  ghostCap: '#1B1D22',
+  ghostStripe: '#7A5CFF',
+  ghostText: '#D7DBE4',
 };
+// Milestone 25: the Ghost Cat (SEC-X-02's reward, mascots/mascot_05) sits in the garage's front-left corner by the door,
+// on every team on the device. width: its drawn width in cells. A slow breath and a tail-flick tilt every few seconds.
+export const MASCOT = { art: 'mascot_05', col: 1.55, row: 15.35, width: 1.1, breathSecs: 2.6, flickEvery: 5.5, flickSecs: 0.5 };
 
 // Stations (Milestone 10): every facility that can stand in the garage — bible F01–F15 and the rest spot — from
 // data/facilities.js. Where they stand is the team's layout (core/FacilitySystem, src/systems/garageFacilities.js),

@@ -229,6 +229,24 @@ export const FACILITIES = [
     art: 'facility_f33', size: { w: 2, h: 2 }, draw: { width: 1.06, drop: 0.3 },
     purpose: 'Wind, rain and track temperature: better race forecasts (weather comes later).',
   },
+  // Milestone 25: the two secret facilities (bible §19 F34 / F35, §36.4). Never in the shop until their secret is found
+  // (unlock.secret); their effects are STORED for later systems (secret-part research, prestige builds, the rival clue hub).
+  // F35 opens the Ghost Annex (EXPANSIONS below), a separate room it can stand in.
+  {
+    id: 'F34', name: 'Black Lab', role: 'Secret', unlock: { secret: 'SEC-FAC-01' }, cost: 18000,
+    effectText: 'Secret part research +20%; unlocks prestige experiments',
+    effects: [{ key: 'researchSpeedPct.secret', value: 20 }, { key: 'unlock.prestigeExperiments', value: 1 }],
+    art: 'facility_f34', size: { w: 3, h: 3 }, draw: { width: 1.02, drop: 0.3 },
+    purpose: 'A room that is not on the floor plan: secret-part research and prestige experiments.',
+  },
+  {
+    id: 'F35', name: 'Ghost Garage', role: 'Secret', unlock: { secret: 'SEC-FAC-02' }, cost: 22000,
+    effectText: 'Prestige car build speed +15%; secret-rival clue hub',
+    effects: [{ key: 'prestigeBuildPct', value: 15 }, { key: 'unlock.rivalClueHub', value: 1 }],
+    art: 'facility_f35', size: { w: 3, h: 3 }, draw: { width: 1.02, drop: 0.3 },
+    purpose: 'Ghostline’s old annex: prestige cars come together faster here.',
+    secretRoom: 'ghost', // built into the Ghost Annex when there is room
+  },
 ];
 
 // The rest spot (Milestone 1; Milestone 8 art): not a bible facility — it stays, can be moved, costs nothing.

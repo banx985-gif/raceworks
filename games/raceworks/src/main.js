@@ -16,8 +16,10 @@
 // Milestone 23: events and the Inbox (src/systems/events.js): a major event is a card (src/ui/eventCard.js) that pauses
 // the calendar, a minor one a strip under the top bar; never on a race screen; the top bar's Inbox has the unread badge.
 // ?debug=1&events=0 mutes them for the older browser checks (no rolled events; major cards go straight to the Inbox).
-// Milestone 24: the Secret Condition Engine (src/systems/secrets.js). The published game has no rules yet (M25 adds the
-// 34); ?debug=1 loads the four synthetic test rules, and the Rumour Archive / Inbox get the why-false inspector.
+// Milestone 24: the Secret Condition Engine (src/systems/secrets.js); ?debug=1 gives the Rumour Archive / Inbox the why-false
+// inspector. Milestone 25: the game runs the 34 real secrets (data/secrets.js SECRET_RULES); ?debug=1&synthetic=1 loads the
+// four M24 synthetic test rules instead (the M24 browser check), and the inspector can force any one secret (it sets the
+// competitive-invalid flag). A Legendary / Prestige arrival's portrait loads when it arrives.
 import { THEME, font } from '../../../core/Theme.js';
 import { EventBus } from '../../../core/EventBus.js';
 import { Rng } from '../../../core/Rng.js';
@@ -72,7 +74,7 @@ import { drawResearchBanner, researchBannerHeight } from './ui/researchBanner.js
 import { createEventCard } from './ui/eventCard.js'; // Milestone 23
 import { NODE } from './systems/research.js';
 import { comboById } from '../data/combos.js';
-import { SYNTHETIC_RULES } from '../data/secrets.js'; // Milestone 24 (?debug=1 only)
+import { SYNTHETIC_RULES, SECRET_RULES } from '../data/secrets.js'; // Milestone 24 (synthetic: ?debug=1&synthetic=1 only) · Milestone 25
 import { createRecruitScreen } from './screens/RecruitScreen.js';
 import { createTrainScreen } from './screens/TrainScreen.js';
 import { checkStaffData } from './systems/staffCheck.js';
@@ -187,7 +189,9 @@ debug.log(`seeded rng check: ${rng.int(0, 9999)} (same every reload)`);
 // ---------------------------------------------------------------------------
 // The team (Milestone 3): the calendar, the three starters and the save (src/app/Team.js). The top bar's
 // Pause / 1× / 2× / 4× drive its core Clock, which now ticks days.
-const team = new Team({ bus, seed: 'raceworks', secretRules: debug.enabled ? SYNTHETIC_RULES : [] });
+// Milestone 25: a Legendary / Prestige arrival's portrait loads as it arrives (its event card shows it).
+bus.on('recruit:arrival', ({ card }) => card?.art && assets.isPending?.(card.art) && assets.ensure([card.art]));
+const team = new Team({ bus, seed: 'raceworks', secretRules: debug.enabled && new URLSearchParams(window.location.search).get('synthetic') === '1' ? SYNTHETIC_RULES : SECRET_RULES });
 const clock = team.clock;
 let teamReady = false;
 bus.on('clock:speed', ({ speed }) => debug.log(speed ? `speed ${speed}×` : 'game paused'));
@@ -795,6 +799,8 @@ async function openTeam(n) {
   activeSlot = n;
   team.events.muted = debug.enabled && PARAMS.get('events') === '0'; // Milestone 23 (older browser checks)
   assets.ensure(team.roster.map((s) => s.art).filter((k) => assets.isPending(k))); // Milestone 12: hires' portraits
+  // Milestone 25: a waiting special arrival's portrait (its Inbox card and the Special tab show it)
+  assets.ensure(team.recruitment.cardsOf('special').map((c) => c.art).filter((k) => k && assets.isPending(k)));
   garage.loadTeam();
   teamReady = true;
   const acc = await slots.loadAccount();

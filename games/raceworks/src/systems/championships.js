@@ -69,7 +69,7 @@ export function createChampionships({ bus, team }) {
       const locked = api.unlockWhy(id);
       if (locked) return locked;
       if (api.current) return api.current.id === id ? 'Your championship now' : `One at a time: finish the ${champById(api.current.id).name} first`;
-      if (!api.eligibleCar(id)) return `Needs a ${c.classText} car`;
+      if (!api.eligibleCar(id)) return /car$/i.test(c.classText) ? `Needs ${c.classText[0].toLowerCase()}${c.classText.slice(1)}` : `Needs a ${c.classText} car`; // (Milestone 25: C11's words already end in "car")
       if (team.races.current) return 'Finish the race weekend in progress first';
       if (!team.money.affordable(CHAMP_BANDS[id].entry)) return `Entry ${fmt(CHAMP_BANDS[id].entry)} Credits`;
       return null;
@@ -104,11 +104,15 @@ export function createChampionships({ bus, team }) {
       const today = team.clock.totalDays;
       return { index: k.round, total: c.rounds, trackId: c.tracks[k.round], due, daysAway: Math.max(0, due - today), ready: today >= due };
     },
-    // The teams in this championship's field (bible §28: from their first championship on; R08 only under the override).
+    // The teams in this championship's field (bible §28: from their first championship on). Milestone 25: R08 Ghostline
+    // once SEC-RIVAL-01 is found, in the World-tier championships (C08–C12, "elite events" — PLACEHOLDER), or under the
+    // ?debug=1 override.
     rivalPool(id) {
       const i = bandIndex(id);
+      const found = new Set(team.secrets?.unlockedIds?.() ?? []);
+      const elite = champById(id)?.tier === 'world';
       return Object.entries(RIVAL_TEAMS)
-        .filter(([, t]) => (t.secret ? api.debugSecrets : bandIndex(t.first) <= i || (i >= bandIndex('C11') && bandIndex(t.first) >= 0)))
+        .filter(([, t]) => (t.secret ? api.debugSecrets || (found.has(t.secret) && elite) : bandIndex(t.first) <= i || (i >= bandIndex('C11') && bandIndex(t.first) >= 0)))
         .map(([tid]) => tid);
     },
     raceConfig() {
@@ -155,7 +159,8 @@ export function createChampionships({ bus, team }) {
         team.money.economy.add('credits', band.title, `Title bonus: ${c.name}`, 'championship');
         team.money.reputation.add(band.titleRep, `Champions: ${c.name}`);
       }
-      const rec = { id: k.id, year: k.year, pos: me?.pos ?? null, points: me?.points ?? 0, title, day: team.clock.totalDays, standings: api.standings().map((r) => ({ id: r.id, name: r.name, team: r.team, points: r.points, wins: r.wins, podiums: r.podiums, pos: r.pos, isPlayer: r.isPlayer })) };
+      // (Milestone 25: entered + carNumber for the secrets' season facts)
+      const rec = { id: k.id, entered: k.entered, carNumber: k.carNumber ?? null, year: k.year, pos: me?.pos ?? null, points: me?.points ?? 0, title, day: team.clock.totalDays, standings: api.standings().map((r) => ({ id: r.id, name: r.name, team: r.team, points: r.points, wins: r.wins, podiums: r.podiums, pos: r.pos, isPlayer: r.isPlayer })) };
       api.history.push(rec);
       api.current = null;
       const fresh = trophies.check((rule) => api.titles().includes(rule.title), { day: rec.day });

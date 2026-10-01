@@ -71,6 +71,9 @@ export const STAFF_PORTRAITS = Object.fromEntries(ALL_STAFF.map((d) => d.art).fi
 import { SPONSORS } from './sponsors.js';
 
 export const LATER_ASSETS = {
+  // Milestone 25: the Ghost Cat mascot (SEC-X-02's reward, in the garage). (The secret parts, F34 / F35, R08's logo and the
+  // V17–V20 families are already in the lists below.)
+  mascot_05: 'assets/images/mascots/mascot_05.png',
   // Milestone 21: the eight sponsor logos (the Sponsor sheet)
   ...Object.fromEntries(SPONSORS.map((s) => art('logos', s.logo))),
   // Milestone 20: the rival logos, the Club / National / World trophies and the standings / rival icons (the Compete sheet)

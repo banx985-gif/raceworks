@@ -53,6 +53,7 @@ import { courseFromTrack } from '../race/lapCourse.js';
 import { strategyProfile, rivalProfile, forecastOf } from './raceStrategy.js';
 
 const HISTORY_KEEP = 30;
+const RATING_STATS = ['SPD', 'ACC', 'COR', 'BRK', 'REL', 'EFF', 'TYR']; // Milestone 25: a car's rating = the mean of these
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const TYRE_WEAR_LIMIT = AUTO.pitWear; // "laps before a stop": when the crew would pit
@@ -500,7 +501,12 @@ export function createRaces({ bus, team }) {
       const swingWin = race.kind === 'weekend' ? api.strategySwing(me) : null;
       // Milestone 24: the race modes used — manual = any command of yours other than switching Auto on; drive = a Drive Stint
       const modes = { manual: (sim.commands ?? []).some((c) => c.id === me?.id && !(c.type === 'auto' && c.value)), drive: (race.stints?.length ?? 0) > 0 };
-      const entry = { champ: race.champ ?? null, swingWin, wet: !!result.weather?.wet, n: race.n, kind: race.kind, trackId: race.trackId, laps: race.laps, day: team.clock.totalDays, carNumber: race.carNumber, seed: race.seed, result, wear, prize, reputation, grid: race.grid, quali: race.quali ?? null, setupScore: race.quali?.setupScore ?? null, crew: race.crew ?? [], sponsors: race.sponsors ?? [], telemetry: !!race.telemetry, eff: race.entries.find((e) => e.isPlayer)?.car?.EFF ?? null, fuelStart: race.entries.find((e) => e.isPlayer)?.fuel ?? null, modes, stints: (race.stints ?? []).length }; // (Milestone 21: sponsor / contract facts)
+      // Milestone 25: the car ratings (bible §36.6 / §36.8): the mean of the seven car stats, yours and the rest of the field's
+      const playerE = race.entries.find((e) => e.isPlayer);
+      const rating = (car) => (car ? Math.round((RATING_STATS.reduce((t, k) => t + (car[k] ?? 0), 0) / RATING_STATS.length) * 10) / 10 : 0);
+      const others = race.entries.filter((e) => !e.isPlayer).map((e) => rating(e.car));
+      const ratings = { car: rating(playerE?.car), field: others.length ? Math.round((others.reduce((t, v) => t + v, 0) / others.length) * 10) / 10 : 0 };
+      const entry = { raceType: race.raceType ?? 'standard', driver: playerE?.driverId ?? null, ratings, champ: race.champ ?? null, swingWin, wet: !!result.weather?.wet, n: race.n, kind: race.kind, trackId: race.trackId, laps: race.laps, day: team.clock.totalDays, carNumber: race.carNumber, seed: race.seed, result, wear, prize, reputation, grid: race.grid, quali: race.quali ?? null, setupScore: race.quali?.setupScore ?? null, crew: race.crew ?? [], sponsors: race.sponsors ?? [], telemetry: !!race.telemetry, eff: race.entries.find((e) => e.isPlayer)?.car?.EFF ?? null, fuelStart: race.entries.find((e) => e.isPlayer)?.fuel ?? null, modes, stints: (race.stints ?? []).length }; // (Milestone 21: sponsor / contract facts)
       api.history.push(entry);
       if (api.history.length > HISTORY_KEEP) api.history.shift();
       api.current = null;
