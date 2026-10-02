@@ -342,6 +342,7 @@ export function createEvents({ bus, team, seed = 'raceworks' }) {
     fireItemEvent: (id, params = {}) => (BY_ID[id] ? fireNow(id, params) : null), // Milestone 25b: the well-wisher
     // Milestone 26: a minor event (an achievement earned): its strip only when no other strip is showing or waiting —
     // else straight to the Inbox, unread — so a burst never holds up a card. params.icon: its own icon.
+    fire: (id, params = {}) => (BY_ID[id] ? fireNow(id, params) : null), // Milestone 27: the game's own major cards (EV_FINAL_YEAR)
     announce: (id, params = {}) => (BY_ID[id] ? fireNow(id, { ...params, quietIfBusy: true }) : null),
     // Milestone 25b: a plain note (an item arrived, the store is full): a minor strip and an Inbox line, not an event.
     //   It only shows a strip when no other strip is showing or waiting (else straight to the Inbox, unread), so it never

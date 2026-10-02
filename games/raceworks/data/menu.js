@@ -54,7 +54,7 @@ export const FACILITY_ACTIONS = {
   F01: CAR, F02: CAR, F03: CAR, F04: CAR, F05: CAR, F06: CAR, F07: { row: 'raceWeekend', label: 'Race weekend' }, F08: CAR, F09: CAR, F10: CAR,
   F11: RESEARCH, F12: TRAIN, F13: { row: 'store', label: 'Parts Store' }, F14: { row: 'carGarage', label: 'Car Garage' }, F15: { row: 'sponsors', label: 'Sponsors' },
   F16: RESEARCH, F17: RESEARCH, F18: CAR, F19: CAR, F20: RESEARCH, F21: CAR, F22: { row: 'raceWeekend', label: 'Race weekend' }, F23: { row: 'raceWeekend', label: 'Race weekend' },
-  F24: RESEARCH, F30: CAR, F32: { row: 'championships', label: 'Championships' }, F33: { row: 'raceWeekend', label: 'Race weekend' }, F34: RESEARCH, F35: CAR,
+  F24: RESEARCH, F29: { row: 'rumourArchive', label: 'Rumour Archive' }, F30: CAR, F32: { row: 'championships', label: 'Championships' }, F33: { row: 'raceWeekend', label: 'Race weekend' }, F34: RESEARCH, F35: CAR,
   REST: { row: 'roster', label: 'Roster' },
 };
 

@@ -1,7 +1,8 @@
 // Facilities and the garage floor (Milestone 10, bible §19 / §19.1 / §6.4). Plain data only: the shared
 // core/FacilitySystem holds the layout, src/systems/garageFacilities.js adds money, unlocks and the effect queries.
 //
-// Every facility: id, name, role (bible §6.4 station role), unlock ({} = Start, { rank }, { research }), cost (bible),
+// Every facility: id, name, role (bible §6.4 station role), unlock ({} = Start, { rank }, { research }, Milestone 27:
+// { year, trophies }), cost (bible),
 // effectText (the bible's words), effects [{ key, value }] (summed by core/FacilitySystem.total(key)), art,
 // size { w, h } in grid cells (col × row; not in the bible — chosen to match each picture, see DECISIONS.md),
 // draw { width: art width as a share of the footprint's drawn width, drop: how far below the footprint's front corner
@@ -23,6 +24,7 @@
 //   forecast                   + race forecast accuracy — STORED: forecasts arrive with weather (later milestone)
 //   unlock.<feature>           1 = that feature is open: Auto Training (Milestone 12: staff training needs it) — STORED:
 //                              manual drills (Milestone 14) and the sponsor portfolio (Milestone 21: +1 sponsor offer a month).
+//   clueAfterEnding            Milestone 27: 1 = after the Year-16 ending every secret's clue is one more stage on (F29)
 //   trainingSeats.<slot>       Milestone 12: training capacity — simulator = people on the Driver Simulator course at
 //                              once; study = extra training places for the other courses (data/training.js)
 
@@ -229,6 +231,15 @@ export const FACILITIES = [
     art: 'facility_f33', size: { w: 2, h: 2 }, draw: { width: 1.06, drop: 0.3 },
     purpose: 'Wind, rain and track temperature: better race forecasts (weather comes later).',
   },
+  // Milestone 27: the Heritage Room (bible §19 F29 "NG+ clue gain +1 after ending"): from Year 8 with 3 trophies; after the
+  // Year-16 ending it adds one more clue stage to every secret in the Rumour Archive (on top of the ending's own +1).
+  {
+    id: 'F29', name: 'Heritage Room', role: 'Showcase', unlock: { year: 8, trophies: 3 }, cost: 6800,
+    effectText: 'NG+ clue gain +1 after ending',
+    effects: [{ key: 'clueAfterEnding', value: 1 }],
+    art: 'facility_f29', size: { w: 2, h: 2 }, draw: { width: 1.06, drop: 0.3 },
+    purpose: 'Old cars, old photos, old stories: after the Year-16 ending its rumours run one step clearer.',
+  },
   // Milestone 25: the two secret facilities (bible §19 F34 / F35, §36.4). Never in the shop until their secret is found
   // (unlock.secret); their effects are STORED for later systems (secret-part research, prestige builds, the rival clue hub).
   // F35 opens the Ghost Annex (EXPANSIONS below), a separate room it can stand in.
@@ -271,16 +282,16 @@ export const SELL_REFUND_PCT = 50; // bible §19
 
 // The garage floor (bible §19.1). The Starter Garage is the Milestone 1 room (12 × 16 cells); each wing is a block of
 // floor that opens later. Walls run along row 0 and col 0 over the whole building, so a wing grows the room forward.
-//   rank: the rank that opens it (automatically, no cost — see DECISIONS.md). openInM10: false = it stays locked
-//   (greyed floor) whatever the rank until its milestone. secret: never drawn until opened (the Ghost Annex, F35).
+//   rank: the rank that opens it (automatically, no cost — see DECISIONS.md; M10 opened the Bay Extension, M27 the
+//   three higher wings, greyed floor until then). secret: never drawn until opened (the Ghost Annex, F35).
 export const STARTER_AREA = { id: 'starter', name: 'Starter Garage', cols: 12, rows: 16 };
 export const EXPANSIONS = [
-  { id: 'bay', name: 'Bay Extension', rank: 'D', col: 12, row: 0, w: 4, h: 16, requires: [], openInM10: true },
-  { id: 'engineering', name: 'Engineering Wing', rank: 'C', col: 0, row: 16, w: 16, h: 6, requires: ['bay'], openInM10: false },
-  { id: 'raceOps', name: 'Race Operations Wing', rank: 'B', col: 16, row: 0, w: 4, h: 22, requires: ['engineering'], openInM10: false },
-  { id: 'worldAnnex', name: 'World Team Annex', rank: 'A', col: 0, row: 22, w: 20, h: 4, requires: ['raceOps'], openInM10: false },
+  { id: 'bay', name: 'Bay Extension', rank: 'D', col: 12, row: 0, w: 4, h: 16, requires: [] },
+  { id: 'engineering', name: 'Engineering Wing', rank: 'C', col: 0, row: 16, w: 16, h: 6, requires: ['bay'] },
+  { id: 'raceOps', name: 'Race Operations Wing', rank: 'B', col: 16, row: 0, w: 4, h: 22, requires: ['engineering'] },
+  { id: 'worldAnnex', name: 'World Team Annex', rank: 'A', col: 0, row: 22, w: 20, h: 4, requires: ['raceOps'] },
   // F35 Ghost Garage's secret room (SEC-FAC-02): a separate room with its own entrance, below the building. Hidden.
-  { id: 'ghost', name: 'Ghost Annex', secret: 'SEC-FAC-02', col: 0, row: 27, w: 6, h: 4, requires: [], entrance: { col: 0, row: 27 }, openInM10: false },
+  { id: 'ghost', name: 'Ghost Annex', secret: 'SEC-FAC-02', col: 0, row: 27, w: 6, h: 4, requires: [], entrance: { col: 0, row: 27 } },
 ];
 
 // Where people come in (always kept clear; every station must be reachable from here): the door in the left wall.
@@ -358,7 +369,7 @@ export const FACILITY_LEVELS = {
   RESEARCH_BUILD_RANK: 'C',
   SECRET_BUILD_RANK: 'A',
 };
-export const NO_SCALE = ['carBays', 'telemetry', 'reliabilityData'];
+export const NO_SCALE = ['carBays', 'telemetry', 'reliabilityData', 'clueAfterEnding'];
 export const NO_SCALE_PREFIX = ['unlock.', 'trainingSeats.'];
 export const LEVEL_BONUS = {
   F02: [{ key: 'workPct.mechanic', value: 4 }], // Pit Bay: the crew works faster on the car
@@ -366,4 +377,5 @@ export const LEVEL_BONUS = {
   F15: [{ key: 'revealReputation', value: 2 }], // Sponsor Wall: a better-shown reveal
   F21: [{ key: 'dev.EFF', value: 2 }], // Hybrid Lab
   F30: [{ key: 'workPct.mechanic', value: 3 }], // Prototype Bay
+  F29: [{ key: 'revealReputation', value: 2 }], // Heritage Room (Milestone 27): the history on show
 };

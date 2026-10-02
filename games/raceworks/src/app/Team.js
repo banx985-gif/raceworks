@@ -47,6 +47,9 @@
 // Milestone 26: team.achievements (src/systems/achievements.js) — the 30 achievements (account-wide, on the M24 engine
 //   and its triggers), the Records screen's records and the completion metrics; their account half is in the account
 //   save (main.js gives it; .sync() after a load rebuilds the records from the save).
+// Milestone 27: team.ending (src/systems/ending.js) — the Year-16 ending on core/CampaignEnding: the 1,000-point grade, the
+//   ceremony's cards, the archived run (Hall of Runs) and Prestige Tokens on the account; postgame carries on in Year 17+.
+//   team.prestigeTokens = the secrets' tokens + the endings'. The slot card shows "ended Grade X".
 import { Clock } from '../../../../core/Clock.js';
 import { Rng } from '../../../../core/Rng.js';
 import { StaffSystem } from '../../../../core/StaffSystem.js';
@@ -77,6 +80,7 @@ import { createEvents } from '../systems/events.js';
 import { createSecrets } from '../systems/secrets.js';
 import { createItems } from '../systems/items.js'; // Milestone 25b
 import { createAchievements } from '../systems/achievements.js'; // Milestone 26
+import { createEnding } from '../systems/ending.js'; // Milestone 27
 
 // A new game's setup when none is given (tests, and saves from before Milestone 4b).
 export const DEFAULT_SETUP = { teamName: 'RACEWORKS', principal: 'Principal', colour: 'red', founderId: 'MEC01' };
@@ -155,6 +159,10 @@ export const SAVE_MIGRATIONS = {
   //   met, staff tiers reached; the race records' best lap and pit errors). Nothing to change here — achievements.load()
   //   rebuilds the run log from what the save holds and the race records read no lap record / no pit error.
   19: (record) => record,
+  //   20 → 21 (Milestone 27): the Year-16 ending (reached, the grade and the ceremony's cards, ceremony seen, the archive
+  //   id, the Year-16 notices shown). Nothing to change here — ending.load() gives a save without it no ending yet (a save
+  //   already past Year 16 gets it on its next day tick).
+  20: (record) => record,
 };
 
 const blankContractRecords = () => ({ partEvents: {}, facts: {} });
@@ -200,7 +208,7 @@ export class Team {
     });
     this.money = createTeamMoney({ bus, seed, clock: this.clock, staff: this.staff, cars: this.cars, revealBonus: () => this.facilities.bonus('revealReputation'), generateOffer: (rng, taken) => contractTerms(this, rng, taken), onPaid: (c) => this.contractPaid(c) }); // (Milestone 21: the §29 contracts)
     // (Milestone 21: the sponsors' perks join the research bonuses in the one effect query)
-    this.facilities = createGarageFacilities({ bus, today: () => this.clock.totalDays, money: this.money, research: () => new Set(this.unlocks.research), secrets: () => new Set(this.secrets?.unlockedIds() ?? []), extraBonus: (key) => this.research.bonus(key) + (this.sponsors?.bonus(key) ?? 0) + (this.events?.bonus(key) ?? 0), extraKeys: () => [...this.research.bonusKeys(), ...(this.sponsors?.bonusKeys() ?? []), ...(this.events?.bonusKeys() ?? [])] }); // Milestone 10 (Milestone 23: + the events' timed modifiers)
+    this.facilities = createGarageFacilities({ bus, today: () => this.clock.totalDays, progress: () => ({ year: this.clock.year, trophies: this.championships?.trophyList().length ?? 0 }), money: this.money, research: () => new Set(this.unlocks.research), secrets: () => new Set(this.secrets?.unlockedIds() ?? []), extraBonus: (key) => this.research.bonus(key) + (this.sponsors?.bonus(key) ?? 0) + (this.events?.bonus(key) ?? 0), extraKeys: () => [...this.research.bonusKeys(), ...(this.sponsors?.bonusKeys() ?? []), ...(this.events?.bonusKeys() ?? [])] }); // Milestone 10 (Milestone 23: + the events' timed modifiers)
     this.research = createResearch({ bus, team: this }); // Milestone 11
     this.combos = createCombos({ bus, team: this }); // Milestone 22 (after research: a discovery pays RP)
     this.races = createRaces({ bus, team: this }); // Milestone 6: the race being run (fixed seed) and the results
@@ -215,6 +223,7 @@ export class Team {
     this.items = createItems({ bus, team: this, seed }); // Milestone 25b
     this.secrets = createSecrets({ bus, team: this, rules: secretRules }); // Milestone 24 (after everything: facts are committed first)
     this.achievements = createAchievements({ bus, team: this }); // Milestone 26 (after the secrets: their facts and records first)
+    this.ending = createEnding({ bus, team: this }); // Milestone 27 (last: every system's month-end runs before the ending)
     this.runId = null;
     this.recruitment.extraBusy = (id) => {
       const t = this.training.trainingOf(id);
@@ -282,6 +291,12 @@ export class Team {
     this.secrets.newGame(); // Milestone 24
     this.achievements.newGame(); // Milestone 26 (the account's achievements, records and completion stay)
     if (this.achievements.attached) this.achievements.sync(); // the starting parts, garage and staff count for completion
+    this.ending.newGame(); // Milestone 27 (the account's Hall of Runs and tokens stay)
+  }
+
+  // Milestone 27: every Prestige Token on this device — the secrets' (bible §36) and the endings' (by grade).
+  get prestigeTokens() {
+    return (this.secrets?.prestigeTokens ?? 0) + (this.ending?.tokensTotal ?? 0);
   }
 
   // Milestone 21: a development contract paid — its rewards beyond Credits / RP / Reputation (bible §29): sponsor
@@ -395,7 +410,9 @@ export class Team {
       month: this.clock.month,
       rank: this.money.rank,
       ngPlus: SLOT_PLACEHOLDERS.ngPlus,
-      grade: SLOT_PLACEHOLDERS.grade,
+      grade: this.ending.result?.grade?.band ?? SLOT_PLACEHOLDERS.grade, // Milestone 27: "ended Grade A"
+      ended: this.ending.reached,
+      worldCrown: !!this.ending.result?.worldCrown,
       playSeconds: Math.round(this.playSeconds),
       cars: this.cars.cars.count,
     };
@@ -443,6 +460,7 @@ export class Team {
       secrets: this.secrets.serialize(), // Milestone 24
       items: this.items.serialize(), // Milestone 25b
       achievements: this.achievements.serialize(), // Milestone 26
+      ending: this.ending.serialize(), // Milestone 27
     };
   }
 
@@ -477,6 +495,7 @@ export class Team {
     this.secrets.load(data.secrets ?? null); // none before Milestone 24: no rule state, records rebuilt from the save
     this.achievements.load(data.achievements ?? null); // none before Milestone 26: the run log rebuilt from the save
     if (this.achievements.attached) this.achievements.sync(); // records, completion and achievements from what it holds
+    this.ending.load(data.ending ?? null); // none before Milestone 27: no ending yet
   }
 
   // A team saved before Milestone 5 had no money: it gets the §30.2 starting state today, and each car it already

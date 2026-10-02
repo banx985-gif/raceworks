@@ -617,7 +617,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
         //   (Milestone 26, the hidden denominator: before the ending only how many were found, never how many exist)
         ...(team.secrets?.rules.length ? [{ title: team.secrets.postEnding ? `Secrets · ${team.secrets.foundCount()} of ${team.secrets.rules.length} found` : `Secrets · ${team.secrets.foundCount()} found`, lines: secretLines() }] : []),
         // Milestone 25: account-wide rewards — accolades and switches, Prestige Tokens, the final page
-        ...(team.secrets?.accolades().length || team.secrets?.prestigeTokens ? [{ title: 'Accolades', lines: [...team.secrets.accolades().map((a) => ({ text: a.text, color: C.good })), { text: `Prestige Tokens: ${team.secrets.prestigeTokens}`, color: C.actionDark }] }] : []),
+        ...(team.secrets?.accolades().length || team.prestigeTokens ? [{ title: 'Accolades', lines: [...team.secrets.accolades().map((a) => ({ text: a.text, color: C.good })), { text: `Prestige Tokens: ${team.prestigeTokens}`, color: C.actionDark }] }] : []),
         ...(team.secrets?.finalPage ? [{ title: 'The final page', lines: [{ text: team.secrets.finalPage, color: C.actionDark }] }] : []),
         ...(debug ? [{ columns: 1, buttons: [secretInspectorButton()] }] : []),
       ],

@@ -30,7 +30,8 @@ export const FACILITY_DEFS = Object.fromEntries([...FACILITIES.map(leveled), { .
 // Milestone 25: secrets() → the secret ids found (team.unlocks.secrets): a secret facility (F34 / F35, unlock.secret) is in
 // the shop only once its secret is found, and the Ghost Annex (a secret room) opens with SEC-FAC-02.
 // Milestone 25b: today() → the game day (upgrades take days; they finish on 'clock:day').
-export function createGarageFacilities({ bus, money, research = () => new Set(), secrets = () => new Set(), extraBonus = () => 0, extraKeys = () => [], today = () => 0 }) {
+// Milestone 27: progress() → { year, trophies } for an unlock by year and trophies won (F29 Heritage Room).
+export function createGarageFacilities({ bus, money, research = () => new Set(), secrets = () => new Set(), extraBonus = () => 0, extraKeys = () => [], today = () => 0, progress = () => ({ year: 1, trophies: 0 }) }) {
   const system = new FacilitySystem({
     bus,
     levels: { max: FACILITY_LEVELS.max, mult: FACILITY_LEVELS.mult }, // Milestone 25b
@@ -52,12 +53,13 @@ export function createGarageFacilities({ bus, money, research = () => new Set(),
   const hasRank = (id) => rankIndex() >= rankIndexOf(RANKS, id);
 
   // --- expansions (bible §19.1) ------------------------------------------------------------------------------------
-  // A wing opens by itself when the team reaches its rank (Milestone 10: the Bay Extension only; the higher wings stay
-  // locked, greyed floor; the Ghost Annex stays hidden). Returns the zones opened.
+  // A wing opens by itself, free, when the team reaches its rank (Bay Extension D, Engineering Wing C, Race Operations
+  // Wing B, World Team Annex A — in that order, each needs the one before; greyed floor until then). The Ghost Annex
+  // stays hidden until its secret. Returns the zones opened.
   function syncExpansions() {
     const opened = [];
     for (const z of EXPANSIONS) {
-      if (z.openInM10 && z.rank && !system.isOwned(z.id) && hasRank(z.rank) && system.openZone(z.id)) opened.push(z);
+      if (z.rank && !system.isOwned(z.id) && hasRank(z.rank) && system.openZone(z.id)) opened.push(z);
       if (z.secret && !system.isOwned(z.id) && secrets().has(z.secret) && system.openZone(z.id)) opened.push(z); // Milestone 25
     }
     return opened;
@@ -67,7 +69,7 @@ export function createGarageFacilities({ bus, money, research = () => new Set(),
   // Every wing and what state it is in: open · locked (greyed) · hidden.
   const expansions = () => [
     { id: STARTER_AREA.id, name: STARTER_AREA.name, state: 'open', col: 0, row: 0, w: STARTER_AREA.cols, h: STARTER_AREA.rows },
-    ...EXPANSIONS.map((z) => ({ ...z, state: system.isOwned(z.id) ? 'open' : z.secret ? 'hidden' : 'locked', why: z.openInM10 ? `Opens at Rank ${z.rank}` : `Rank ${z.rank} · opens in a later update` })),
+    ...EXPANSIONS.map((z) => ({ ...z, state: system.isOwned(z.id) ? 'open' : z.secret ? 'hidden' : 'locked', why: `Opens at Rank ${z.rank}` })),
   ];
 
   // --- levels (Milestone 25b, series common feature §3) -------------------------------------------------------------
@@ -154,6 +156,8 @@ export function createGarageFacilities({ bus, money, research = () => new Set(),
       if (u.secret && !secrets().has(u.secret)) return 'Secret'; // Milestone 25
       if (u.rank && !hasRank(u.rank)) return `Needs Rank ${u.rank}`;
       if (u.research && !research().has(u.research)) return `Needs ${nodeLabel(u.research)} research`;
+      if (u.year && progress().year < u.year) return `Needs Year ${u.year}`; // Milestone 27
+      if (u.trophies && progress().trophies < u.trophies) return `Needs ${u.trophies} trophies (${progress().trophies} so far)`;
       return null;
     },
     status(defId) {

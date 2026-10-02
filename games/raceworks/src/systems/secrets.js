@@ -267,7 +267,9 @@ export function createSecrets({ bus, team, rules = [] }) {
   const rawStage = (id) => engine.clueStage(id);
   // What the player sees: found → 4 for good; otherwise one more after the ending, plus any clue a reward gave (never
   // past 3 without finding it).
-  const bonusOf = (id) => (postEnding ? CLUE.postEndingBonus : 0) + (runClues[id] ?? 0) + (accountFlags()[`clue:${id}`] ?? 0);
+  // Milestone 27: + one more after the ending with a Heritage Room (F29, the garage's clueAfterEnding effect).
+  const afterEnding = () => (postEnding ? CLUE.postEndingBonus + (team.facilities?.bonus('clueAfterEnding') > 0 ? CLUE.heritageBonus : 0) : 0);
+  const bonusOf = (id) => afterEnding() + (runClues[id] ?? 0) + (accountFlags()[`clue:${id}`] ?? 0);
   const stage = (id) => {
     const s = rawStage(id);
     return s >= CLUE.discovered ? s : Math.min(CLUE.discovered - 1, s + bonusOf(id));

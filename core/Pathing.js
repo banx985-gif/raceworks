@@ -1,7 +1,22 @@
 // A* path finding on a Grid. 4-way moves by default; diagonals optional (never cut blocked corners).
 // Returns the tiles to walk through, NOT including the start tile, ending on the goal.
 // Returns [] if already there, or null if there is no way to reach the goal.
-export function findPath(grid, start, goal, { allowDiagonal = false, maxIterations = 10000 } = {}) {
+// Optional cache (CAREWORKS M28): when grid.pathCache is a Map, a path already found on the same grid version is handed
+// back as a fresh copy (A* is deterministic, so the result is exactly what a new search would find). Grids without one
+// behave as before. grid.pathCacheMax (default 4000) entries at most; the cache empties when full.
+export function findPath(grid, start, goal, opts = {}) {
+  const cache = grid.pathCache;
+  if (!cache) return search(grid, start, goal, opts);
+  const key = `${grid.version ?? 0}|${start.col},${start.row}|${goal.col},${goal.row}|${opts.allowDiagonal ? 1 : 0}|${opts.maxIterations ?? 10000}`;
+  let hit = cache.get(key);
+  if (hit === undefined) {
+    if (cache.size >= (grid.pathCacheMax ?? 4000)) cache.clear();
+    hit = search(grid, start, goal, opts);
+    cache.set(key, hit && hit.map((t) => ({ ...t })));
+  }
+  return hit && hit.map((t) => ({ ...t }));
+}
+function search(grid, start, goal, { allowDiagonal = false, maxIterations = 10000 } = {}) {
   if (!grid.inBounds(start.col, start.row) || grid.isBlocked(goal.col, goal.row)) return null;
   if (start.col === goal.col && start.row === goal.row) return [];
 

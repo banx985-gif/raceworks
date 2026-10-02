@@ -8,6 +8,8 @@ export class Grid {
     this.x = x; // world position of the grid's top-left corner
     this.y = y;
     this.blocked = new Uint8Array(cols * rows);
+    this.version = 0; // bumped whenever a tile changes (core/Pathing's optional path cache reads it)
+    this.pathCache = null; // optional: a Map — set it to let core/Pathing reuse paths on an unchanged grid
   }
 
   get width() {
@@ -31,7 +33,13 @@ export class Grid {
   }
 
   setBlocked(col, row, value = true) {
-    if (this.inBounds(col, row)) this.blocked[row * this.cols + col] = value ? 1 : 0;
+    if (!this.inBounds(col, row)) return;
+    const i = row * this.cols + col;
+    const v = value ? 1 : 0;
+    if (this.blocked[i] !== v) {
+      this.blocked[i] = v;
+      this.version++;
+    }
   }
 
   blockRect(col, row, w, h, value = true) {

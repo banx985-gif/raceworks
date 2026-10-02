@@ -58,6 +58,10 @@ import { SAVE_VERSION } from '../data/balance.js';
 import { SLOT_COUNT, FOUNDERS } from '../data/setup.js';
 import { createMainMenuScreen } from './screens/MainMenuScreen.js';
 import { createSlotsScreen } from './screens/SlotsScreen.js';
+import { createCeremonyScreen } from './screens/CeremonyScreen.js'; // Milestone 27
+import { createHallOfRunsScreen } from './screens/HallOfRunsScreen.js';
+import { createNgPlusScreen } from './screens/NgPlusScreen.js';
+import { ENDING_TEXT } from '../data/ending.js';
 import { createTeamSetupScreen } from './screens/TeamSetupScreen.js';
 import { createMenuHeader } from './ui/menuHeader.js';
 import { createRaceScreen } from './screens/RaceScreen.js';
@@ -101,11 +105,11 @@ const W = 1080;
 const BASE_H = 1920; // 9:16; taller phones grow the height (see Renderer)
 const MAX_H = 2640; // up to 9:22 fills edge to edge; taller still gets thin bars top and bottom
 const START_SCREEN = new URLSearchParams(window.location.search).get('screen') === 'test' ? 'test' : 'menu';
-const MENU_SCREENS = ['slots', 'setup']; // screens off the main menu: Back returns towards it
+const MENU_SCREENS = ['slots', 'setup', 'hall', 'ngplus']; // screens off the main menu: Back returns towards it (Milestone 27: the Hall of Runs, New Game+)
 const TEST_SCREENS = ['test', 'route']; // the Milestone 0 screens: pause button, full debug box
 const GAME_SCREENS = ['garage', 'roster', 'staff', 'carBuilder', 'car', 'cars', 'weekend', 'raceIntro', 'race', 'raceResult', 'research', 'recruit', 'train', 'medals'];
 const RACE_SCREENS = ['weekend', 'raceIntro', 'race', 'raceResult']; // Milestone 6: the garage calendar waits while a race is on // the game's screens: P pauses the game clock here
-const CALENDAR_WAITS = [...RACE_SCREENS, 'drill']; // Milestone 14: … and while a drill is played (its course must not end mid-drill)
+const CALENDAR_WAITS = [...RACE_SCREENS, 'drill', 'ceremony', 'ngplus']; // Milestone 14: … and while a drill is played (its course must not end mid-drill); Milestone 27: the ceremony
 // Screens opened from the garage (or from each other). A back stack remembers the way in (with each screen's
 // params: which person, which car), so the back button and the phone's Back retrace it one step at a time.
 const SUB_SCREENS = { roster: 'Roster', staff: 'Details', carBuilder: 'New car', car: 'Car', cars: 'Car Garage', weekend: 'Weekend', raceIntro: 'Race', race: 'Race', raceResult: 'Result', research: 'Research', recruit: 'Hire', train: 'Training', medals: 'Drills', drill: 'Drill' };
@@ -158,6 +162,8 @@ const loop = new FixedStepLoop({
       autosave.tick(dt);
       team.playSeconds += dt; // play time on the save-slot card (real seconds with a team open)
     }
+    // Milestone 27: the Year-16 ceremony comes up in the garage as soon as nothing else is on screen
+    if (teamReady && team.ending.pending && router.currentName === 'garage' && !sheet.active && !dialog.active && !eventCard.active && !pendingCar && !garage.buildMode) router.go('ceremony');
     if (pendingCar && (pendingCar.wait -= dt) <= 0) {
       const { number } = pendingCar;
       pendingCar = null;
@@ -409,6 +415,8 @@ team.combos.setRecords(comboRecords);
 team.secrets.setAccount({ load: async () => (slots ? ((await slots.loadAccount()).secrets ?? null) : null), save: (block) => saveAccountBlock('secrets', block) });
 // Milestone 26: achievements, records and completion — account-wide too (they survive slot deletes and New Game+)
 team.achievements.setAccount({ load: async () => (slots ? ((await slots.loadAccount()).achievements ?? null) : null), save: (block) => saveAccountBlock('achievements', block) });
+// Milestone 27: the Hall of Runs and the endings' Prestige Tokens — account-wide too
+team.ending.setAccount({ load: async () => (slots ? ((await slots.loadAccount()).ending ?? null) : null), save: (block) => saveAccountBlock('ending', block) });
 team.training.setDrillRecords(drillRecords);
 bus.on('stint:done', ({ record }) => drillRecords.recordStint(record)); // Milestone 18: Drive Stints on the account records
 // Milestone 20: the championship ladder — enter one (the fee on the ledger), race its next round (its race weekend).
@@ -693,6 +701,7 @@ const topBar = createTopBar({
   onInbox: () => openMenu('inbox'),
   onHelp: () => openMenu('help'),
   inboxCount: () => (teamReady ? team.events.unread : 0), // Milestone 23
+  dateTag: () => (teamReady && team.ending.postgame ? ENDING_TEXT.postgame : null), // Milestone 27
 });
 // The staff screens show the same bar with a back button (‹ Garage / ‹ Roster) instead of the long date.
 const screenBar = createTopBar({
@@ -792,6 +801,9 @@ function back() {
   else if (router.currentName === 'setup') {
     if (!setupScreen.onBack()) router.go(setupFrom, setupFrom === 'slots' ? { mode: slotsScreen.mode } : {});
   } else if (router.currentName === 'slots') router.go('menu');
+  else if (router.currentName === 'hall') router.go('slots', { mode: 'load' }); // Milestone 27
+  else if (router.currentName === 'ngplus') leaveNgPlus(ngPlusScreen.from);
+  else if (router.currentName === 'ceremony') ceremonyScreen.next(); // Back moves the ceremony on (its last card waits for a choice)
   else if (router.currentName === 'garage' && garage.buildMode) garage.setBuildMode(false);
   else if (router.currentName === 'race') {
     if (!raceScreen.onBack()) leaveRace(); // Milestone 18: during a Drive Stint, Back hands back first
@@ -810,7 +822,7 @@ function back() {
   return true;
 }
 const backNav = createBackNav({
-  depth: () => (dialog.active || (teamReady && eventCard.active) || MENU_SCREENS.includes(router.currentName) || sheet.active || router.currentName === 'route' || SUB_SCREENS[router.currentName] || (router.currentName === 'garage' && garage.buildMode) ? 1 : 0),
+  depth: () => (dialog.active || (teamReady && eventCard.active) || MENU_SCREENS.includes(router.currentName) || sheet.active || router.currentName === 'route' || router.currentName === 'ceremony' || SUB_SCREENS[router.currentName] || (router.currentName === 'garage' && garage.buildMode) ? 1 : 0),
   back,
 });
 
@@ -1022,6 +1034,7 @@ async function playSlot(n) {
     await accountChain; // (Milestone 24: any account write still on its way lands first)
     await team.secrets.loadAccount();
     await team.achievements.loadAccount(); // Milestone 26
+    await team.ending.loadAccount(); // Milestone 27
     team.load(data);
   } catch (err) {
     debug.log(`slot ${n} would not load: ${err.message}`);
@@ -1040,6 +1053,7 @@ async function startNewTeam(setup, n) {
   await accountChain;
   await team.secrets.loadAccount(); // Milestone 24
   await team.achievements.loadAccount(); // Milestone 26
+  await team.ending.loadAccount(); // Milestone 27
   team.newGame(setup);
   debug.log(`new team in slot ${n}: ${team.setup.teamName}, founder ${team.founder.id}`);
   await team.save();
@@ -1132,7 +1146,38 @@ const slotsScreen = createSlotsScreen({
   onReplace: confirmReplace,
   onDelete: confirmDelete,
   onBack: () => router.go('menu'),
+  onHall: () => goHall(), // Milestone 27
+  onNgPlus: (n, s) => router.go('ngplus', { from: 'slots', slot: n, summary: s.summary }),
 });
+// Milestone 27: the Year-16 ceremony, the Hall of Runs and the New Game+ stub.
+function endCeremony(then) {
+  team.ending.finishCeremony();
+  team.save();
+  then();
+}
+const ceremonyScreen = createCeremonyScreen({
+  layout,
+  assets,
+  team,
+  onContinue: () => endCeremony(() => router.go('garage')),
+  onNgPlus: () => endCeremony(() => router.go('ngplus', { from: 'ceremony' })),
+  sfx,
+  haptic,
+  reduced: () => !!settings.get('reducedMotion'),
+});
+let hallList = [];
+async function goHall() {
+  await accountChain;
+  hallList = slots ? ((await slots.loadAccount()).ending?.archive ?? []) : [];
+  router.go('hall');
+}
+const hallScreen = createHallOfRunsScreen({ layout, header, archive: () => hallList, onBack: () => router.go('slots', { mode: 'load' }) });
+// The stub goes back where it came from: the garage (postgame, Year 17) or the slot screen. It never changes anything.
+function leaveNgPlus(from) {
+  if (from === 'slots' || !teamReady) router.go('slots', { mode: 'load' });
+  else router.go('garage');
+}
+const ngPlusScreen = createNgPlusScreen({ layout, header, onBack: (from) => leaveNgPlus(from) });
 const setupScreen = createTeamSetupScreen({
   layout,
   assets,
@@ -1142,12 +1187,15 @@ const setupScreen = createTeamSetupScreen({
   onBack: () => router.go(setupFrom, setupFrom === 'slots' ? { mode: slotsScreen.mode } : {}),
 });
 
-if (debug.enabled) window.__rw = { hintLine, MENU_OPEN, openMenuRow, menuState, openSettings, syncMenuSlot, bottomItems, governor, lowFx, audio, haptics, openMenu, menus, comboRecords, slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, get events() { return team.events; }, eventCard, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, drillScreen, medalsScreen, drillRecords, taps: [] };
+if (debug.enabled) window.__rw = { ceremonyScreen, hallScreen, ngPlusScreen, goHall, get hallList() { return hallList; }, hintLine, MENU_OPEN, openMenuRow, menuState, openSettings, syncMenuSlot, bottomItems, governor, lowFx, audio, haptics, openMenu, menus, comboRecords, slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, get events() { return team.events; }, eventCard, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, drillScreen, medalsScreen, drillRecords, taps: [] };
 
 router
   .register('boot', bootScreen)
   .register('menu', menuScreen)
   .register('slots', slotsScreen)
+  .register('ceremony', ceremonyScreen) // Milestone 27
+  .register('hall', hallScreen)
+  .register('ngplus', ngPlusScreen)
   .register('setup', setupScreen)
   .register('garage', garage)
   .register('roster', rosterScreen)

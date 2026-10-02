@@ -6,6 +6,8 @@
 //                     'new': every slot is full — pick one to replace (Replace asks first, in main.js)
 //                     'ngplus' + parent: (Milestone 28 hook) the parent run is locked and can't be picked; NG+ must
 //                     ask for a slot and never write over its parent (spec §8)
+// Milestone 27: a finished run's card says "Year 17 · ended Grade A" and has a New Game+ button (onNgPlus: the stub
+// screen); the load list starts with the Hall of Runs (onHall).
 import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
@@ -22,7 +24,7 @@ export function playTimeText(sec = 0) {
   return h ? `${h} h ${String(m % 60).padStart(2, '0')} m` : `${m} min`;
 }
 
-export function createSlotsScreen({ layout, assets, header, slots, onPlay, onNewTeam, onReplace, onDelete, onBack }) {
+export function createSlotsScreen({ layout, assets, header, slots, onPlay, onNewTeam, onReplace, onDelete, onBack, onHall = null, onNgPlus = null }) {
   let mode = 'load';
   let parent = null;
   let hits = [];
@@ -43,6 +45,12 @@ export function createSlotsScreen({ layout, assets, header, slots, onPlay, onNew
       const note = mode === 'new' ? 'All four slots are full. The team in the slot you pick will be deleted.' : 'Your finished run stays as it is.';
       if (ctx) text(ctx, note, 8, y, { size: S.body, bold: true, color: C.actionDark, maxWidth: w - 16 });
       y += 64;
+    }
+    if (mode === 'load' && onHall) {
+      const b = { x: 0, y, w, h: 120 };
+      if (ctx) drawButton(ctx, b, 'Hall of Runs', { accent: C.gold });
+      hits.push({ rect: b, id: 'hall', onTap: () => onHall() });
+      y += 120 + 24;
     }
     const list = slots() ?? [];
     for (let i = 0; i < SLOT_COUNT; i++) {
@@ -79,7 +87,8 @@ export function createSlotsScreen({ layout, assets, header, slots, onPlay, onNew
     }
     const d = s.summary;
     const colour = TEAM_COLOURS.find((c) => c.id === d.colour) ?? TEAM_COLOURS[0];
-    const h = 470;
+    const ngRow = mode === 'load' && d.ended && onNgPlus; // Milestone 27: a finished run can start New Game+
+    const h = ngRow ? 610 : 470;
     const locked = mode === 'ngplus' && parent === s.n;
     const portrait = { x: x + pad, y: y + 30, w: 190, h: 240 };
     const tx = portrait.x + portrait.w + 30;
@@ -103,15 +112,20 @@ export function createSlotsScreen({ layout, assets, header, slots, onPlay, onNew
       const lines = [
         `${PLAYER_TITLE} ${d.principal}`,
         `Founder: ${d.founderName}`,
-        `Year ${d.year} · Month ${d.month} · Rank ${d.rank} · NG+ ${d.ngPlus}`,
-        `Played ${playTimeText(d.playSeconds)}${d.grade ? ` · Grade ${d.grade}` : ''}`,
+        d.ended ? `Year ${d.year} · ended Grade ${d.grade} · Rank ${d.rank} · NG+ ${d.ngPlus}` : `Year ${d.year} · Month ${d.month} · Rank ${d.rank} · NG+ ${d.ngPlus}`,
+        `Played ${playTimeText(d.playSeconds)}${d.worldCrown ? ' · World Champions' : ''}`,
       ];
       for (const l of lines) {
         text(ctx, l, tx, ty, { size: S.small, bold: l.startsWith('Year'), color: C.text, maxWidth: tw });
         ty += 44;
       }
     }
-    const by = y + h - 150;
+    const by = y + h - 150 - (ngRow ? 140 : 0);
+    if (ngRow) {
+      const nb = { x: x + pad, y: by + 140, w: w - 2 * pad, h: 120 };
+      if (ctx) drawButton(ctx, nb, 'Start New Game+', { accent: C.purple });
+      hits.push({ rect: nb, id: `ngplus_${s.n}`, onTap: () => onNgPlus(s.n, s) });
+    }
     const del = { x: x + w - pad - 250, y: by, w: 250, h: 120 };
     const main = { x: x + pad, y: by, w: del.x - 24 - (x + pad), h: 120 };
     if (mode === 'load') {

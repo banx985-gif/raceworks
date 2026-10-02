@@ -52,7 +52,7 @@ export const EVENT_RULES = {
   inboxMax: 150,
   toastSec: 3.6,
   toastSecReduced: 3.0, // reduced motion: a shorter strip that fades in place (no slide)
-  queueScreens: ['weekend', 'raceIntro', 'race', 'raceResult', 'drill'], // nothing shows here; everything waits
+  queueScreens: ['weekend', 'raceIntro', 'race', 'raceResult', 'drill', 'ceremony', 'ngplus'], // nothing shows here; everything waits (Milestone 27: + the ceremony)
 };
 
 // The milestone moments (Art List §events). Each fires once, when its own fact comes true (none waits for another).
@@ -208,6 +208,12 @@ export const EVENTS = [
     id: 'EV_BOTWORKS_DEMO', cls: 'sponsor', size: 'major', trigger: { type: 'fact', fact: 'secretBotworks' }, cooldownDays: 0,
     title: 'BOTWORKS: a robot in the pit lane', text: 'BOTWORKS Systems bring a pit-service robot to your garage for a demonstration. It changes a wheel faster than anyone expected.',
     effects: [{ type: 'sponsorRep', value: 10 }, { type: 'flag', key: 'pitRobotCameo' }], choices: [{ id: 'host', label: 'Host the demo', line: 'Sponsor reputation +10', effects: [], default: true }, { id: 'study', label: 'Study the robot', line: '+30 RP', effects: [{ type: 'rp', value: 30 }] }],
+  },
+  // Milestone 27: the Year-16 ending is coming (src/systems/ending.js fires it at the start of Year 16 and at Month 10).
+  {
+    id: 'EV_FINAL_YEAR', cls: 'milestone', size: 'major', trigger: { type: 'calendar', on: 'month' }, cooldownDays: 0, art: 'race_event_07',
+    title: 'Year 16 is ending', text: '{months} months left. When Year 16 Month 12 ends, the Year-16 ceremony grades your run — then you keep playing the same save.',
+    effects: [], choices: [{ id: 'ok', label: 'Got it', line: 'Records shows how the run is going', effects: [], default: true }, { id: 'push', label: 'One last push', line: 'Team Morale +4', effects: [{ type: 'teamMorale', value: 4 }] }],
   },
   { id: 'EV_SEASON', cls: 'race', size: 'minor', trigger: { type: 'calendar', on: 'year' }, cooldownDays: 0, title: 'Year {year} begins', text: 'A new racing year. The calendar, the sponsors and the rivals start again.', effects: [] },
 ];

@@ -160,7 +160,7 @@ export const REWARD_TYPES = [
 ];
 
 // Clue stages (§35): 0 invisible, 1 vague rumour, 2 stronger hint, 3 nearly explicit, 4 discovered (exact recipe).
-export const CLUE = { discovered: 4, postEndingBonus: 1 };
+export const CLUE = { discovered: 4, postEndingBonus: 1, heritageBonus: 1 }; // (Milestone 27: + F29 Heritage Room after the ending)
 // The default shares of a rule's conditions that reach clue stages 1–3 (a rule can set its own).
 export const CLUE_SHARES = [0.25, 0.5, 0.75];
 
