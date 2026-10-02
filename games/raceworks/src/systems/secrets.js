@@ -41,11 +41,12 @@ const r1 = (v) => Math.round(v * 10) / 10;
 const blankLog = () => ({ races: [], cars: [], months: [], timeline: [], drills: 0, monthStartCredits: null, hires: [], starters: [], standardDrivers: [], left: [], techDemoSeen: false, techDemoDone: false, ending: false });
 
 // A race record made before Milestone 25: the new fields from what it has (nothing else can be known now).
+// Milestone 26: a record from before it has no best lap or pit errors (unknown: no lap record, no error counted).
 function upgradeRace(r) {
-  if (r.won !== undefined) return r;
+  if (r.won !== undefined) return { bestLap: null, pitErrors: 0, ...r };
   const finished = !r.retired;
   const champ = r.champ ?? null;
-  return { ...r, won: r.pos === 1 && finished, finished, pole: r.grid === 1, fastestLap: false, wetClass: false, rain: !!r.wet, night: SR.nightTracks.includes(r.trackId), permanent: !SR.streetTracks.includes(r.trackId), tier: champ ? CHAMP[champ]?.tier ?? null : null, champRace: !!champ, season: null, raceType: 'standard', tyreLife: 0, spins: 0, damageHits: 0, damageRepairs: 0, mechFails: r.mechRetired ? 1 : 0, faults: 0, stops: 0, plannedStops: 0, energySave: false, topSpeed: 0, speedRecord: false, powerUnit: null, carRating: 0, fieldRating: 0, belowFieldPct: 0, fieldAbovePct: 0, ghostIn: false, ghostBeat: false, driver: null };
+  return { ...r, won: r.pos === 1 && finished, finished, pole: r.grid === 1, fastestLap: false, wetClass: false, rain: !!r.wet, night: SR.nightTracks.includes(r.trackId), permanent: !SR.streetTracks.includes(r.trackId), tier: champ ? CHAMP[champ]?.tier ?? null : null, champRace: !!champ, season: null, raceType: 'standard', tyreLife: 0, spins: 0, damageHits: 0, damageRepairs: 0, mechFails: r.mechRetired ? 1 : 0, faults: 0, stops: 0, plannedStops: 0, energySave: false, topSpeed: 0, speedRecord: false, powerUnit: null, carRating: 0, fieldRating: 0, belowFieldPct: 0, fieldAbovePct: 0, ghostIn: false, ghostBeat: false, driver: null, bestLap: null, pitErrors: 0 };
 }
 
 export function createSecrets({ bus, team, rules = [] }) {
@@ -166,7 +167,7 @@ export function createSecrets({ bus, team, rules = [] }) {
     .define('run.races', () => races())
     .define('run.cars', () => log.cars)
     .define('run.months', () => log.months)
-    .define('run.staff', () => team.roster.map((s) => ({ id: s.id, role: s.role, tier: s.tier, hiredDay: s.counters?.hiredDay ?? 0, daysEmployed: team.careers.of?.(s.id)?.daysEmployed ?? 0, founder: team.isFounder(s.id) })))
+    .define('run.staff', () => team.roster.map((s) => ({ id: s.id, role: s.role, tier: s.tier, hiredDay: s.counters?.hiredDay ?? 0, daysEmployed: team.careers.of?.(s.id)?.daysEmployed ?? 0, founder: team.isFounder(s.id), level: s.level ?? 1 })))
     .define('run.racesAutoOnly', () => log.races.filter((r) => r.autoOnly).length)
     .define('run.racesManual', () => log.races.filter((r) => r.manual).length)
     .define('run.racesDrive', () => log.races.filter((r) => r.drive).length)
@@ -372,6 +373,9 @@ export function createSecrets({ bus, team, rules = [] }) {
       ghostIn: ghosts.length > 0,
       ghostBeat: ghosts.length > 0 && finished && ghosts.every((g) => g.pos > me.pos),
       driver: entry.driver ?? null,
+      // Milestone 26 (the Records screen's lap records; Pit Perfect)
+      bestLap: me.best ?? null,
+      pitErrors: me.pitErrors ?? 0,
     });
     first('firstRace');
     if (me.pos <= 3 && me.status !== 'retired') first('firstPodium');

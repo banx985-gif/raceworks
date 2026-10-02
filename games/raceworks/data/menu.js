@@ -30,7 +30,7 @@ export const MENU_GROUPS = [
     row('sponsors', 'Sponsors', 'Six-month deals: stipends, perks, obligations', 'race_ui_26'),
   ] },
   { title: 'Records', rows: [
-    row('records', 'Trophy cabinet', 'Your titles, wins and podiums', 'race_reward_08'),
+    row('records', 'Records', 'Achievements, records, medals, completion and the trophy cabinet', 'race_reward_08'),
     row('inbox', 'Inbox', 'News, offers, rumours and big moments', 'race_ui_13'),
   ] },
   { title: 'Archives', rows: [

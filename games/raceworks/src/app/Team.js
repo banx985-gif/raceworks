@@ -44,6 +44,9 @@
 //   Inbox and the milestone moments; its timed modifiers join the one effect query (team.facilities.bonus(key)).
 // Milestone 25b: team.items (src/systems/items.js) — items for staff on core/ItemSystem (the Parts Store, likes, caps,
 //   sources); facility levels 1–3 live in team.facilities (core/FacilitySystem levels).
+// Milestone 26: team.achievements (src/systems/achievements.js) — the 30 achievements (account-wide, on the M24 engine
+//   and its triggers), the Records screen's records and the completion metrics; their account half is in the account
+//   save (main.js gives it; .sync() after a load rebuilds the records from the save).
 import { Clock } from '../../../../core/Clock.js';
 import { Rng } from '../../../../core/Rng.js';
 import { StaffSystem } from '../../../../core/StaffSystem.js';
@@ -73,6 +76,7 @@ import { ENDURANCE } from '../../data/training.js';
 import { createEvents } from '../systems/events.js';
 import { createSecrets } from '../systems/secrets.js';
 import { createItems } from '../systems/items.js'; // Milestone 25b
+import { createAchievements } from '../systems/achievements.js'; // Milestone 26
 
 // A new game's setup when none is given (tests, and saves from before Milestone 4b).
 export const DEFAULT_SETUP = { teamName: 'RACEWORKS', principal: 'Principal', colour: 'red', founderId: 'MEC01' };
@@ -147,6 +151,10 @@ export const SAVE_MIGRATIONS = {
   //   18 → 19 (Milestone 25b): items (the Parts Store, likes, season points) and facility levels. Nothing to change here —
   //   items.load() gives a save without them an empty store and everyone's likes; a layout without levels is all level 1.
   18: (record) => record,
+  //   19 → 20 (Milestone 26): achievements, records and completion (their run log: years ended, peak Credits, sponsor deals
+  //   met, staff tiers reached; the race records' best lap and pit errors). Nothing to change here — achievements.load()
+  //   rebuilds the run log from what the save holds and the race records read no lap record / no pit error.
+  19: (record) => record,
 };
 
 const blankContractRecords = () => ({ partEvents: {}, facts: {} });
@@ -206,6 +214,7 @@ export class Team {
     this.events = createEvents({ bus, team: this, seed }); // Milestone 23 (last: its day runs after every other system's)
     this.items = createItems({ bus, team: this, seed }); // Milestone 25b
     this.secrets = createSecrets({ bus, team: this, rules: secretRules }); // Milestone 24 (after everything: facts are committed first)
+    this.achievements = createAchievements({ bus, team: this }); // Milestone 26 (after the secrets: their facts and records first)
     this.runId = null;
     this.recruitment.extraBusy = (id) => {
       const t = this.training.trainingOf(id);
@@ -271,6 +280,8 @@ export class Team {
     this.runId = newRunId();
     this.items.newGame(); // Milestone 25b: an empty Parts Store, everyone's likes
     this.secrets.newGame(); // Milestone 24
+    this.achievements.newGame(); // Milestone 26 (the account's achievements, records and completion stay)
+    if (this.achievements.attached) this.achievements.sync(); // the starting parts, garage and staff count for completion
   }
 
   // Milestone 21: a development contract paid — its rewards beyond Credits / RP / Reputation (bible §29): sponsor
@@ -431,6 +442,7 @@ export class Team {
       runId: this.runId, // Milestone 24
       secrets: this.secrets.serialize(), // Milestone 24
       items: this.items.serialize(), // Milestone 25b
+      achievements: this.achievements.serialize(), // Milestone 26
     };
   }
 
@@ -463,6 +475,8 @@ export class Team {
     this.runId = data.runId ?? newRunId(); // none before Milestone 24
     this.items.load(data.items ?? null); // none before Milestone 25b: an empty store, likes rolled / from data
     this.secrets.load(data.secrets ?? null); // none before Milestone 24: no rule state, records rebuilt from the save
+    this.achievements.load(data.achievements ?? null); // none before Milestone 26: the run log rebuilt from the save
+    if (this.achievements.attached) this.achievements.sync(); // records, completion and achievements from what it holds
   }
 
   // A team saved before Milestone 5 had no money: it gets the §30.2 starting state today, and each car it already

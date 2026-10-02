@@ -15,7 +15,11 @@
 //   screenTag                 the screen name the game is on (for the tracking record)
 //   loadOptional(key, src)    a picture that may not exist yet (Milestone 25b: art still to be painted): loaded quietly
 //                             if it is there (has(key) turns true) — never a warning, a placeholder or a "missing" entry
+// GOALWORKS Milestone 12b — canvas loss (core/CanvasLoss): the size copies are made again (SpriteCache), and every picture
+// a game made in code and put in images (a kit-tinted body, a livery copy — any canvas, not a loaded file) is dropped, so
+// has(key) turns false and the game's own "make it if missing" code makes it again. bus: 'assets:canvasLost' { reason }.
 import { SpriteCache } from './SpriteCache.js';
+import { onCanvasLoss } from './CanvasLoss.js';
 
 export class AssetManager {
   constructor({ basePath = '', bus = null, resolve = null } = {}) {
@@ -32,6 +36,20 @@ export class AssetManager {
     this.fallbacks = new Map(); // key → { draw, aspect }: a stand-in drawn while the file is missing
     this.tracking = null; // { drawn: Map, fallbacks: Map } while tracking
     this.screenTag = '';
+    onCanvasLoss(this, (a, reason) => a.dropMadeImages(reason));
+  }
+
+  // Every image that is a canvas made in code (not a loaded file) goes; its maker makes it again on its next call.
+  dropMadeImages(reason = 'lost') {
+    const isCanvas = (img) => typeof HTMLCanvasElement !== 'undefined' && img instanceof HTMLCanvasElement;
+    let n = 0;
+    for (const [k, img] of [...this.images]) {
+      if (!isCanvas(img)) continue;
+      this.images.delete(k);
+      n++;
+    }
+    this.bus?.emit('assets:canvasLost', { reason, dropped: n });
+    return n;
   }
 
   // A readable stand-in for art that is not drawn yet (a labelled block, a simple figure…). While the file is

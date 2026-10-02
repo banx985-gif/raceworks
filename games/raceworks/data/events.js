@@ -32,6 +32,7 @@ export const EVENT_CLASSES = [
   { id: 'financial', name: 'Financial', icon: 'race_ui_05' },
   { id: 'secret', name: 'Rumour', icon: 'race_ui_28' },
   { id: 'item', name: 'Equipment', icon: 'race_ui_02' }, // Milestone 25b: items (the Parts Store; a note shows the store crate)
+  { id: 'achievement', name: 'Achievement', icon: 'race_ui_23' }, // Milestone 26: the Training Medal (each achievement shows its own icon)
 ];
 
 // Cadence (bible §31 "no pop-up stacking"; card M23 placeholders). Rolled events only — a fact or calendar event (a
@@ -175,6 +176,8 @@ export const EVENTS = [
   // Milestone 25b: a well-wisher's gift — fired by a monthly roll in src/systems/items.js (ITEM_SOURCES.wellWisher), its
   // 'item' effect puts one item in the Parts Store.
   { id: 'EV_WELL_WISHER', cls: 'item', size: 'minor', trigger: { type: 'fact', fact: 'wellWisher' }, cooldownDays: 0, title: 'A gift from a well-wisher', text: 'A long-time fan of {team} dropped off some kit for the crew. It is in the Parts Store.', effects: [{ type: 'item', source: 'wellWisher' }] },
+  // Milestone 26: an achievement earned (src/systems/achievements.js → events.announce; the icon is the achievement's own)
+  { id: 'EV_ACHIEVEMENT', cls: 'achievement', size: 'minor', trigger: { type: 'fact', fact: 'achievement' }, cooldownDays: 0, title: 'Achievement: {name}', text: '{recipe} · {reward} · Records has every achievement.', effects: [] },
   { id: 'EV_SECRET_FOUND', cls: 'secret', size: 'minor', trigger: { type: 'fact', fact: 'secretFound' }, cooldownDays: 0, title: 'Secret discovered: {name}', text: '{clue}', effects: [] },
   // Milestone 25: the secrets' events (fired by a found secret through events.fireSecret — never rolled; each once a run,
   // or once ever for an account secret). PLACEHOLDER effects (DECISIONS.md, M25).

@@ -13,6 +13,7 @@ import { RIVAL_TEAMS, PRIVATEERS } from './rivals.js';
 import { TYRES, RACE_ICONS } from './race.js';
 import { RESEARCH_ICONS } from './research.js';
 import { EVENT_CLASSES, MILESTONES } from './events.js';
+import { ACHIEVEMENT_ICONS } from './achievements.js';
 
 const art = (folder, key) => [key, `assets/images/${folder}/${key}.png`];
 
@@ -71,6 +72,8 @@ export const STAFF_PORTRAITS = Object.fromEntries(ALL_STAFF.map((d) => d.art).fi
 import { SPONSORS } from './sponsors.js';
 
 export const LATER_ASSETS = {
+  // Milestone 26: the achievements' icons (the nearest existing art: race_ui / race_reward; the Records screen, toasts)
+  ...Object.fromEntries(ACHIEVEMENT_ICONS.map((k) => art(k.startsWith('race_reward') ? 'rewards' : 'ui', k))),
   // Milestone 25: the Ghost Cat mascot (SEC-X-02's reward, in the garage). (The secret parts, F34 / F35, R08's logo and the
   // V17–V20 families are already in the lists below.)
   mascot_05: 'assets/images/mascots/mascot_05.png',

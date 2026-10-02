@@ -122,6 +122,7 @@ export const CATEGORY_NAMES = {
   training: 'Training', // Milestone 12
   championship: 'Championships (entry fees, title bonuses)', // Milestone 20
   sponsor: 'Sponsors (stipends, race bonuses, obligation bonuses)', // Milestone 21
+  achievement: 'Achievements', // Milestone 26
   debug: 'Debug',
   carried: 'Earlier lines',
 };

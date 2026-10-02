@@ -164,9 +164,9 @@ export function createEvents({ bus, team, seed = 'raceworks' }) {
     const data = { uid: inst.uid, id: def.id, cls: def.cls, look: def.look ?? null };
     if (def.look === 'research') Object.assign(data, { nodeId: p.nodeId, fired: p.fired });
     if (def.look === 'combo') Object.assign(data, { comboId: p.comboId, rp: p.rp });
-    const msg = { kind: def.kind, day: inst.day, title: words(def.title, p), body: words(def.text, p), icon: classOf(def.cls).icon, art: def.art ?? p.art ?? null, data }; // (Milestone 25: p.art)
+    const msg = { kind: def.kind, day: inst.day, title: words(def.title, p), body: words(def.text, p), icon: p.icon ?? classOf(def.cls).icon, art: def.art ?? p.art ?? null, data }; // (Milestone 25: p.art; Milestone 26: p.icon)
     if (def.size === 'major') notes.post({ ...msg, level: 'major', popup: !muted, toast: false });
-    else notes.post({ ...msg, level: 'minor', toast: true });
+    else notes.post({ ...msg, level: 'minor', toast: !(p.quietIfBusy && (notes.toasts.length || notes.toastWaiting.length)) }); // (Milestone 26: announce)
     stats.peakQueue = Math.max(stats.peakQueue, notes.pending);
   });
   bus.on('event:resolved', ({ instance: inst, def, choice, auto }) => {
@@ -340,6 +340,9 @@ export function createEvents({ bus, team, seed = 'raceworks' }) {
     milestoneFired: (id) => events.seen(id),
     fireSecret: (id, params = {}) => (BY_ID[id] ? fireNow(id, params) : null), // Milestone 25
     fireItemEvent: (id, params = {}) => (BY_ID[id] ? fireNow(id, params) : null), // Milestone 25b: the well-wisher
+    // Milestone 26: a minor event (an achievement earned): its strip only when no other strip is showing or waiting —
+    // else straight to the Inbox, unread — so a burst never holds up a card. params.icon: its own icon.
+    announce: (id, params = {}) => (BY_ID[id] ? fireNow(id, { ...params, quietIfBusy: true }) : null),
     // Milestone 25b: a plain note (an item arrived, the store is full): a minor strip and an Inbox line, not an event.
     //   It only shows a strip when no other strip is showing or waiting (else straight to the Inbox, unread), so it never
     //   holds up a card.

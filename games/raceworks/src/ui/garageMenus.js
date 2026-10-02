@@ -24,6 +24,8 @@
 //   sheet has Upgrade too and its Sell pays half of the build price and the upgrades. The Parts Store ('store' → 'item' →
 //   'giveItem' → 'giveConfirm', and 'giveTo' from a person) gives items to staff; the Sponsor Wall shows its logo slots;
 //   Help (top bar) leads to Settings (openSettings) so Settings is reachable with the Menu button off.
+// Milestone 26: the Records screen ('records', src/ui/recordsMenu.js: achievements, records, medals, completion), from the
+//   Staff sheet, the Compete sheet and the Menu. The Rumour Archive never says how many secrets exist before the ending.
 // Milestone 21: the Sponsor Wall's sheet also has Sponsors — the 'sponsors' sheet (src/ui/sponsorMenu.js, the same as the
 //   Money sheet's Sponsors tab): slots, deals, obligation progress and the offers.
 import { MenuRegistry } from '../../../../core/ui/BottomSheet.js';
@@ -55,6 +57,7 @@ import { ITEM_RARITIES, ITEM_RULES, ITEM_TEXT, ITEM_SOURCES, itemTypeById, itemG
 import { STAT_NAMES } from '../../data/staff.js';
 import { itemIcon } from '../../../../core/ui/ItemArt.js';
 import { sponsorById } from '../../data/sponsors.js';
+import { recordsMenu } from './recordsMenu.js'; // Milestone 26
 
 const C = THEME.color;
 
@@ -473,7 +476,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
         menu.subtitle = `${team.roster.length} of ${team.recruitment.staffCap()} people · ${slot.line}`;
         menu.sections = [
           { columns: 1, buttons: [{ id: 'roster', label: 'Roster', sub: 'Everyone on the team', icon: slot.icon, onTap: goRoster }] },
-          { columns: 2, buttons: [hireButton(), trainButton()] }, // Milestone 12
+          { columns: 2, buttons: [hireButton(), trainButton(), recordsButton()] }, // Milestone 12 (Milestone 26: Records)
           { buttons: team.roster.map((s) => ({ id: `staff_${s.id}`, label: s.name.split(' ')[0], sub: ROLES[s.role].name, icon: s.art, accent: C.progress, onTap: () => goStaff(s.id) })), columns: 3 },
         ];
       }
@@ -534,6 +537,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
           buttons: [
             { id: 'rivals', label: 'Rivals', sub: 'Teams, drivers, logos', icon: 'race_ui_27', accent: C.progress, onTap: () => open('rivals') },
             { id: 'trophies', label: 'Trophies', sub: `${CH?.trophies.count ?? 0} in the cabinet`, icon: 'race_reward_07', accent: C.progress, onTap: () => open('trophies') },
+            ...(team.achievements ? [recordsButton()] : []), // Milestone 26
           ],
         });
         menu.sections = [
@@ -555,6 +559,11 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
       return menu;
     });
   }
+  // Milestone 26: the Records screen.
+  function recordsButton() {
+    return { id: 'records', label: 'Records', sub: team.achievements ? `${team.achievements.completion().text} · ${team.achievements.earnedList().length} achievements` : '', icon: 'race_reward_08', accent: C.progress, onTap: () => open('records') };
+  }
+  if (team.achievements) menus.register('records', () => recordsMenu({ team, open, menuRow }));
   // Milestone 22: the Parts Archive (the open parts by slot) → the Combo Archive and the Rumour Archive.
   menus.register('partsArchive', () => {
     const ctx = unlockContext(team);
@@ -605,7 +614,8 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
       sections: [
         { title: 'Combos', lines: list.length ? list.map((x) => ({ text: `${x.kind === 'recipe' ? 'Recipe' : 'Rumour'}: ${x.text}`, color: x.kind === 'recipe' ? C.good : C.text })) : ['Nothing yet. Build cars: a combination that almost works starts a rumour.'] },
         // Milestone 24: the secrets — each one's newest clue stage (1 vague … 3 nearly explicit), a found one's exact recipe
-        ...(team.secrets?.rules.length ? [{ title: `Secrets · ${team.secrets.foundCount()} of 34 found`, lines: secretLines() }] : []),
+        //   (Milestone 26, the hidden denominator: before the ending only how many were found, never how many exist)
+        ...(team.secrets?.rules.length ? [{ title: team.secrets.postEnding ? `Secrets · ${team.secrets.foundCount()} of ${team.secrets.rules.length} found` : `Secrets · ${team.secrets.foundCount()} found`, lines: secretLines() }] : []),
         // Milestone 25: account-wide rewards — accolades and switches, Prestige Tokens, the final page
         ...(team.secrets?.accolades().length || team.secrets?.prestigeTokens ? [{ title: 'Accolades', lines: [...team.secrets.accolades().map((a) => ({ text: a.text, color: C.good })), { text: `Prestige Tokens: ${team.secrets.prestigeTokens}`, color: C.actionDark }] }] : []),
         ...(team.secrets?.finalPage ? [{ title: 'The final page', lines: [{ text: team.secrets.finalPage, color: C.actionDark }] }] : []),

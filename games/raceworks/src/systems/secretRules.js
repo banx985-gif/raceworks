@@ -78,7 +78,10 @@ function checkCond(c, path, errors) {
   });
 }
 
-export function validateRule(r) {
+// Milestone 26: { achievement: true } checks a visible achievement (data/achievements.js) with the same rules, except
+// that it has no clue stages (it is never hidden), must be an account rule, and pays Credits / RP / Racing Tokens.
+const ACH_REWARDS = new Set(['credits', 'rp', 'tokens']);
+export function validateRule(r, { achievement = false } = {}) {
   const errors = [];
   if (!r || typeof r.id !== 'string' || !ID.test(r.id)) return ['a rule needs an id'];
   if (!['run', 'account'].includes(r.scope)) errors.push('scope must be run or account');
@@ -96,7 +99,11 @@ export function validateRule(r) {
   for (const k of Object.keys(r)) if (/^(when|condition|requires|text|rule)$/i.test(k)) errors.push(`"${k}" looks like a free-text condition`);
   // clue stages 1–3 with rising shares, and the stage-4 recipe
   const cs = r.clueStages ?? [];
-  if (cs.length !== CLUE.discovered - 1) errors.push(`needs ${CLUE.discovered - 1} clue stages (1–3)`);
+  if (achievement) {
+    if (r.scope !== 'account') errors.push('an achievement is account-wide (scope account)');
+    if (cs.length) errors.push('an achievement has no clue stages (it is visible)');
+    if (!(typeof r.name === 'string' && r.name)) errors.push('no name');
+  } else if (cs.length !== CLUE.discovered - 1) errors.push(`needs ${CLUE.discovered - 1} clue stages (1–3)`);
   cs.forEach((s, i) => {
     const sh = s?.minMet?.share;
     if (!(typeof s?.text === 'string' && s.text) || !(sh > 0 && sh <= 1) || (i && !(sh > cs[i - 1]?.minMet?.share))) errors.push(`clue stage ${i + 1}: text and a rising share`);
@@ -105,24 +112,24 @@ export function validateRule(r) {
   // rewards: known types, explicit ids, never the same action twice, currency with an amount
   const seen = new Set();
   for (const a of r.rewardActions ?? []) {
-    if (!REWARD[a.type]) errors.push(`unknown reward "${a.type}"`);
+    if (achievement ? !ACH_REWARDS.has(a.type) : !REWARD[a.type]) errors.push(`unknown reward "${a.type}"`);
     if (typeof a.id !== 'string' || !ID.test(a.id)) errors.push(`reward ${a.type}: needs an id`);
     const key = `${a.type}:${a.id}`;
     if (seen.has(key)) errors.push(`reward ${key} twice (it could grant twice)`);
     seen.add(key);
-    if (REWARD[a.type]?.currency && !(Number.isFinite(a.amount) && a.amount > 0)) errors.push(`reward ${a.type}: needs an amount`);
+    if ((achievement || REWARD[a.type]?.currency) && !(Number.isFinite(a.amount) && a.amount > 0)) errors.push(`reward ${a.type}: needs an amount`);
   }
   if (!(r.rewardActions ?? []).length) errors.push('no reward actions');
   return errors;
 }
 
-export function validateRules(rules) {
+export function validateRules(rules, opts = {}) {
   const out = [];
   const ids = new Set();
   for (const r of rules) {
     if (ids.has(r?.id)) out.push({ id: r.id, error: 'duplicate id' });
     ids.add(r?.id);
-    for (const error of validateRule(r)) out.push({ id: r?.id ?? '?', error });
+    for (const error of validateRule(r, opts)) out.push({ id: r?.id ?? '?', error });
   }
   return out;
 }

@@ -5,7 +5,8 @@
 //   const items = new ItemSystem({ types, rarities, rules, rng, bus, person, statOf, statCap, raise, morale })
 //     types: [{ id, name, group, stat }] · rarities: { id: { name, gain, sell, weight } } (gain = stat points)
 //     rules: { inventoryMax, periodCap (item points per person per period), loveMult 1.5, dislikeMult 0.5,
-//              loveMorale (morale for a loved item), likes: { loves: [min, max], dislikeChance } }
+//              loveMorale (morale for a loved item), likes: { loves: [min, max], dislikeChance },
+//              periodWord ('this year' — the period's name in the no-points-left reason; GOALWORKS M12c: 'this season') }
 //     person(id) → the person or null · statOf(p, stat) · statCap(p, stat) · raise(p, stat, n) · morale(p, n)
 //   Inventory: add(typeId, rarity, source) → the item or null (full: 'item:full') · remove / sell(uid) → money
 //   Likes: likesOf(id) → { loves: [group], dislike: group | null } · setLikes(id, likes) · rollLikes(id, groups)
@@ -137,7 +138,7 @@ export class ItemSystem {
     const left = this.pointsLeft(personId);
     const gain = Math.min(want, room, left);
     const capped = gain < want ? (room <= left ? 'tier' : 'period') : null;
-    const why = gain <= 0 ? (capped === 'tier' ? 'Already at their tier cap' : 'No item points left this year') : null;
+    const why = gain <= 0 ? (capped === 'tier' ? 'Already at their tier cap' : `No item points left ${this.rules.periodWord ?? 'this year'}`) : null;
     return { ok: !why, why, stat: t.stat, base, mult, like, want, gain, capped, now };
   }
 

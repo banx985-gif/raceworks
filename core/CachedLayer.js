@@ -2,6 +2,9 @@
 // offscreen canvas and copied to the screen each frame (bible §40.1). Call invalidate() when the
 // layout changes; a pixel-scale change (resize) also triggers a redraw.
 //   draw(g) paints in logical units inside a width×height box.
+// GOALWORKS Milestone 12b: a canvas loss (core/CanvasLoss) marks it dirty, so it is drawn again instead of staying blank.
+import { onCanvasLoss, watchCanvas } from './CanvasLoss.js';
+
 export class CachedLayer {
   constructor({ width, height, draw }) {
     this.width = width;
@@ -11,6 +14,7 @@ export class CachedLayer {
     this.canvas = null;
     this.dirty = true;
     this.rebuilds = 0; // how many times it has been redrawn (for checks)
+    onCanvasLoss(this, (l) => (l.dirty = true));
   }
 
   invalidate() {
@@ -42,7 +46,7 @@ export class CachedLayer {
 
   rebuild() {
     const ps = this.pixelScale;
-    const c = this.canvas || document.createElement('canvas');
+    const c = this.canvas || watchCanvas(document.createElement('canvas'));
     c.width = Math.max(1, Math.round(this.width * ps));
     c.height = Math.max(1, Math.round(this.height * ps));
     const g = c.getContext('2d');

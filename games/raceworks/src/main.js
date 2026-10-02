@@ -407,6 +407,8 @@ const comboRecords = createComboRecords({
 team.combos.setRecords(comboRecords);
 // Milestone 24: the secret engine's account half (found secrets, cross-run facts) lives in the account save too
 team.secrets.setAccount({ load: async () => (slots ? ((await slots.loadAccount()).secrets ?? null) : null), save: (block) => saveAccountBlock('secrets', block) });
+// Milestone 26: achievements, records and completion — account-wide too (they survive slot deletes and New Game+)
+team.achievements.setAccount({ load: async () => (slots ? ((await slots.loadAccount()).achievements ?? null) : null), save: (block) => saveAccountBlock('achievements', block) });
 team.training.setDrillRecords(drillRecords);
 bus.on('stint:done', ({ record }) => drillRecords.recordStint(record)); // Milestone 18: Drive Stints on the account records
 // Milestone 20: the championship ladder — enter one (the fee on the ledger), race its next round (its race weekend).
@@ -554,7 +556,7 @@ const MENU_OPEN = {
   ledger: () => (openMenu('money'), sheet.setTab('ledger')),
   contracts: () => (openMenu('money'), sheet.setTab('contracts')),
   sponsors: () => openMenu('sponsors'),
-  records: () => openMenu('trophies'),
+  records: () => openMenu('records'), // Milestone 26: the Records screen (its Trophy cabinet button opens the cabinet)
   inbox: () => openMenu('inbox'),
   partsArchive: () => openMenu('partsArchive'),
   comboArchive: () => openMenu('comboArchive'),
@@ -1019,6 +1021,7 @@ async function playSlot(n) {
     team.useSlot(slots.slot(n));
     await accountChain; // (Milestone 24: any account write still on its way lands first)
     await team.secrets.loadAccount();
+    await team.achievements.loadAccount(); // Milestone 26
     team.load(data);
   } catch (err) {
     debug.log(`slot ${n} would not load: ${err.message}`);
@@ -1036,6 +1039,7 @@ async function startNewTeam(setup, n) {
   team.useSlot(slots.slot(n));
   await accountChain;
   await team.secrets.loadAccount(); // Milestone 24
+  await team.achievements.loadAccount(); // Milestone 26
   team.newGame(setup);
   debug.log(`new team in slot ${n}: ${team.setup.teamName}, founder ${team.founder.id}`);
   await team.save();

@@ -10,9 +10,17 @@
 // frameBudgetMs (optional, same milestone): once the copies made since beginFrame() took that long, a new size is not
 // made this frame — the source image is returned (drawn scaled, once) and the copy comes on a later frame, so many new
 // pictures at once never make one long frame (stats.deferred). Default: no budget.
+// GOALWORKS Milestone 12b: a canvas loss (core/CanvasLoss — the phone's GPU wiped every canvas made in code) clears the
+// cache, so each copy is made again on its next draw instead of staying blank. maxUpscale (optional): a copy is never
+// made bigger than the source × this (1 = the source's own size; drawImage stretches it the rest of the way, which looks
+// the same) — a 512-px picture drawn 1,400 px wide under a zoomed camera no longer holds a 1,400-px copy per zoom step.
+// Default: no limit (as before).
+import { onCanvasLoss, watchCanvas } from './CanvasLoss.js';
+
 export class SpriteCache {
-  constructor({ maxSizesPerImage = 16, maxPixels = Infinity, frameBudgetMs = Infinity } = {}) {
+  constructor({ maxSizesPerImage = 16, maxPixels = Infinity, frameBudgetMs = Infinity, maxUpscale = Infinity } = {}) {
     this.frameBudgetMs = frameBudgetMs;
+    this.maxUpscale = maxUpscale;
     this.spentMs = 0;
     this.pixelScale = 1; // real screen pixels per logical unit
     this.maxSizesPerImage = maxSizesPerImage;
@@ -23,6 +31,10 @@ export class SpriteCache {
     this.stats = { made: 0, hits: 0, cleared: 0, pruned: 0, evicted: 0, deferred: 0 };
     this.used = new Map(); // key → the prune clock when it was last drawn
     this.clock = 0;
+    onCanvasLoss(this, (sc) => {
+      sc.clear();
+      sc.stats.lost = (sc.stats.lost ?? 0) + 1;
+    });
   }
 
   // Call at the start of every drawn frame when frameBudgetMs is set.
@@ -51,8 +63,15 @@ export class SpriteCache {
 
   // The copy of `img` for a logical w×h, made once and reused. key names the image.
   get(key, img, w, h) {
-    const pw = Math.max(1, Math.round(w * this.pixelScale));
-    const ph = Math.max(1, Math.round(h * this.pixelScale));
+    let pw = Math.max(1, Math.round(w * this.pixelScale));
+    let ph = Math.max(1, Math.round(h * this.pixelScale));
+    if (this.maxUpscale < Infinity) {
+      const sw = (img.naturalWidth || img.width) * this.maxUpscale;
+      if (sw > 0 && pw > sw) {
+        ph = Math.max(1, Math.round((ph * sw) / pw));
+        pw = Math.max(1, Math.round(sw));
+      }
+    }
     const code = pw * 65536 + ph; // number key: no string built per frame
     this.used.delete(key); // re-inserted last: the map's order is least- to most-recently drawn
     this.used.set(key, this.clock);
@@ -154,6 +173,6 @@ export class SpriteCache {
     g.imageSmoothingEnabled = true;
     g.imageSmoothingQuality = 'high';
     g.drawImage(src, 0, 0, w, h);
-    return c;
+    return watchCanvas(c);
   }
 }

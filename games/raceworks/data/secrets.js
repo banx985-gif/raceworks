@@ -38,6 +38,11 @@ export const TRIGGERS = [
   { id: 'facilityBuilt', on: 'facility:bought', text: 'a facility is built' },
   { id: 'secretFound', on: 'secret:found', text: 'another secret is found (after the one that found it has paid out)' },
   { id: 'runEnded', on: 'run:ended', text: 'the run reaches its Year-16 ending (Milestone 27 sends it)' },
+  // Milestone 26 (the achievements are checked on these triggers too)
+  { id: 'levelUp', on: 'staff:levelup', text: 'someone goes up a level' },
+  { id: 'sponsorEnded', on: 'sponsor:ended', text: 'a sponsor deal reaches the end of its term' },
+  { id: 'carRepaired', on: 'car:repaired', text: 'a car in the Car Garage is repaired' },
+  { id: 'drillRecorded', on: 'drill:recorded', text: 'a driver drill result is written to the account records' },
 ];
 
 // --- facts: every one an explicit id, number, boolean, set or ordered list (never free text) ----------------------
@@ -70,6 +75,8 @@ export const FACTS = [
       'day', 'trackId', 'champ', 'pos', 'grid', 'wet', 'retired', 'mechRetired', 'faultsFixed', 'swing', 'family', 'classId', 'carNumber', 'crew', 'autoOnly', 'manual', 'drive', 'setupScore',
       // Milestone 25 (SECRET_READINGS below says how each is read)
       'won', 'finished', 'pole', 'fastestLap', 'wetClass', 'rain', 'night', 'permanent', 'tier', 'champRace', 'season', 'raceType', 'tyreLife', 'spins', 'damageHits', 'damageRepairs', 'mechFails', 'faults', 'stops', 'plannedStops', 'energySave', 'topSpeed', 'speedRecord', 'powerUnit', 'carRating', 'fieldRating', 'belowFieldPct', 'fieldAbovePct', 'ghostIn', 'ghostBeat', 'driver',
+      // Milestone 26: your best lap (seconds) and pit stops forced by a fault or taken outside the window
+      'bestLap', 'pitErrors',
     ],
   },
   { id: 'run.cars', scope: 'run', type: 'list', text: 'every finished car this run', fields: ['day', 'number', 'classId', 'quality', 'powerUnit', 'parts', 'family', 'combos', 'crew', 'spd', 'acc', 'cor', 'puTier', 'startPartsOnly', 'researchPrototype'] },
@@ -99,7 +106,16 @@ export const FACTS = [
   { id: 'run.endingReached', scope: 'run', type: 'boolean', text: 'the run has reached its Year-16 ending (Milestone 27)' },
   { id: 'run.legacyTitles', scope: 'run', type: 'number', text: 'World-tier titles (C08–C12) a Legacy Staff member raced in (NG+, Milestone 28)' },
   { id: 'run.months', scope: 'run', type: 'list', text: 'each finished month’s cash flow', fields: ['month', 'net', 'positive'] },
-  { id: 'run.staff', scope: 'run', type: 'list', text: 'everyone employed now', fields: ['id', 'role', 'tier', 'hiredDay', 'daysEmployed', 'founder'] },
+  { id: 'run.staff', scope: 'run', type: 'list', text: 'everyone employed now', fields: ['id', 'role', 'tier', 'hiredDay', 'daysEmployed', 'founder', 'level'] },
+  // Milestone 26 (the achievements read them; src/systems/achievements.js defines them)
+  { id: 'run.champsOpen', scope: 'run', type: 'set', text: 'visible championship ids open to enter now (or won / in progress)' },
+  { id: 'run.partsDiscovered', scope: 'run', type: 'number', text: 'of the 44 non-prestige part licences, how many are open beyond the six Start parts' },
+  { id: 'run.preparedCars', scope: 'run', type: 'number', text: 'cars in the Car Garage at full Condition (100)' },
+  { id: 'run.staffCount', scope: 'run', type: 'number', text: 'people employed now' },
+  { id: 'run.maxStaffLevel', scope: 'run', type: 'number', text: 'the highest level of anyone employed now' },
+  { id: 'run.expansionsOpen', scope: 'run', type: 'number', text: 'garage wings open (the 4 normal ones; never the Ghost Annex)' },
+  { id: 'run.sponsorDealsMet', scope: 'run', type: 'number', text: 'sponsor deals that ran their term with the obligation met' },
+  { id: 'run.yearEnds', scope: 'run', type: 'list', text: 'each finished year with the Credits on hand as it turned', fields: ['year', 'credits'] },
   // run: race-mode usage (counters over run.races)
   { id: 'run.racesAutoOnly', scope: 'run', type: 'number', mode: true, text: 'race weekends run on Auto from start to flag' },
   { id: 'run.racesManual', scope: 'run', type: 'number', mode: true, text: 'race weekends with at least one manual command' },
