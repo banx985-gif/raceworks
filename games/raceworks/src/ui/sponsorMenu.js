@@ -6,6 +6,9 @@
 import { THEME } from '../../../../core/Theme.js';
 import { sponsorById, SPONSOR_SLOTS, DEAL_DAYS, DEAL_MONTH_DAYS } from '../../data/sponsors.js';
 import { fmt, signed } from './moneyMenu.js';
+import { ITEM_SOURCES, ITEM_RULES } from '../../data/items.js'; // Milestone 25b: a met obligation also brings an item
+
+const ITEM_WORD = ITEM_SOURCES.sponsor.onMet ? ` + ${ITEM_SOURCES.sponsor.onMet === 1 ? 'an item' : `${ITEM_SOURCES.sponsor.onMet} items`} for the ${ITEM_RULES.storeName}` : '';
 
 const C = THEME.color;
 const MONTHS = DEAL_DAYS / DEAL_MONTH_DAYS;
@@ -32,10 +35,10 @@ export function sponsorSections(team, toast = () => {}) {
     const judgedAtEnd = def.obligation.when === 'end';
     const onTrack = sp.isMet(deal);
     const status = deal.met
-      ? { text: `Obligation met ✓ · bonus ${fmt(deal.completion)} Credits paid`, color: C.good }
+      ? { text: `Obligation met ✓ · bonus ${fmt(deal.completion)} Credits paid${ITEM_WORD}`, color: C.good }
       : judgedAtEnd
-        ? { text: `Judged when the deal ends · ${onTrack ? 'on track ✓' : 'not there yet'} · bonus ${fmt(deal.completion)} Credits if met`, color: onTrack ? C.good : C.textMuted }
-        : { text: `In progress · bonus ${fmt(deal.completion)} Credits when met`, color: C.textMuted };
+        ? { text: `Judged when the deal ends · ${onTrack ? 'on track ✓' : 'not there yet'} · bonus ${fmt(deal.completion)} Credits${ITEM_WORD} if met`, color: onTrack ? C.good : C.textMuted }
+        : { text: `In progress · bonus ${fmt(deal.completion)} Credits${ITEM_WORD} when met`, color: C.textMuted };
     const lines = [
       { text: `${fmt(sp.stipendNow(deal))} Credits a month · ${monthsLeft} stipend${monthsLeft === 1 ? '' : 's'} to come · ${sp.daysLeft(deal)} days left`, color: C.actionDark },
       `Race bonus: ${fmt(deal.bonusCredits)} Credits ${def.bonus.text}${deal.bonusesPaid ? ` (${fmt(deal.bonusesPaid)} so far)` : ''}`,

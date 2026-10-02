@@ -17,6 +17,7 @@ import { STAT_KEYS, STAT_NAMES, ROLES, TRAITS, DRIVER_RATINGS } from '../../data
 import { statusIconsOf } from '../ui/statusIcons.js';
 import { staffLine } from '../ui/garageMenus.js';
 import { traitLines } from '../systems/staffTraits.js';
+import { ITEM_RULES, itemTypeById, itemGroupById } from '../../data/items.js'; // Milestone 25b
 
 const C = THEME.color;
 const S = THEME.size;
@@ -26,7 +27,8 @@ const TABS = [
 ];
 const RATING_NAME = Object.fromEntries(DRIVER_RATINGS.map((r) => [r.id, r.name]));
 
-export function createStaffDetailScreen({ layout, assets, team, garage, topBar, debugEnabled = false, goTrain = () => {}, confirm = null, toast = () => {}, afterLetGo = () => {} }) {
+// Milestone 25b: giveItem(id) opens the Parts Store picker for this person (the 'giveTo' sheet).
+export function createStaffDetailScreen({ layout, assets, team, garage, topBar, debugEnabled = false, goTrain = () => {}, confirm = null, toast = () => {}, afterLetGo = () => {}, giveItem = () => {} }) {
   const panel = new ScrollPanel({
     getRect: () => {
       const t = topBar.rect();
@@ -180,6 +182,29 @@ export function createStaffDetailScreen({ layout, assets, team, garage, topBar, 
       }
     }
     y += 12;
+
+    // --- Milestone 25b: items (series common feature §4) — what they love, what they were given, Give an item ---
+    if (team.items) {
+      const lk = team.items.likesOf(s.id);
+      const got = team.items.receivedBy(s.id);
+      const gname = (g) => itemGroupById(g)?.name ?? g;
+      const lines = [
+        `Loves: ${lk.loves.map(gname).join(' and ') || '—'} kit${lk.dislike ? ` · not keen on ${gname(lk.dislike)}` : ''}`,
+        got.length ? `Items received: ${got.length} — ${got.slice(-3).map((g) => `${itemTypeById(g.type)?.name ?? g.type} (+${g.gain} ${g.stat})`).join(', ')}` : 'Items received: none yet',
+        `Item points left this season: ${team.items.pointsLeft(s.id)} of ${ITEM_RULES.periodCap}`,
+      ];
+      if (ctx) text(ctx, 'Equipment', 8, y, { size: S.heading, bold: true, color: C.actionDark });
+      y += 64;
+      lines.forEach((l, i) => {
+        const h = para(null, l, 0, 0, w - 16, { size: S.body });
+        if (ctx) para(ctx, l, 8, y, w - 16, { size: S.body, color: i === 0 ? C.good : C.text });
+        y += h + 8;
+      });
+      const gb = { x: 0, y: y + 8, w, h: 120 };
+      if (ctx) drawButton(ctx, gb, `Give an item (${team.items.count} in the ${ITEM_RULES.storeName})`, { accent: C.good, disabled: !team.items.count });
+      hits.push({ rect: gb, id: 'giveItem', onTap: () => (team.items.count ? giveItem(s.id) : toast(`The ${ITEM_RULES.storeName} is empty`, 'Items come from races, sponsors, contracts and great training')) });
+      y += 148;
+    }
     if (ctx) {
       text(ctx, 'Salary', 8, y, { size: S.heading, bold: true, color: C.actionDark });
       text(ctx, `${s.salary.toLocaleString('en-US')} Credits a month`, w - 8, y + 4, { size: S.body, bold: true, align: 'right' });

@@ -137,6 +137,9 @@ export function createEvents({ bus, team, seed = 'raceworks' }) {
       case 'flag':
         flags[e.key] = (flags[e.key] ?? 0) + 1;
         break;
+      case 'item': // Milestone 25b: an item for the Parts Store (src/systems/items.js grants it)
+        bus.emit('event:item', { source: e.source ?? 'wellWisher' });
+        break;
       default:
         return;
     }
@@ -336,6 +339,11 @@ export function createEvents({ bus, team, seed = 'raceworks' }) {
     classOf,
     milestoneFired: (id) => events.seen(id),
     fireSecret: (id, params = {}) => (BY_ID[id] ? fireNow(id, params) : null), // Milestone 25
+    fireItemEvent: (id, params = {}) => (BY_ID[id] ? fireNow(id, params) : null), // Milestone 25b: the well-wisher
+    // Milestone 25b: a plain note (an item arrived, the store is full): a minor strip and an Inbox line, not an event.
+    //   It only shows a strip when no other strip is showing or waiting (else straight to the Inbox, unread), so it never
+    //   holds up a card.
+    note: ({ title, body = '', icon = null, cls = 'item' }) => notes.post({ kind: 'flavour', day: today(), title, body, icon: icon ?? classOf(cls).icon, art: null, data: { cls }, level: 'minor', toast: !notes.toasts.length && !notes.toastWaiting.length }),
     markAllRead: () => notes.markAllRead(),
     bonus: (key) => events.total(key),
     bonusKeys: () => [...new Set(events.state.modifiers.map((m) => m.key))],

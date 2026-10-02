@@ -42,6 +42,8 @@
 //   C12 (championships), Ghostline in World-tier fields, V17–V20 (carVisual), staff arrivals, events and account switches.
 // Milestone 23: team.events (src/systems/events.js) — the data-driven events (data/events.js), the one-card queue, the
 //   Inbox and the milestone moments; its timed modifiers join the one effect query (team.facilities.bonus(key)).
+// Milestone 25b: team.items (src/systems/items.js) — items for staff on core/ItemSystem (the Parts Store, likes, caps,
+//   sources); facility levels 1–3 live in team.facilities (core/FacilitySystem levels).
 import { Clock } from '../../../../core/Clock.js';
 import { Rng } from '../../../../core/Rng.js';
 import { StaffSystem } from '../../../../core/StaffSystem.js';
@@ -70,6 +72,7 @@ import { createCombos } from '../systems/combos.js';
 import { ENDURANCE } from '../../data/training.js';
 import { createEvents } from '../systems/events.js';
 import { createSecrets } from '../systems/secrets.js';
+import { createItems } from '../systems/items.js'; // Milestone 25b
 
 // A new game's setup when none is given (tests, and saves from before Milestone 4b).
 export const DEFAULT_SETUP = { teamName: 'RACEWORKS', principal: 'Principal', colour: 'red', founderId: 'MEC01' };
@@ -141,6 +144,9 @@ export const SAVE_MIGRATIONS = {
   //   and account records (top speeds, Prestige Tokens, switches). Nothing to change here — secrets.load() fills in what a
   //   save made before it lacks (records rebuilt from its cars and race history, the starting staff from its founder).
   17: (record) => record,
+  //   18 → 19 (Milestone 25b): items (the Parts Store, likes, season points) and facility levels. Nothing to change here —
+  //   items.load() gives a save without them an empty store and everyone's likes; a layout without levels is all level 1.
+  18: (record) => record,
 };
 
 const blankContractRecords = () => ({ partEvents: {}, facts: {} });
@@ -164,7 +170,8 @@ export class Team {
       rules: STAFF_RULES,
       planActivity: (s) => this.activityOf(s),
       // Endurance Camp (Milestone 12): each camp done adds to resting recovery for good (data/training.js ENDURANCE).
-      restModifier: (s) => ({ energyMult: 1 + (ENDURANCE.recoveryPct * Math.min(ENDURANCE.maxCamps, s.counters?.enduranceCamps ?? 0)) / 100 }),
+      // Milestone 25b: + Fitness items (+1% recovery a point).
+      restModifier: (s) => ({ energyMult: 1 + (ENDURANCE.recoveryPct * Math.min(ENDURANCE.maxCamps, s.counters?.enduranceCamps ?? 0) + (this.items?.fitnessPct(s) ?? 0)) / 100 }),
       // Push Quality (bible §14.7): +10% Energy drain for the car's team.
       energyLossMultiplier: (s) => {
         const job = this.cars?.active;
@@ -185,7 +192,7 @@ export class Team {
     });
     this.money = createTeamMoney({ bus, seed, clock: this.clock, staff: this.staff, cars: this.cars, revealBonus: () => this.facilities.bonus('revealReputation'), generateOffer: (rng, taken) => contractTerms(this, rng, taken), onPaid: (c) => this.contractPaid(c) }); // (Milestone 21: the §29 contracts)
     // (Milestone 21: the sponsors' perks join the research bonuses in the one effect query)
-    this.facilities = createGarageFacilities({ bus, money: this.money, research: () => new Set(this.unlocks.research), secrets: () => new Set(this.secrets?.unlockedIds() ?? []), extraBonus: (key) => this.research.bonus(key) + (this.sponsors?.bonus(key) ?? 0) + (this.events?.bonus(key) ?? 0), extraKeys: () => [...this.research.bonusKeys(), ...(this.sponsors?.bonusKeys() ?? []), ...(this.events?.bonusKeys() ?? [])] }); // Milestone 10 (Milestone 23: + the events' timed modifiers)
+    this.facilities = createGarageFacilities({ bus, today: () => this.clock.totalDays, money: this.money, research: () => new Set(this.unlocks.research), secrets: () => new Set(this.secrets?.unlockedIds() ?? []), extraBonus: (key) => this.research.bonus(key) + (this.sponsors?.bonus(key) ?? 0) + (this.events?.bonus(key) ?? 0), extraKeys: () => [...this.research.bonusKeys(), ...(this.sponsors?.bonusKeys() ?? []), ...(this.events?.bonusKeys() ?? [])] }); // Milestone 10 (Milestone 23: + the events' timed modifiers)
     this.research = createResearch({ bus, team: this }); // Milestone 11
     this.combos = createCombos({ bus, team: this }); // Milestone 22 (after research: a discovery pays RP)
     this.races = createRaces({ bus, team: this }); // Milestone 6: the race being run (fixed seed) and the results
@@ -197,6 +204,7 @@ export class Team {
     this.contractRecords = blankContractRecords(); // Milestone 21
     attachContractProgress({ bus, team: this }); // Milestone 21: race weekends and drills count for their contracts
     this.events = createEvents({ bus, team: this, seed }); // Milestone 23 (last: its day runs after every other system's)
+    this.items = createItems({ bus, team: this, seed }); // Milestone 25b
     this.secrets = createSecrets({ bus, team: this, rules: secretRules }); // Milestone 24 (after everything: facts are committed first)
     this.runId = null;
     this.recruitment.extraBusy = (id) => {
@@ -261,6 +269,7 @@ export class Team {
     this.money.firstOffers(); // Milestone 21: three contract offers the team can meet (the garage and research are set now)
     this.events.newGame(); // Milestone 23: an empty Inbox, then Opening the First Garage
     this.runId = newRunId();
+    this.items.newGame(); // Milestone 25b: an empty Parts Store, everyone's likes
     this.secrets.newGame(); // Milestone 24
   }
 
@@ -421,6 +430,7 @@ export class Team {
       events: this.events.serialize(), // Milestone 23
       runId: this.runId, // Milestone 24
       secrets: this.secrets.serialize(), // Milestone 24
+      items: this.items.serialize(), // Milestone 25b
     };
   }
 
@@ -451,6 +461,7 @@ export class Team {
     if (!data.sponsors) this.money.firstOffers(); // before Milestone 21: three fresh contract offers
     this.events.load(data.events ?? null); // none before Milestone 23: an empty Inbox, past milestones counted as fired
     this.runId = data.runId ?? newRunId(); // none before Milestone 24
+    this.items.load(data.items ?? null); // none before Milestone 25b: an empty store, likes rolled / from data
     this.secrets.load(data.secrets ?? null); // none before Milestone 24: no rule state, records rebuilt from the save
   }
 

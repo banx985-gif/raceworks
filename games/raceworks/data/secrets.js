@@ -51,6 +51,8 @@ export const FACTS = [
   { id: 'run.wins', scope: 'run', type: 'number', text: 'race weekend wins' },
   { id: 'run.podiums', scope: 'run', type: 'number', text: 'race weekend podiums' },
   { id: 'run.facilities', scope: 'run', type: 'set', text: 'facility ids standing in the garage' },
+  { id: 'run.facilityLevels', scope: 'run', type: 'list', text: 'each standing facility and its level 1–3 (Milestone 25b)', fields: ['id', 'level'] },
+  { id: 'run.maxFacilityLevel', scope: 'run', type: 'number', text: 'the highest facility level in the garage (0 with none; Milestone 25b)' },
   { id: 'run.research', scope: 'run', type: 'set', text: 'research node ids finished' },
   { id: 'run.combos', scope: 'run', type: 'set', text: 'combo ids on this run’s finished cars' },
   { id: 'run.sponsorDeals', scope: 'run', type: 'number', text: 'sponsor deals signed (running + past)' },

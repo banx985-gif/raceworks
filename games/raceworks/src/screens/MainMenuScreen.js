@@ -1,4 +1,4 @@
-// Main menu (Milestone 4b, bible §7): Continue (the latest slot), New Game, Load, Help. The RACEWORKS title is drawn in
+// Main menu (Milestone 4b, bible §7): Continue (the latest slot), New Game, Load, Help (Milestone 25b: + Settings). The RACEWORKS title is drawn in
 // code text for now (the title logo is due a redraw). New Game+, Records, Settings and Credits arrive with their
 // milestones. Milestone 8: the picture is Aaron's art, never a car drawn in code — the key art (race_brand_02) in a
 // frame, and in front of it the latest team's Club Hatch (car_v01_showcase) in its team colour (src/ui/livery.js).
@@ -17,7 +17,7 @@ const MENU_CAR = CLASSES.clubHatch.art;
 const C = THEME.color;
 const S = THEME.size;
 
-export function createMainMenuScreen({ renderer, layout, assets, slots, onContinue, onNew, onLoad, onHelp }) {
+export function createMainMenuScreen({ renderer, layout, assets, slots, onContinue, onNew, onLoad, onHelp, onSettings = null }) {
   let t = 0;
   const latest = () => {
     const list = slots() ?? [];
@@ -28,9 +28,10 @@ export function createMainMenuScreen({ renderer, layout, assets, slots, onContin
     const sr = layout.safeRect;
     const w = Math.min(sr.w - 120, 760);
     const x = sr.x + (sr.w - w) / 2;
-    const h = 150;
-    const gap = 30;
-    const total = 4 * h + 3 * gap;
+    const h = onSettings ? 132 : 150; // (Milestone 25b: five buttons with Settings)
+    const gap = onSettings ? 24 : 30;
+    const n = onSettings ? 5 : 4;
+    const total = n * h + (n - 1) * gap;
     const y0 = sr.y + sr.h - total - Math.max(80, sr.h * 0.07);
     const last = latest();
     return [
@@ -38,6 +39,7 @@ export function createMainMenuScreen({ renderer, layout, assets, slots, onContin
       { id: 'new', label: 'New Game', onTap: onNew },
       { id: 'load', label: 'Load', sub: `${(slots() ?? []).filter((s) => !s.empty).length} of ${(slots() ?? []).length || 4} slots used`, accent: C.progress, onTap: onLoad },
       { id: 'help', label: 'Help', accent: C.progress, onTap: onHelp },
+      ...(onSettings ? [{ id: 'settings', label: 'Settings', sub: 'Sound, graphics, text size, Menu button, hints', accent: C.progress, onTap: onSettings }] : []),
     ].map((b, i) => ({ ...b, r: { x, y: y0 + i * (h + gap), w, h } }));
   }
 

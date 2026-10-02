@@ -3,14 +3,15 @@
 //   Medal picture tinted Bronze / Silver / Gold, with counts), Mastered, attempts. Records are the account's: they
 //   survive New Game+, slot deletes and reloads.
 //   Drill settings (this device, bible §13.6 / §45): steering sensitivity, racing-line help, brake-line help, reduced
-//   motion, reduced flashes. None of them sets competitiveSecretInvalidated.
+//   motion, reduced flashes. None of them sets competitiveSecretInvalidated. Milestone 25b: they moved to the Settings
+//   sheet (series common feature §2); here a line shows them and a Settings button opens that sheet (onSettings).
 //   ?debug=1: Practice any drill (no course), Reset records, and whether a forced result has invalidated competitive
 //   secret checks.
 import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { text, para, card } from '../../../../core/ui/Kit.js';
-import { DRILLS, MEDALS, MEDAL_NAMES, DRILL_ART, SENSITIVITY_RANGE, DRILL_SETTINGS } from '../../data/drills.js';
+import { DRILLS, MEDALS, MEDAL_NAMES, DRILL_ART, DRILL_SETTINGS } from '../../data/drills.js';
 import { COURSES } from '../../data/training.js';
 import { drawMedal } from '../ui/medal.js';
 
@@ -19,7 +20,7 @@ const S = THEME.size;
 const PAD = 24;
 const courseName = (id) => COURSES.find((c) => c.id === id)?.name ?? id;
 
-export function createMedalsScreen({ layout, assets, topBar, records, settings, debugEnabled = false, goPractice = () => {}, toast = () => {} }) {
+export function createMedalsScreen({ layout, assets, topBar, records, settings, onSettings = () => {}, debugEnabled = false, goPractice = () => {}, toast = () => {} }) {
   const panel = new ScrollPanel({
     getRect: () => {
       const t = topBar.rect();
@@ -58,30 +59,6 @@ export function createMedalsScreen({ layout, assets, topBar, records, settings, 
     return h;
   }
 
-  // One settings row: a label and either a toggle or − / value / +.
-  function settingRow(ctx, y, w, label, id, kind) {
-    const h = 130;
-    const v = opt(id);
-    if (ctx) text(ctx, label, 8, y + 34, { size: S.body, bold: true, maxWidth: w - 440 });
-    if (kind === 'toggle') {
-      const b = { x: w - 300, y: y + 8, w: 300, h: 114 };
-      if (ctx) drawButton(ctx, b, v ? 'On' : 'Off', { active: !!v, accent: C.progress });
-      hits.push({ rect: b, id: `set_${id}`, onTap: () => settings.set(id, !v) });
-    } else {
-      const R = SENSITIVITY_RANGE;
-      const minus = { x: w - 420, y: y + 8, w: 120, h: 114 };
-      const plus = { x: w - 120, y: y + 8, w: 120, h: 114 };
-      if (ctx) {
-        drawButton(ctx, minus, '−', { disabled: v <= R.min, accent: C.progress });
-        drawButton(ctx, plus, '+', { disabled: v >= R.max, accent: C.progress });
-        text(ctx, `${v.toFixed(2)}×`, w - 210, y + 36, { size: S.button, bold: true, align: 'center' });
-      }
-      hits.push({ rect: minus, id: `set_${id}_down`, onTap: () => settings.set(id, Math.max(R.min, Math.round((v - R.step) * 100) / 100)) });
-      hits.push({ rect: plus, id: `set_${id}_up`, onTap: () => settings.set(id, Math.min(R.max, Math.round((v + R.step) * 100) / 100)) });
-    }
-    return h;
-  }
-
   function layoutPage(ctx, w) {
     hits = [];
     let y = 0;
@@ -99,11 +76,15 @@ export function createMedalsScreen({ layout, assets, topBar, records, settings, 
     const note = 'Aids never affect records, achievements or secrets.';
     if (ctx) text(ctx, note, 8, y, { size: S.small, color: C.textMuted, maxWidth: w - 16 });
     y += 56;
-    y += settingRow(ctx, y, w, 'Steering sensitivity', 'steerSensitivity', 'range');
-    y += settingRow(ctx, y, w, 'Racing-line help', 'lineAid', 'toggle');
-    y += settingRow(ctx, y, w, 'Brake-line help', 'brakeAid', 'toggle');
-    y += settingRow(ctx, y, w, 'Reduced motion', 'reducedMotion', 'toggle');
-    y += settingRow(ctx, y, w, 'Reduced flashes', 'reducedFlashes', 'toggle');
+    const on = (k) => (opt(k) ? 'on' : 'off');
+    const now = `Steering ${Number(opt('steerSensitivity')).toFixed(2)}× · racing line ${on('lineAid')} · brake line ${on('brakeAid')} · reduced motion ${on('reducedMotion')} · reduced flashes ${on('reducedFlashes')}`;
+    const nh = para(null, now, 0, 0, w - 16, { size: S.small });
+    if (ctx) para(ctx, now, 8, y, w - 16, { size: S.small, color: C.text });
+    y += nh + 20;
+    const sb = { x: 0, y, w, h: 120 };
+    if (ctx) drawButton(ctx, sb, 'Settings', { accent: C.progress });
+    hits.push({ rect: sb, id: 'openSettings', onTap: () => onSettings() });
+    y += 140;
     if (debugEnabled) {
       y += 20;
       if (ctx) text(ctx, `Debug · competitive secrets ${records.invalidated ? 'INVALIDATED (a forced result)' : 'valid'}`, 8, y, { size: S.small, bold: true, color: records.invalidated ? C.bad : C.good, maxWidth: w - 16 });

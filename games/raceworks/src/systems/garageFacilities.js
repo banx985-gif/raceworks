@@ -15,19 +15,25 @@
 // and here 'facility:bought' { item, cost }.
 import { FacilitySystem } from '../../../../core/FacilitySystem.js';
 import { rankIndexOf } from '../../../../core/CompanyRank.js';
-import { FACILITIES, REST_SPOT, PROPS, SELL_REFUND_PCT, STARTER_AREA, EXPANSIONS, ENTRANCE, START_LAYOUT, PHASE_AREAS, BUILD_TEXT } from '../../data/facilities.js';
+import { FACILITIES, REST_SPOT, PROPS, SELL_REFUND_PCT, STARTER_AREA, EXPANSIONS, ENTRANCE, START_LAYOUT, PHASE_AREAS, BUILD_TEXT, FACILITY_LEVELS, NO_SCALE, NO_SCALE_PREFIX, LEVEL_BONUS } from '../../data/facilities.js';
 import { RANKS } from '../../data/economy.js';
 import { nodeLabel } from './research.js';
 
-export const FACILITY_DEFS = Object.fromEntries([...FACILITIES, REST_SPOT, ...PROPS].map((d) => [d.id, { ...d, w: d.size.w, h: d.size.h }]));
+// Milestone 25b: counts and unlock flags never scale with a level (data NO_SCALE); a facility with only those gets its
+// LEVEL_BONUS (nothing at level 1). The Rest Spot and props have no levels (levels: false).
+const noScale = (key) => NO_SCALE.includes(key) || NO_SCALE_PREFIX.some((p) => key.startsWith(p));
+const leveled = (d) => ({ ...d, effects: [...d.effects.map((e) => (noScale(e.key) ? { ...e, scale: false } : e)), ...(LEVEL_BONUS[d.id] ?? []).map((e) => ({ ...e, levelMult: [0, 1, 2], levelOnly: true }))] });
+export const FACILITY_DEFS = Object.fromEntries([...FACILITIES.map(leveled), { ...REST_SPOT, levels: false }, ...PROPS.map((p) => ({ ...p, levels: false }))].map((d) => [d.id, { ...d, w: d.size.w, h: d.size.h }]));
 
 // research() → the finished research nodes (Milestone 11); extraBonus(key) / extraKeys() → effects from elsewhere (research
 // bonuses) added into bonus(key), so every system still asks the one query.
 // Milestone 25: secrets() → the secret ids found (team.unlocks.secrets): a secret facility (F34 / F35, unlock.secret) is in
 // the shop only once its secret is found, and the Ghost Annex (a secret room) opens with SEC-FAC-02.
-export function createGarageFacilities({ bus, money, research = () => new Set(), secrets = () => new Set(), extraBonus = () => 0, extraKeys = () => [] }) {
+// Milestone 25b: today() → the game day (upgrades take days; they finish on 'clock:day').
+export function createGarageFacilities({ bus, money, research = () => new Set(), secrets = () => new Set(), extraBonus = () => 0, extraKeys = () => [], today = () => 0 }) {
   const system = new FacilitySystem({
     bus,
+    levels: { max: FACILITY_LEVELS.max, mult: FACILITY_LEVELS.mult }, // Milestone 25b
     defs: FACILITY_DEFS,
     area: { cols: STARTER_AREA.cols, rows: STARTER_AREA.rows },
     zones: EXPANSIONS.map((z) => ({ ...z })),
@@ -64,6 +70,54 @@ export function createGarageFacilities({ bus, money, research = () => new Set(),
     ...EXPANSIONS.map((z) => ({ ...z, state: system.isOwned(z.id) ? 'open' : z.secret ? 'hidden' : 'locked', why: z.openInM10 ? `Opens at Rank ${z.rank}` : `Rank ${z.rank} · opens in a later update` })),
   ];
 
+  // --- levels (Milestone 25b, series common feature §3) -------------------------------------------------------------
+  const L = FACILITY_LEVELS;
+  const rankIds = RANKS.map((r) => r.id);
+  // The rank a facility is built at (its unlock rank; Start = E; research / secret ones: data placeholders).
+  function buildRank(def) {
+    const u = def.unlock ?? {};
+    if (u.rank) return u.rank;
+    if (u.secret) return L.SECRET_BUILD_RANK;
+    if (u.research) return L.RESEARCH_BUILD_RANK;
+    return rankIds[0];
+  }
+  const rankFor = (def, to) => rankIds[Math.min(rankIds.length - 1, rankIndexOf(RANKS, buildRank(def)) + L.rankStep[to - 1])];
+  const upgradeCost = (def, to) => Math.round(def.cost * L.costMult[to - 1]);
+  // One placed facility's level and its next upgrade: { level, max, mult, pending, next: { to, cost, days, rank, ok, why } }
+  function levelStatus(uid) {
+    const it = system.get(uid);
+    if (!it) return null;
+    const def = FACILITY_DEFS[it.def];
+    if (def.levels === false) return null;
+    const level = system.level(uid);
+    const pending = system.upgradePending(uid);
+    const out = { uid, defId: it.def, level, max: L.max, mult: L.mult[level - 1], pending, next: null };
+    if (level < L.max) {
+      const to = level + 1;
+      const cost = upgradeCost(def, to);
+      const rank = rankFor(def, to);
+      const why = pending ? `Upgrading: ready on day ${pending.doneDay + 1}` : !hasRank(rank) ? `Needs Rank ${rank}` : money.economy.isBlocked('facility') ? BUILD_TEXT.debt : !money.affordable(cost) ? `Needs ${cost.toLocaleString('en-US')} Credits` : null;
+      out.next = { to, cost, days: L.days[to - 1], rank, mult: L.mult[to - 1], ok: !why, why };
+    }
+    return out;
+  }
+  function upgrade(uid) {
+    const st = levelStatus(uid);
+    if (!st) return { ok: false, reason: 'This can’t be upgraded' };
+    if (!st.next) return { ok: false, reason: 'Already at the top level' };
+    if (!st.next.ok) return { ok: false, reason: st.next.why };
+    const def = FACILITY_DEFS[st.defId];
+    const r = system.startUpgrade(uid, { cost: st.next.cost, today: today(), days: st.next.days });
+    if (!r.ok) return { ok: false, reason: r.why };
+    money.economy.spend('credits', st.next.cost, `Upgrade: ${def.name} to level ${st.next.to}`, 'facilities');
+    bus.emit('facility:upgradeBought', { uid, defId: st.defId, to: st.next.to, cost: st.next.cost, doneDay: r.doneDay });
+    if (st.next.days <= 0) bus.emit('facility:upgraded', { uid, defId: st.defId, level: system.level(uid) });
+    return { ok: true, to: st.next.to, cost: st.next.cost, doneDay: r.doneDay };
+  }
+  bus.on('clock:day', () => {
+    for (const d of system.tickUpgrades(today())) bus.emit('facility:upgraded', { uid: d.uid, defId: system.get(d.uid)?.def, level: d.level });
+  });
+
   // --- the effect queries -------------------------------------------------------------------------------------------
   const bonus = (key) => system.total(key) + extraBonus(key);
   const api = {
@@ -84,6 +138,11 @@ export function createGarageFacilities({ bus, money, research = () => new Set(),
 
     // --- what's here ------------------------------------------------------------------------------------------------
     items: () => system.placed,
+    levelStatus, // Milestone 25b
+    upgrade,
+    level: (uid) => system.level(uid),
+    facilityLevel: (defId) => system.levelOfDef(defId), // 0 when it isn't built (the Secret Engine fact)
+    levels: () => system.placed.filter((p) => FACILITY_DEFS[p.def].levels !== false).map((p) => ({ id: p.def, level: system.level(p.uid) })),
     builtIds: () => [...new Set(system.placed.map((p) => p.def))],
     has: (defId) => system.has(defId),
     expansions,

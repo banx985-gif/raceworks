@@ -19,6 +19,11 @@
 //   (front desk) leads to Recruitment; a worker's sheet has Train (or their course and days left).
 // Milestone 23: the Inbox (top bar) — every event newest first (● unread), tap one to see its card again (a choice once
 //   made stays locked); Rumour Archive and Mark all read at the top.
+// Milestone 25b (series common features): every station's sheet starts with its main action (data/menu.js
+//   FACILITY_ACTIONS → menuRow(row), the Menu's own code path) and ends with its level (1–3) and Upgrade; Build Mode's
+//   sheet has Upgrade too and its Sell pays half of the build price and the upgrades. The Parts Store ('store' → 'item' →
+//   'giveItem' → 'giveConfirm', and 'giveTo' from a person) gives items to staff; the Sponsor Wall shows its logo slots;
+//   Help (top bar) leads to Settings (openSettings) so Settings is reachable with the Menu button off.
 // Milestone 21: the Sponsor Wall's sheet also has Sponsors — the 'sponsors' sheet (src/ui/sponsorMenu.js, the same as the
 //   Money sheet's Sponsors tab): slots, deals, obligation progress and the offers.
 import { MenuRegistry } from '../../../../core/ui/BottomSheet.js';
@@ -45,6 +50,11 @@ import { NODE, nodeLabel } from '../systems/research.js';
 import { TRACKS, TRACK_IDS, geoOf } from '../race/tracks.js'; // Milestone 19
 import { champById, TROPHY_ART } from '../../data/championships.js'; // Milestone 20
 import { RIVAL_TEAMS } from '../../data/rivals.js';
+import { FACILITY_ACTIONS, MENU_GROUPS } from '../../data/menu.js'; // Milestone 25b
+import { ITEM_RARITIES, ITEM_RULES, ITEM_TEXT, ITEM_SOURCES, itemTypeById, itemGroupById } from '../../data/items.js';
+import { STAT_NAMES } from '../../data/staff.js';
+import { itemIcon } from '../../../../core/ui/ItemArt.js';
+import { sponsorById } from '../../data/sponsors.js';
 
 const C = THEME.color;
 
@@ -54,7 +64,7 @@ export function staffLine(s) {
   return [ROLES[s.role].name, `Level ${s.level}`, TIERS[s.tier].name, ...status].join(' · ');
 }
 
-export function createGarageMenus({ garage, team, assets = null, open, close = () => {}, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null, goResearch = () => {}, goRecruit = () => {}, goTrain = () => {}, debugTracks = null, goChampRound = () => {}, enterChamp = () => {} }) {
+export function createGarageMenus({ garage, team, assets = null, open, close = () => {}, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null, goResearch = () => {}, goRecruit = () => {}, goTrain = () => {}, debugTracks = null, goChampRound = () => {}, enterChamp = () => {}, menuRow = () => {}, menuState = () => ({}), openSettings = () => {}, showHelp = () => {}, sfx = () => {}, haptic = () => {} }) {
   const menus = new MenuRegistry();
   const fac = team.facilities;
   // What a facility does, for its sheets (bible §19): its effect, its role and what it cost.
@@ -63,6 +73,160 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
     `${def.role} station${def.cost ? ` · built for ${fmt(def.cost)} Credits` : ''}`,
   ];
   const enterBuild = () => garage().setBuildMode(true);
+  // --- Milestone 25b: the main action and the level ---------------------------------------------------------------
+  const rowOf = (id) => MENU_GROUPS.flatMap((g) => g.rows).find((r) => r.id === id) ?? null;
+  const uidOf = (defId, st = null) => st?.uid ?? fac.items().find((p) => p.def === defId)?.uid ?? null;
+  function mainActionSection(defId) {
+    const act = FACILITY_ACTIONS[defId];
+    if (!act) return [];
+    const row = rowOf(act.row);
+    const st = menuState(act.row) ?? {};
+    return [{ columns: 1, buttons: [{ id: 'mainAction', label: act.label, sub: st.locked ?? row?.line ?? '', icon: row?.icon ?? 'race_ui_01', locked: !!st.locked, accent: C.good, onTap: () => !st.locked && menuRow(act.row) }] }];
+  }
+  const multText = (m) => `×${Number.isInteger(m) ? m : m.toFixed(1)}`;
+  function levelSections(uid, reopen) {
+    const ls = uid != null ? fac.levelStatus(uid) : null;
+    if (!ls) return [];
+    const def = fac.defs[ls.defId];
+    const lines = [{ text: `Level ${ls.level} of ${ls.max}${ls.level > 1 ? ` — its effect ${multText(ls.mult)}` : ''}`, color: C.actionDark }];
+    if (ls.pending) lines.push({ text: `Upgrading to level ${ls.pending.to}: ready on day ${ls.pending.doneDay + 1} (it works at level ${ls.level} until then)`, color: C.progress });
+    const out = [{ title: 'Level', lines }];
+    if (ls.next && !ls.pending) {
+      const bonus = def.effects.some((e) => e.levelOnly) ? ' and an upgrade bonus' : '';
+      out.push({ columns: 1, buttons: [{ id: 'upgrade', label: `Upgrade to level ${ls.next.to}`, sub: ls.next.why ?? `${fmt(ls.next.cost)} Credits · its effect ${multText(ls.next.mult)}${bonus} · ${ls.next.days} days`, icon: 'race_ui_01', disabled: !ls.next.ok, accent: C.purple, onTap: () => {
+        const r = fac.upgrade(uid);
+        if (!r.ok) return toast(r.reason);
+        sfx('sfx_upgrade');
+        toast(`${def.name}: upgrading to level ${r.to}`, `−${fmt(r.cost)} Credits · ready in ${ls.next.days} days`);
+        reopen();
+      } }] });
+    }
+    return out;
+  }
+
+  // --- Milestone 25b: the Sponsor Wall's logo slots ------------------------------------------------------------------
+  function logoSlotSections() {
+    const sp = team.sponsors;
+    const n = sp.slots();
+    const buttons = [];
+    for (let i = 0; i < n; i++) {
+      const d = sp.deals[i];
+      const def = d ? sponsorById(d.id) : null;
+      buttons.push(def ? { id: `logo_${i}`, label: def.name, sub: `On the car · ${sp.daysLeft(d)} days left`, icon: def.logo, accent: C.good, onTap: () => open('sponsors') } : { id: `logo_${i}`, label: 'Empty slot', sub: sp.offers.length ? 'Sign an offer to fill it' : 'Offers come each month', icon: 'race_ui_26', accent: C.outline, onTap: () => open('sponsors') });
+    }
+    return [{ title: `Logo slots · ${sp.deals.length} of ${n}`, columns: Math.min(3, Math.max(1, n)), buttons }];
+  }
+
+  // --- Milestone 25b: the Parts Store (items) -------------------------------------------------------------------------
+  const items = team.items;
+  const statWord = (k) => (k === 'FIT' ? 'Energy recovery' : STAT_NAMES[k] ?? k);
+  const itemName = (x) => itemTypeById(x.type)?.name ?? x.type;
+  const itemLine = (x) => {
+    const t = itemTypeById(x.type);
+    const r = ITEM_RARITIES[x.rarity];
+    return `${r.name} · ${itemGroupById(t.group).name} · ${statWord(t.stat)} +${r.gain}${t.stat === 'FIT' ? '%' : ''}`;
+  };
+  const likeWord = (pv) => (pv.like === 'love' ? `loves it ×${ITEM_RULES.loveMult} and Morale +${ITEM_RULES.loveMorale}` : pv.like === 'dislike' ? `not their thing ×${ITEM_RULES.dislikeMult}` : 'no strong feelings');
+  const capWord = (pv) => (pv.capped === 'tier' ? ' · capped by their tier' : pv.capped === 'period' ? ' · capped by this season’s item points' : '');
+  const gainText = (pv) => (pv.ok ? `+${pv.gain} ${statWord(pv.stat)}${pv.stat === 'FIT' ? '%' : ''} (${likeWord(pv)})${capWord(pv)}` : pv.why);
+  const storeButton = () => ({ id: 'partsStore', label: ITEM_RULES.storeName, sub: `${items.count} of ${items.max} items · give them to staff`, icon: ITEM_RULES.storeIcon, accent: C.progress, onTap: () => open('store') });
+  menus.register('store', () => ({
+    title: ITEM_RULES.storeName,
+    subtitle: `${items.count} of ${items.max} items · earned, never bought`,
+    art: ITEM_RULES.storeIcon,
+    accent: C.progress,
+    sections: items.count
+      ? [{ lines: [ITEM_TEXT.storeLine] }, { columns: 1, buttons: items.store().map((x) => ({ id: `item_${x.uid}`, label: itemName(x), sub: `${itemLine(x)} · ${ITEM_SOURCES[x.source]?.text ?? ''}`, icon: itemIcon(x.type, x.rarity), accent: C.progress, onTap: () => open('item', x.uid) })) }]
+      : [{ lines: [ITEM_TEXT.empty] }],
+  }));
+  menus.register('item', (uid) => {
+    const x = items.system.get(uid);
+    if (!x) return null;
+    const value = items.system.sellValue(uid);
+    return {
+      title: itemName(x),
+      subtitle: itemLine(x),
+      art: itemIcon(x.type, x.rarity),
+      accent: C.progress,
+      sections: [
+        { lines: [`Given to one person, it raises their ${statWord(itemTypeById(x.type).stat)} for good, then it is used up. People who love ${itemGroupById(itemTypeById(x.type).group).name} kit get ×${ITEM_RULES.loveMult}.`] },
+        { columns: 1, buttons: [
+          { id: 'giveItem', label: ITEM_TEXT.give, sub: 'Pick who gets it: see the exact gain first', icon: 'race_ui_02', accent: C.good, onTap: () => open('giveItem', uid) },
+          { id: 'sellItem', label: `Sell the spare for ${fmt(value)} Credits`, sub: 'It goes for good', icon: 'race_ui_05', accent: C.bad, onTap: () => {
+            const v = items.sell(uid);
+            if (v != null) toast(`Sold: ${itemName(x)}`, `+${fmt(v)} Credits`);
+            open('store');
+          } },
+          { id: 'backStore', label: `‹ ${ITEM_RULES.storeName}`, accent: C.progress, onTap: () => open('store') },
+        ] },
+      ],
+    };
+  });
+  menus.register('giveItem', (uid) => {
+    const x = items.system.get(uid);
+    if (!x) return null;
+    return {
+      title: `Give: ${itemName(x)}`,
+      subtitle: `${itemLine(x)} · tap someone to see the exact gain`,
+      art: itemIcon(x.type, x.rarity),
+      accent: C.progress,
+      sections: [
+        { columns: 1, buttons: team.roster.map((p) => {
+          const pv = items.preview(uid, p.id);
+          return { id: `give_${p.id}`, label: p.name, sub: gainText(pv), icon: p.art, disabled: !pv.ok, accent: pv.like === 'love' ? C.good : C.progress, onTap: () => open('giveConfirm', { uid, id: p.id }) };
+        }) },
+        { columns: 1, buttons: [{ id: 'backItem', label: '‹ Back', accent: C.progress, onTap: () => open('item', uid) }] },
+      ],
+    };
+  });
+  menus.register('giveConfirm', (t) => {
+    const x = t && items.system.get(t.uid);
+    const p = t && team.get(t.id);
+    if (!x || !p) return null;
+    const pv = items.preview(t.uid, t.id);
+    const lk = items.likesOf(t.id);
+    return {
+      title: `${itemName(x)} → ${p.name}`,
+      subtitle: 'Used up when given · the gain is for good',
+      art: p.art,
+      accent: C.good,
+      sections: [
+        { lines: [
+          { text: pv.ok ? `${statWord(pv.stat)}: ${pv.now} → ${pv.now + pv.gain} (+${pv.gain})` : pv.why, color: pv.ok ? C.good : C.bad },
+          `Base ${pv.base ?? '—'} · ${likeWord(pv)}${capWord(pv)}`,
+          `Loves: ${lk.loves.map((g) => itemGroupById(g)?.name ?? g).join(', ') || '—'}${lk.dislike ? ` · not keen on ${itemGroupById(lk.dislike)?.name}` : ''} · item points left this season: ${items.pointsLeft(t.id)} of ${ITEM_RULES.periodCap}`,
+        ] },
+        { columns: 2, buttons: [
+          { id: 'giveYes', label: `Give (+${pv.gain ?? 0})`, sub: `To ${p.name.split(' ')[0]}`, icon: itemIcon(x.type, x.rarity), disabled: !pv.ok, accent: C.good, onTap: () => {
+            const r = items.give(t.uid, t.id);
+            if (!r.ok) return toast(r.why ?? 'It can’t be given');
+            sfx('sfx_item');
+            haptic('light');
+            toast(`${p.name.split(' ')[0]}: +${r.gain} ${statWord(r.stat)}`, r.like === 'love' ? 'They love it!' : itemName(x));
+            open('store');
+          } },
+          { id: 'giveNo', label: '‹ Back', accent: C.progress, onTap: () => open('giveItem', t.uid) },
+        ] },
+      ],
+    };
+  });
+  // From a person (their details): pick an item for them.
+  menus.register('giveTo', (id) => {
+    const p = team.get(id);
+    if (!p) return null;
+    return {
+      title: `An item for ${p.name}`,
+      subtitle: `${items.count} in the ${ITEM_RULES.storeName} · tap one to see the exact gain`,
+      art: p.art,
+      accent: C.progress,
+      sections: items.count
+        ? [{ columns: 1, buttons: items.store().map((x) => {
+            const pv = items.preview(x.uid, id);
+            return { id: `giveTo_${x.uid}`, label: itemName(x), sub: gainText(pv), icon: itemIcon(x.type, x.rarity), disabled: !pv.ok, accent: pv.like === 'love' ? C.good : C.progress, onTap: () => open('giveConfirm', { uid: x.uid, id }) };
+          }) }]
+        : [{ lines: [ITEM_TEXT.empty] }],
+    };
+  });
   const buildButton = () => ({ id: 'buildMode', label: 'Build Mode', sub: 'Move, sell or build stations', icon: 'race_ui_01', accent: C.progress, onTap: enterBuild });
   // The Research sheet (Milestone 11): what is being researched, RP, the queues and the way into the tree.
   const research = team.research;
@@ -101,16 +265,16 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
     const sp = team.sponsors;
     return { id: 'sponsors', label: 'Sponsors', sub: `${sp.deals.length} of ${sp.slots()} slots · ${sp.offers.length} offer${sp.offers.length === 1 ? '' : 's'}`, icon: 'race_ui_02', accent: C.progress, onTap: () => open('sponsors') };
   };
-  const extraFor = { F12: () => [trainButton()], F15: () => [sponsorsButton(), hireButton()] };
+  const extraFor = { F12: () => [trainButton()], F13: () => [storeButton()], F15: () => [sponsorsButton(), hireButton()] };
   menus.register('sponsors', () => ({ title: 'Sponsors', subtitle: `${team.sponsors.deals.length} of ${team.sponsors.slots()} slots · Rank ${team.money.rank}`, art: 'race_ui_02', accent: C.progress, sections: sponsorSections(team, toast) }));
 
   for (const def of STATIONS) {
     if (def.id === 'F02') continue; // the Pit Bay's sheet is the car project's (below)
     if (def.research) {
-      menus.register(def.id, () => ({ title: def.name, subtitle: def.purpose, art: def.art, sections: [...researchSections(), { lines: effectLines(def), columns: 1, buttons: [buildButton()] }] }));
+      menus.register(def.id, (st) => ({ title: def.name, subtitle: def.purpose, art: def.art, sections: [...mainActionSection(def.id), ...researchSections(), { lines: effectLines(def), columns: 1, buttons: [buildButton()] }, ...levelSections(uidOf(def.id, st), () => open(def.id, st))] }));
       continue;
     }
-    menus.register(def.id, () => ({ title: def.name, subtitle: def.purpose, art: def.art ?? 'race_ui_02', sections: [...(extraFor[def.id] ? [{ columns: 1, buttons: extraFor[def.id]() }] : []), { lines: effectLines(def), columns: 1, buttons: [buildButton()] }] }));
+    menus.register(def.id, (st) => ({ title: def.name, subtitle: def.purpose, art: def.art ?? 'race_ui_02', sections: [...mainActionSection(def.id), ...(extraFor[def.id] ? [{ columns: 1, buttons: extraFor[def.id]() }] : []), ...(def.id === 'F15' ? logoSlotSections() : []), { lines: effectLines(def), columns: 1, buttons: [buildButton()] }, ...levelSections(uidOf(def.id, st), () => open(def.id, st))] }));
   }
 
   // Build Mode (Milestone 10): a tapped station or prop — what it does, and Sell (half its price back) when it may go.
@@ -126,13 +290,14 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
       art: def.art,
       sections: [
         { lines: def.prop ? ['Drag it on the floor to move it.'] : [...effectLines(def), 'Drag it on the floor to move it.'] },
+        ...levelSections(st.uid, () => open('facility', st)), // Milestone 25b
         {
           columns: 1,
           buttons: [
             {
               id: 'sell',
               label: why ? 'Can’t sell' : `Sell for ${fmt(refund)} Credits`,
-              sub: why ?? `Half of its ${fmt(def.cost)} Credits back`,
+              sub: why ?? (fac.system.invested(st.uid) ? `Half of its ${fmt(def.cost)} Credits and of its ${fmt(fac.system.invested(st.uid))} in upgrades back` : `Half of its ${fmt(def.cost)} Credits back`),
               icon: def.art,
               disabled: !!why,
               accent: C.bad,
@@ -196,6 +361,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
         sections: [
           { columns: 1, buttons: [{ id: 'newCar', label: 'New car', sub: can.ok ? 'Choose a class and parts' : can.reason, icon: assets ? liveryKey(assets, CLASSES.clubHatch.art, teamColourId(team)) : CLASSES.clubHatch.art, onTap: goBuilder }] },
           { columns: 1, buttons: [garageButton()] },
+          ...levelSections(uidOf('F02'), () => open('F02')),
         ],
       };
     }
@@ -251,6 +417,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
         ],
       });
     }
+    sections.push(...levelSections(uidOf('F02'), () => open('F02')));
     return { title: `${pitBay.name} · ${job.name}`, subtitle: `Building: ${phase.stage.toLowerCase()} (${phase.name})`, art: pitBay.art, sections };
   });
 
@@ -562,8 +729,12 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
       };
     });
   }
+  // Milestone 25b: Help (top bar) — how to play, and Settings (reachable even with the Menu button off).
   for (const [id, t] of Object.entries(TOP_SHEETS)) {
-    menus.register(id, () => ({ title: t.title, subtitle: t.line, accent: C.progress }));
+    menus.register(id, () => ({ title: t.title, subtitle: t.line, accent: C.progress, sections: id === 'help' ? [{ columns: 2, buttons: [
+      { id: 'howToPlay', label: 'How to play', sub: 'The garage, cars and race weekends', icon: 'race_ui_13', accent: C.progress, onTap: () => showHelp() },
+      { id: 'helpSettings', label: 'Settings', sub: 'Sound, graphics, text size, Menu, hints', icon: 'race_ui_menu', accent: C.progress, onTap: () => openSettings() },
+    ] }] : [] }));
   }
   return menus;
 }

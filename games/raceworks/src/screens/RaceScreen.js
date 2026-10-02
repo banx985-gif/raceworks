@@ -56,7 +56,10 @@ export const raceClock = (secs) => {
 const surname = (name) => name.split(' ').slice(-1)[0];
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 
-export function createRaceScreen({ renderer, layout, assets, team, bus, settings = null, onFinished, onLeave, toast = () => {}, debug = false }) {
+// Milestone 25b (Settings): lowFx() → true in Low graphics (fewer effects, like Reduced motion); shakeScale() → the Screen
+// shake setting (0 off … 1 normal): a short shake when your car is hit, spins with damage or breaks (never with Reduced
+// motion); settings 'keyMoments' Off = fast-forward never stops for a Key Moment.
+export function createRaceScreen({ renderer, layout, assets, team, bus, settings = null, onFinished, onLeave, toast = () => {}, debug = false, lowFx = () => false, shakeScale = () => 1 }) {
   let sim = null;
   let race = null;
   let speed = 1;
@@ -117,7 +120,21 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
   let camera = settings?.get('raceCamera') ?? 'overview';
   const layer = new CachedLayer({ width: 1, height: 1, draw: (g) => drawTrackLayer(g) });
   const ws = () => sim.geo.def.display?.widthScale ?? 1;
-  const fx = createRaceFx({ assets, reduced: () => !!settings?.get('reducedMotion') }); // Milestone 17: Reduced motion (Milestone 14 setting)
+  const fx = createRaceFx({ assets, reduced: () => !!settings?.get('reducedMotion') || lowFx() }); // Milestone 17: Reduced motion (Milestone 14 setting) · Milestone 25b: Low graphics too
+  // Milestone 25b: the screen shake on a big hit to your car
+  let shakeT = 0;
+  let shakeSeen = null;
+  const SHAKE = { secs: 0.4, px: 14 };
+  function watchShake(dt) {
+    shakeT = Math.max(0, shakeT - dt);
+    const evs = sim?.events ?? [];
+    if (shakeSeen == null || shakeSeen > evs.length) shakeSeen = evs.length;
+    while (shakeSeen < evs.length) {
+      const ev = evs[shakeSeen++];
+      const big = (ev.kind === 'spin' && ev.damage) || (ev.kind === 'contact' && ev.hit === PLAYER) || (ev.kind === 'failure' && ev.outcome !== 'paceLoss');
+      if (big && ev.ids?.includes(PLAYER)) shakeT = SHAKE.secs;
+    }
+  }
   // Milestone 18: the Drive Stint view
   const stintView = createDriveStintView({ renderer, layout, assets, team, bus, settings, debug, drawWeather: (ctx, r, w) => fx.drawWeather(ctx, r, w) });
   stintView.onDone = (rec) => {
@@ -475,7 +492,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     ]);
   }
 
-  return {
+  const screen = {
     get sim() {
       return sim;
     },
@@ -553,10 +570,12 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
       const running = !paused && !sim.done;
       if (running) {
         let fired = null;
-        sim.advance(dt * RACE.watchTimeScale * speed, speed > 1 ? { stopAt: () => (fired = momentNow()) !== null } : undefined);
+        const km = settings?.get('keyMoments') !== false; // Milestone 25b: Settings → Key Moment prompts
+        sim.advance(dt * RACE.watchTimeScale * speed, speed > 1 && km ? { stopAt: () => (fired = momentNow()) !== null } : undefined);
         if (fired) fireMoment(fired);
-        else if (speed === 1 && race) race.momentEv = sim.events.length; // Milestone 17: at 1× you see it happen
+        else if ((speed === 1 || !km) && race) race.momentEv = sim.events.length; // Milestone 17: at 1× you see it happen
       }
+      watchShake(dt);
       fx.step(sim, running ? dt * RACE.watchTimeScale * speed : 0, dt);
       keepT += dt;
       if (keepT > 3 && !sim.done) {
@@ -580,6 +599,21 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     render(ctx) {
       if (!sim) return;
       if (stintView.active) return stintView.render(ctx);
+      const k = settings?.get('reducedMotion') ? 0 : shakeScale();
+      if (shakeT > 0 && k > 0) {
+        const a = (shakeT / SHAKE.secs) * SHAKE.px * k;
+        ctx.save();
+        ctx.translate((Math.random() * 2 - 1) * a, (Math.random() * 2 - 1) * a);
+        screen.renderRace(ctx);
+        ctx.restore();
+        return;
+      }
+      screen.renderRace(ctx);
+    },
+    get shaking() {
+      return shakeT > 0; // (tests)
+    },
+    renderRace(ctx) {
       const r = rects();
       if (r.track.w !== trackRect.w || r.track.h !== trackRect.h || r.track.y !== trackRect.y) relayout();
       layer.setPixelScale(renderer.pixelScale);
@@ -623,4 +657,5 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
       drawBanner(ctx);
     },
   };
+  return screen;
 }

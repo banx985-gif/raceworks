@@ -336,3 +336,34 @@ export const BUILD_TEXT = {
   noSpot: 'No free spot for it: move or sell something first',
   owned: 'Already in the garage',
 };
+
+// Milestone 25b (series common feature §3): facility levels 1–3, on core/FacilitySystem levels. PLACEHOLDERS
+// (DECISIONS.md, M25b): every number here.
+//   cost: level 2 = ×0.6 of the build price, level 3 = ×0.9 (Credits, through the ledger)
+//   rank: level 2 needs one rank above the facility's build rank, level 3 two above (never past S). A Start facility's
+//     build rank is E; one opened by research counts as RESEARCH_BUILD_RANK, a secret one as SECRET_BUILD_RANK.
+//   days: game days to finish (it works at the old level meanwhile)
+//   mult: each effect ×1.0 / ×1.5 / ×2.0 through the effect queries — except the keys in NO_SCALE (counts and unlock
+//     flags: a second Pit Bay level must not mean a second car bay), which never change.
+//   LEVEL_BONUS: facilities whose effects are all counts or unlocks get a small bonus that only upgrades give
+//     (levelMult [0, 1, 2]: nothing at level 1, the value at level 2, twice it at level 3). Each key is one an existing
+//     system already reads.
+//   The Rest Spot and the props have no levels.
+export const FACILITY_LEVELS = {
+  max: 3,
+  mult: [1, 1.5, 2],
+  costMult: [0, 0.6, 0.9], // [level 1 (built), → level 2, → level 3] × the build price
+  rankStep: [0, 1, 2],
+  days: [0, 5, 10],
+  RESEARCH_BUILD_RANK: 'C',
+  SECRET_BUILD_RANK: 'A',
+};
+export const NO_SCALE = ['carBays', 'telemetry', 'reliabilityData'];
+export const NO_SCALE_PREFIX = ['unlock.', 'trainingSeats.'];
+export const LEVEL_BONUS = {
+  F02: [{ key: 'workPct.mechanic', value: 4 }], // Pit Bay: the crew works faster on the car
+  F12: [{ key: 'setupKnowledge', value: 3 }], // Driver Simulator: drivers arrive knowing the setup
+  F15: [{ key: 'revealReputation', value: 2 }], // Sponsor Wall: a better-shown reveal
+  F21: [{ key: 'dev.EFF', value: 2 }], // Hybrid Lab
+  F30: [{ key: 'workPct.mechanic', value: 3 }], // Prototype Bay
+};

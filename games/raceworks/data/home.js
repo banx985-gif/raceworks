@@ -18,5 +18,5 @@ export const TOP_BAR = {
 
 // The Help placeholder sheet (Milestone 23: the Inbox is a real sheet now — src/ui/garageMenus.js).
 export const TOP_SHEETS = {
-  help: { title: 'Help', line: 'Tips and how-to guides will live here.' },
+  help: { title: 'Help', line: 'How to play, and Settings (sound, graphics, text size, the Menu button, hints).' },
 };

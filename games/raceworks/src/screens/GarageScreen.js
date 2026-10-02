@@ -35,7 +35,8 @@ import { Agent } from '../../../../core/Agent.js';
 import { Selection } from '../../../../core/Selection.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { GARAGE, GARAGE_LOOK, REST_STATION, WALK, ROUTINES, WORKER_STATE_TEXT, routineFor, MASCOT } from '../../data/garage.js';
-import { STARTER_AREA, EXPANSIONS, ENTRANCE, PHASE_STATIONS, BUILD_TEXT } from '../../data/facilities.js';
+import { STARTER_AREA, EXPANSIONS, ENTRANCE, PHASE_STATIONS, BUILD_TEXT, FACILITY_LEVELS } from '../../data/facilities.js';
+const LV_DAYS = FACILITY_LEVELS.days; // Milestone 25b: an upgrade's days (the badge's progress ring)
 import { REST } from '../../data/balance.js';
 import { statusIconsOf } from '../ui/statusIcons.js';
 import { createBuildShow } from '../ui/carBuildShow.js';
@@ -44,6 +45,7 @@ import { TEAM_COLOURS } from '../../data/setup.js';
 import { liveryKey, teamColourId, carArtKey } from '../ui/livery.js';
 import { structuralCombos } from '../systems/combos.js'; // Milestone 22
 import { visualFamily } from '../systems/carVisual.js';
+import { sponsorById } from '../../data/sponsors.js'; // Milestone 25b: the Sponsor Wall's logo slots
 
 const C = THEME.color;
 const S = THEME.size;
@@ -59,7 +61,10 @@ const FLASH_SEC = 2.2; // a just-built facility's footprint glows this long
 const DETAIL_STEPS = [0.8, 0.9, 1.0, 1.15, 1.3];
 const detailFor = (zoom) => DETAIL_STEPS.find((d) => d >= zoom - 1e-3) ?? DETAIL_STEPS[DETAIL_STEPS.length - 1];
 
-export function createGarageScreen({ renderer, layout, assets, bus, sheet, openMenu, clock, team, topBar, bottomBar, debug }) {
+// Milestone 25b: simpleFigures() → true in Low graphics (workers stand still: no walk bob or work tilt); sponsorLogos() →
+// the sponsor ids on the car (drawn in the Sponsor Wall's logo slots). Every upgraded station gets a code-drawn level
+// badge (2 / 3; an arrow while an upgrade is under way).
+export function createGarageScreen({ renderer, layout, assets, bus, sheet, openMenu, clock, team, topBar, bottomBar, debug, simpleFigures = () => false, sponsorLogos = () => [] }) {
   const W = renderer.width;
   const { cellSize: CELL, wallH, margin } = GARAGE;
   const { halfW: HW, halfH: HH } = GARAGE.view;
@@ -829,6 +834,7 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
           if (!camera.isVisible(r)) continue;
           const pose = characterPose(it, simTime, workers.indexOf(it) * 1.7, POSE);
           pose.flip = 1;
+          if (simpleFigures()) pose.bob = pose.tilt = 0; // Milestone 25b: Low graphics
           drawCharacter(ctx, assets, staffOf(it)?.art, r.x + r.w / 2, r.y + r.h, r.w, r.h, pose);
         } else {
           const lifted = moving?.st === it;
@@ -837,6 +843,8 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
           if (lifted) ctx.globalAlpha = 0.78;
           assets.draw(ctx, it.def.art, r.x, r.y, r.w, r.h);
           ctx.globalAlpha = 1;
+          if (it.id === 'F15' && !lifted) drawLogoSlots(ctx, r); // Milestone 25b
+          if (!it.def.prop && !lifted) drawLevelBadge(ctx, it, r);
           if (it.id === 'F02' && !lifted) show.draw(ctx, showView());
         }
       }
@@ -855,6 +863,67 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
   };
 
   const POSE = { bob: 0, tilt: 0, flip: 1 }; // reused every frame
+
+  // --- Milestone 25b: the level badge and the Sponsor Wall's logo slots (code-drawn, no new images) ------------------
+  function drawLevelBadge(ctx, st, r) {
+    const level = fac.system.level(st.uid);
+    const pending = fac.system.upgradePending(st.uid);
+    if (level <= 1 && !pending) return;
+    const rad = Math.max(26, Math.min(44, r.w * 0.11));
+    const cx = r.x + r.w - rad * 1.2;
+    const cy = r.y + rad * 1.2;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+    ctx.fillStyle = level >= 3 ? C.gold : C.purple;
+    ctx.fill();
+    ctx.lineWidth = Math.max(4, rad * 0.16);
+    ctx.strokeStyle = C.outline;
+    ctx.stroke();
+    if (pending) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad + ctx.lineWidth, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, Math.max(0, (clock.totalDays - (pending.doneDay - LV_DAYS[pending.to - 1])) / Math.max(1, LV_DAYS[pending.to - 1]))));
+      ctx.strokeStyle = C.progress;
+      ctx.stroke();
+    }
+    ctx.fillStyle = C.textOnDark;
+    ctx.font = font(Math.round(rad * 1.1), true);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(pending ? `${level}↑` : String(level), cx, cy + rad * 0.06);
+    ctx.restore();
+  }
+  function drawLogoSlots(ctx, r) {
+    const n = team.sponsors?.slots?.() ?? 0;
+    if (!n) return;
+    const ids = sponsorLogos();
+    const size = Math.min(r.w * 0.24, 80);
+    const gap = 10;
+    const bw = n * size + (n + 1) * gap;
+    const bx = r.x + (r.w - bw) / 2;
+    const by = r.y - size - 2 * gap;
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,248,236,0.95)';
+    ctx.strokeStyle = C.outline;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, bw, size + 2 * gap, 14);
+    ctx.fill();
+    ctx.stroke();
+    for (let i = 0; i < n; i++) {
+      const box = { x: bx + gap + i * (size + gap), y: by + gap, w: size, h: size };
+      const logo = ids[i] ? sponsorById(ids[i])?.logo : null;
+      if (logo) assets.drawContained(ctx, logo, box);
+      else {
+        ctx.setLineDash([8, 6]);
+        ctx.strokeStyle = L.lockedLine;
+        ctx.lineWidth = 3;
+        ctx.strokeRect(box.x + 4, box.y + 4, box.w - 8, box.h - 8);
+        ctx.setLineDash([]);
+      }
+    }
+    ctx.restore();
+  }
 
   // Milestone 25: the Ghost Cat (SEC-X-02) by the door — the secret paddock animation: a slow breath, a tail-flick tilt.
   const mascot = { kind: 'mascot', get depth() { return (MASCOT.col + MASCOT.row) * CELL; } };

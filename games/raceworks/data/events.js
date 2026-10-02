@@ -14,7 +14,8 @@
 //     { type: 'fact', fact }          fired by the game the first time (or each time) that fact becomes true
 //     { type: 'calendar', on }        fired by the game on a calendar tick ('month' / 'year')
 //   Effects (data; applied once — src/systems/events.js apply): credits (value, or min / max rolled when it fires),
-//   reputation, rp, sponsorRep, morale (the event's {who}), teamMorale, driversMorale, flag (a stored flag only), and
+//   reputation, rp, sponsorRep, morale (the event's {who}), teamMorale, driversMorale, flag (a stored flag only), item
+//   (Milestone 25b: { source } — one item for the Parts Store), and
 //   core's timed { type: 'modifier', key, value, days } (added into the garage's one effect query) and
 //   { type: 'chance', p, then, else } (decided when the event fires, so a reload never rerolls it).
 //
@@ -30,6 +31,7 @@ export const EVENT_CLASSES = [
   { id: 'weather', name: 'Weather', icon: 'race_ui_08' },
   { id: 'financial', name: 'Financial', icon: 'race_ui_05' },
   { id: 'secret', name: 'Rumour', icon: 'race_ui_28' },
+  { id: 'item', name: 'Equipment', icon: 'race_ui_02' }, // Milestone 25b: items (the Parts Store; a note shows the store crate)
 ];
 
 // Cadence (bible §31 "no pop-up stacking"; card M23 placeholders). Rolled events only — a fact or calendar event (a
@@ -170,6 +172,9 @@ export const EVENTS = [
   { id: 'EV_RESCUE', cls: 'financial', size: 'minor', trigger: { type: 'fact', fact: 'debt' }, cooldownDays: 0, title: 'Rescue job offered', text: 'Cash is below 0. A rescue job is on the contract board (Money → Contracts): it lets you build one car.', effects: [] },
   // Milestone 24: the secret engine's clue stages (a rumour) and a secret found (its exact recipe)
   { id: 'EV_SECRET_CLUE', cls: 'secret', size: 'minor', trigger: { type: 'fact', fact: 'secretClue' }, cooldownDays: 0, title: 'A rumour in the paddock', text: '{clue}', effects: [] },
+  // Milestone 25b: a well-wisher's gift — fired by a monthly roll in src/systems/items.js (ITEM_SOURCES.wellWisher), its
+  // 'item' effect puts one item in the Parts Store.
+  { id: 'EV_WELL_WISHER', cls: 'item', size: 'minor', trigger: { type: 'fact', fact: 'wellWisher' }, cooldownDays: 0, title: 'A gift from a well-wisher', text: 'A long-time fan of {team} dropped off some kit for the crew. It is in the Parts Store.', effects: [{ type: 'item', source: 'wellWisher' }] },
   { id: 'EV_SECRET_FOUND', cls: 'secret', size: 'minor', trigger: { type: 'fact', fact: 'secretFound' }, cooldownDays: 0, title: 'Secret discovered: {name}', text: '{clue}', effects: [] },
   // Milestone 25: the secrets' events (fired by a found secret through events.fireSecret — never rolled; each once a run,
   // or once ever for an account secret). PLACEHOLDER effects (DECISIONS.md, M25).

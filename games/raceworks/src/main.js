@@ -82,7 +82,19 @@ import { createDrillScreen } from './screens/DrillScreen.js';
 import { createMedalsScreen } from './screens/MedalsScreen.js';
 import { createDrillRecords } from './systems/drills.js';
 import { createComboRecords } from './systems/combos.js'; // Milestone 22
-import { DRILL_SETTINGS } from '../data/drills.js';
+// Milestone 25b: the series common features — the Menu (core/ui/MenuSheet), the next-step hint line (core/ui/HintLine),
+// Settings (core/Settings, data/settings.js), sound (core/AudioManager), haptics, the frame governor, item art.
+import { menuSheet } from '../../../core/ui/MenuSheet.js';
+import { HintLine } from '../../../core/ui/HintLine.js';
+import { AudioManager } from '../../../core/AudioManager.js';
+import { Haptics } from '../../../core/Haptics.js';
+import { FrameGovernor } from '../../../core/FrameGovernor.js';
+import { setTextScale } from '../../../core/Theme.js';
+import { registerItemArt } from '../../../core/ui/ItemArt.js';
+import { MENU_GROUPS, MENU_TEXT, NEXT_HINTS } from '../data/menu.js';
+import { SETTINGS, SETTINGS_DEFAULTS, SETTINGS_KEY, SHAKE_LEVELS, TEXT_SCALE, SETTINGS_TEXT } from '../data/settings.js';
+import { SOUNDS, MUSIC, AUDIO_RULES } from '../data/audio.js';
+import { ITEM_TYPES, ITEM_GROUPS, ITEM_RARITIES, ITEM_RULES, ITEM_ART } from '../data/items.js';
 const COL = THEME.color;
 
 const W = 1080;
@@ -157,6 +169,7 @@ const loop = new FixedStepLoop({
     // Milestone 23: one event card at a time (nothing on the race screens; a card waits for a dialog or a car reveal)
     if (teamReady) team.events.frame(dt, { screen: router.currentName, busy: dialog.active || textPrompt.active || !!pendingCar, reduced: !!settings.get('reducedMotion') });
     eventCard.update(dt);
+    hintLine.update(dt); // Milestone 25b
     for (const t of toasts) t.age += dt;
     while (toasts.length && toasts[0].age > TOAST_LIFE) toasts.shift();
     backNav.sync();
@@ -164,6 +177,7 @@ const loop = new FixedStepLoop({
   render: (alpha) => {
     const ctx = renderer.begin(COL.bg);
     router.render(ctx, alpha);
+    if (router.currentName === 'garage') hintLine.render(ctx); // Milestone 25b (under any sheet)
     sheet.render(ctx);
     const onGame = GAME_SCREENS.includes(router.currentName);
     const tb = topBarRect(layout);
@@ -341,7 +355,36 @@ const carDebug = {
 // Race (straight to the grid) stays for ?debug=1 only.
 // This device's settings (core/Settings): the race camera the player chose last (bible §24.4).
 // Milestone 14: the drill settings (steering sensitivity, aids, reduced motion / flashes) live here too.
-const settings = new Settings({ key: 'raceworks:settings', defaults: { raceCamera: 'overview', ...DRILL_SETTINGS } });
+// Milestone 25b: the series Settings list (data/settings.js; the old ids kept, so earlier choices load as they were).
+const settings = new Settings({ key: SETTINGS_KEY, defaults: SETTINGS_DEFAULTS });
+// Graphics Auto / High / Low (core/FrameGovernor: Low = a steady 30 FPS); Low also means fewer race effects and simpler
+// figures in the garage. Text size → every font (core/Theme setTextScale).
+const govMode = () => ({ low: 'low', high: 'high' })[settings.get('fpsMode')] ?? 'auto';
+const governor = new FrameGovernor({ mode: govMode(), bus, capFps: true });
+loop.governor = governor;
+const lowFx = () => governor.state === 'half' && settings.get('fpsMode') !== 'high';
+function applySettings() {
+  setTextScale(TEXT_SCALE[settings.get('textSize')] ?? 1);
+  if (governor.mode !== govMode()) governor.setMode(govMode());
+}
+applySettings();
+// Sound: the garage music and a few effects, all code-made (data/audio.js); nothing before the first tap.
+const audio = new AudioManager({ bus, sounds: SOUNDS, music: MUSIC, caps: { crossfadeSec: AUDIO_RULES.crossfadeSec } });
+audio.installUnlock();
+function applyVolumes() {
+  const m = settings.get('muted') ? 0 : 1;
+  audio.setVolumes({ sfx: settings.get('sfxMuted') ? 0 : m * ((settings.get('sfx') ?? 100) / 100), music: settings.get('musicMuted') ? 0 : m * 0.6 * ((settings.get('music') ?? 75) / 100) });
+  audio.setMuted(!!settings.get('muted'));
+}
+applyVolumes();
+const sfx = (id) => audio.play(id);
+const haptics = new Haptics({ enabled: () => settings.get('haptics') !== false });
+const haptic = (level) => haptics[level]?.();
+settings.onChange((k) => {
+  applySettings();
+  applyVolumes();
+  if (k === 'showMenu') syncMenuSlot();
+});
 // Milestone 14: the driver drill records — the account's (they survive New Game+, slot deletes and reloads).
 // Milestone 22: account blocks are written one at a time (the drill and combo records share the account save).
 let accountChain = Promise.resolve();
@@ -481,7 +524,95 @@ carDebug.nextMonth = () => {
   const m = clock.month;
   while (clock.month === m) clock.advanceDay();
 };
-const menus = createGarageMenus({ garage: () => garage, team, assets, open: openMenu, close: () => sheet.close(), goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t, b) => toast(t, b), goWeekend: () => goWeekend(), goTestRace: debug.enabled ? () => goTestRace() : null, goRaceResult: (index) => goSub('raceResult', { index }), goResearch: () => goResearch(), goRecruit: () => goRecruit(), goTrain: (id) => goTrain(id), debugTracks: debug.enabled ? debugTracks : null, goChampRound: () => goChampRound(), enterChamp: (id) => enterChamp(id) });
+const menus = createGarageMenus({ garage: () => garage, team, assets, open: openMenu, close: () => sheet.close(), goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t, b) => toast(t, b), goWeekend: () => goWeekend(), goTestRace: debug.enabled ? () => goTestRace() : null, goRaceResult: (index) => goSub('raceResult', { index }), goResearch: () => goResearch(), goRecruit: () => goRecruit(), goTrain: (id) => goTrain(id), debugTracks: debug.enabled ? debugTracks : null, goChampRound: () => goChampRound(), enterChamp: (id) => enterChamp(id), menuRow: (id) => openMenuRow(id), menuState: (id) => menuState(id), openSettings: () => openSettings(), showHelp: () => showHelp(), sfx, haptic });
+
+// ---------------------------------------------------------------------------
+// Milestone 25b: the Menu (core/ui/MenuSheet, rows in data/menu.js). A row runs the very code the art and the bars run.
+const toGarage = () => router.currentName !== 'garage' && router.go('garage');
+const MENU_OPEN = {
+  pitBay: () => openMenu('F02'),
+  carBuilder: () => (sheet.close(), goBuilder()),
+  carGarage: () => (sheet.close(), goCarGarage()),
+  roster: () => (sheet.close(), goRoster()),
+  hire: () => goRecruit(),
+  train: () => goTrain(),
+  drills: () => (sheet.close(), goSub('medals')),
+  store: () => openMenu('store'),
+  research: () => openMenu('research'),
+  build: () => {
+    sheet.close();
+    toGarage();
+    garage.setBuildMode(true);
+  },
+  shop: () => {
+    toGarage();
+    garage.setBuildMode(true);
+    openMenu('shop');
+  },
+  championships: () => openMenu('compete'),
+  raceWeekend: () => (team.races.current ? goWeekend() : openMenu('compete')),
+  ledger: () => (openMenu('money'), sheet.setTab('ledger')),
+  contracts: () => (openMenu('money'), sheet.setTab('contracts')),
+  sponsors: () => openMenu('sponsors'),
+  records: () => openMenu('trophies'),
+  inbox: () => openMenu('inbox'),
+  partsArchive: () => openMenu('partsArchive'),
+  comboArchive: () => openMenu('comboArchive'),
+  rumourArchive: () => openMenu('rumourArchive'),
+  settings: () => openSettings(),
+  mainMenu: () => goMainMenu(),
+};
+function openMenuRow(id) {
+  sheet.close();
+  MENU_OPEN[id]?.();
+}
+// Locked rows say why (the same rules the sheets use); badges for what is waiting.
+function menuState(id) {
+  if (!teamReady) return {};
+  if (id === 'carBuilder' && team.cars.active) return { locked: 'A car is already being built (Pit Bay)' };
+  if (id === 'train' && !team.training.open()) return { locked: team.training.lockedText };
+  if (id === 'raceWeekend' && !team.races.current && !team.races.canRace) return { locked: 'Build a car first (Pit Bay)' };
+  if (id === 'store') return { badge: team.items.count || null, sub: `${team.items.count} of ${team.items.max} · kit that raises a stat for good` };
+  if (id === 'inbox' && team.events.unread) return { badge: team.events.unread };
+  if (id === 'sponsors' && team.sponsors.offers.length && team.sponsors.freeSlots()) return { badge: team.sponsors.offers.length };
+  return {};
+}
+menus.register('menu', () => menuSheet({ title: MENU_TEXT.title, subtitle: MENU_TEXT.subtitle, art: MENU_TEXT.icon, groups: MENU_GROUPS, open: openMenuRow, state: menuState }));
+// Settings (series §2): one sheet, the series list in Robot Workshop's order, then Help / Privacy / Credits, then the
+// RACEWORKS extras. Reachable from the main menu, the Menu sheet, Help (top bar) and Drills · Medals.
+function openSettings() {
+  openMenu('settings');
+}
+function settingsMenu() {
+  const sections = [];
+  let group = null;
+  const optionRow = (d) => ({
+    title: d.label,
+    lines: d.line ? [{ text: d.line, color: COL.textMuted }] : [],
+    columns: Math.min(d.options.length, 5),
+    buttons: d.options.map((o) => {
+      const on = settings.get(d.id) === o.id;
+      return { id: `set_${d.id}_${o.id}`, label: `${on ? '✓ ' : ''}${o.label}`, accent: on ? COL.good : COL.progress, onTap: () => settings.set(d.id, o.id) };
+    }),
+  });
+  const heading = (g) => g !== group && sections.push({ title: (group = g).toUpperCase(), lines: [] }); // a group heading, then its rows
+  for (const d of SETTINGS.filter((x) => !x.extra)) {
+    heading(d.group);
+    sections.push(optionRow(d));
+  }
+  heading('Help and about');
+  sections.push({ columns: 1, buttons: [
+    { id: 'setHelp', label: SETTINGS_TEXT.help, sub: SETTINGS_TEXT.helpLine, icon: 'race_ui_13', accent: COL.progress, onTap: () => showHelp() },
+    { id: 'setLegal', label: SETTINGS_TEXT.legal, sub: 'How your teams are kept', icon: 'race_ui_13', accent: COL.progress, onTap: () => dialog.show({ title: SETTINGS_TEXT.legal, body: SETTINGS_TEXT.legalBody, buttons: [{ id: 'ok', label: 'OK', accent: COL.progress }] }) },
+    { id: 'setCredits', label: SETTINGS_TEXT.credits, sub: 'The people behind RACEWORKS', icon: 'race_brand_02', accent: COL.progress, onTap: () => dialog.show({ title: SETTINGS_TEXT.credits, body: SETTINGS_TEXT.creditsBody, buttons: [{ id: 'ok', label: 'OK', accent: COL.progress }] }) },
+  ] });
+  for (const d of SETTINGS.filter((x) => x.extra)) {
+    heading(d.group);
+    sections.push(optionRow(d));
+  }
+  return { title: SETTINGS_TEXT.title, subtitle: SETTINGS_TEXT.subtitle, art: 'race_ui_menu', accent: COL.progress, sections };
+}
+menus.register('settings', () => settingsMenu());
 
 // ---------------------------------------------------------------------------
 // Toasts (core/ui/Toast): short money news under the top bar — salary day, a contract paid, Emergency Credit on / off,
@@ -585,12 +716,45 @@ function fromScreen(kind) {
   router.go('garage');
   openMenu(kind);
 }
+const bottomItems = BOTTOM_SLOTS.map((s) => ({ id: s.id, label: s.label, icon: s.icon, badge: () => badges[s.id] }));
+const MENU_SLOT = { id: 'menu', label: MENU_TEXT.button, icon: MENU_TEXT.icon, badge: () => null }; // Milestone 25b
 const bottomBar = createBottomBar({
   layout,
   assets,
-  items: BOTTOM_SLOTS.map((s) => ({ id: s.id, label: s.label, icon: s.icon, badge: () => badges[s.id] })),
+  items: bottomItems,
   open: openMenu,
 });
+// Milestone 25b: the Menu button sits at the end of the bottom row (as in DEVWORKS); Settings → "Show Menu button" Off
+// takes it away (Settings stays on the main menu and in Help).
+function syncMenuSlot() {
+  const on = settings.get('showMenu') !== false;
+  const i = bottomItems.indexOf(MENU_SLOT);
+  if (on && i < 0) bottomItems.push(MENU_SLOT);
+  if (!on && i >= 0) bottomItems.splice(i, 1);
+}
+syncMenuSlot();
+// The Menu icon, drawn by code (three bars on a cream tile; no file).
+assets.setFallback(MENU_TEXT.icon, (ctx, x, y, w, h) => {
+  const sz = Math.min(w, h);
+  const ox = x + (w - sz) / 2;
+  const oy = y + (h - sz) / 2;
+  ctx.fillStyle = '#FFF6E5';
+  ctx.strokeStyle = COL.outline;
+  ctx.lineWidth = Math.max(2, sz * 0.05);
+  ctx.beginPath();
+  ctx.roundRect(ox + sz * 0.08, oy + sz * 0.08, sz * 0.84, sz * 0.84, sz * 0.18);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = COL.action;
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath();
+    ctx.roundRect(ox + sz * 0.24, oy + sz * (0.28 + i * 0.18), sz * 0.52, sz * 0.09, sz * 0.045);
+    ctx.fill();
+  }
+});
+// Items (Milestone 25b): code placeholders in the group colour until assets/images/items/item_01–25.png exist.
+registerItemArt(assets, { types: ITEM_TYPES, groups: ITEM_GROUPS, rarities: ITEM_RARITIES, storeIcon: ITEM_RULES.storeIcon });
+for (const [k, src] of Object.entries(ITEM_ART)) assets.loadOptional(k, src);
 // Debug: B moves one red badge along the five buttons, then clears it; ?badge=<slot> starts with one showing.
 function cycleDebugBadge() {
   const ids = BOTTOM_SLOTS.map((s) => s.id);
@@ -691,9 +855,48 @@ const bootScreen = {
   },
 };
 
-const garage = createGarageScreen({ renderer, layout, assets, bus, sheet, openMenu, clock, team, topBar, bottomBar, debug });
+const garage = createGarageScreen({ renderer, layout, assets, bus, sheet, openMenu, clock, team, topBar, bottomBar, debug, simpleFigures: () => lowFx() || settings.get('fpsMode') === 'low', sponsorLogos: () => team.sponsors.deals.map((d) => d.id) });
+// Milestone 25b: the next-step hint line under the date (core/ui/HintLine): what to do next, tap to go there. Quiet with
+// Settings → hints off, off the garage, in Build Mode, under a sheet, a dialog, an event card or a strip / toast.
+const firstFinishedCar = () => team.cars.cars.latest();
+const hintLine = new HintLine({
+  rect: () => {
+    const tb = topBarRect(layout);
+    return { x: tb.x + 24, y: tb.y + tb.h + 10, w: tb.w - 48, h: 72 };
+  },
+  quiet: () => !teamReady || settings.get('showHints') === false || router.currentName !== 'garage' || garage.buildMode || sheet.active || dialog.active || eventCard.active || !!team.events.toast || toasts.length > 0 || loop.paused,
+  rules: [
+    { id: 'raceDay', text: NEXT_HINTS.raceDay, when: () => !team.races.current && !!team.championships.nextRound()?.ready, open: () => openMenu('compete') },
+    { id: 'firstCar', text: NEXT_HINTS.firstCar, when: () => team.cars.cars.count === 0 && !team.cars.active, open: () => openMenu('F02') },
+    { id: 'hireMechanic', text: NEXT_HINTS.hireMechanic, when: () => !team.roster.some((p) => p.role === 'mechanic'), open: () => goRecruit() },
+    { id: 'carReady', text: () => NEXT_HINTS.carReady(firstFinishedCar()?.name ?? 'car'), when: () => team.cars.cars.count > 0 && team.races.history.length === 0 && !team.races.current && !team.championships.current, open: () => openMenu('compete') },
+    { id: 'item', text: () => NEXT_HINTS.item(team.items.count), when: () => team.items.count > 0 && team.items.store().some((x) => team.roster.some((p) => team.items.preview(x.uid, p.id).ok)), open: () => openMenu('store') },
+    { id: 'research', text: NEXT_HINTS.research, when: () => !team.research.active, open: () => openMenu('research') },
+    { id: 'sponsor', text: NEXT_HINTS.sponsor, when: () => team.sponsors.freeSlots() > 0 && team.sponsors.offers.some((o) => !team.sponsors.signWhy(o.id)), open: () => openMenu('sponsors') },
+    { id: 'upgrade', text: NEXT_HINTS.upgrade, when: () => team.facilities.items().some((p) => team.facilities.levelStatus(p.uid)?.next?.ok), open: () => garage.setBuildMode(true) },
+  ],
+});
+router.layers.push({
+  get active() {
+    return !!hintLine.current && router.currentName === 'garage' && !sheet.active && !garage.buildMode;
+  },
+  handleInput: (hook, p) => hook === 'onTap' && hintLine.handleTap(p),
+});
+// Milestone 25b: sound and buzz on the big moments (Settings: Sound, Vibration).
+bus.on('facility:bought', () => sfx('sfx_build'));
+bus.on('facility:upgraded', ({ defId, level }) => {
+  sfx('sfx_upgrade');
+  haptic('light');
+  if (teamReady) toast(`${team.facilities.defs[defId]?.name ?? 'A station'}: level ${level}!`, 'Its effect is stronger now.');
+});
+bus.on('items:arrived', () => sfx('sfx_item'));
+bus.on('project:complete', () => (sfx('sfx_car_done'), haptic('medium')));
+bus.on('contract:success', () => sfx('sfx_cash'));
+bus.on('race:finished', ({ race: e }) => {
+  if (e?.kind === 'weekend' && e.result?.rows?.find((r) => r.isPlayer)?.pos === 1) (sfx('sfx_win'), haptic('strong'));
+});
 const rosterScreen = createRosterScreen({ layout, assets, team, garage, topBar: screenBar, goStaff, goRecruit: () => goRecruit(), goTrain: () => goTrain() });
-const staffScreen = createStaffDetailScreen({ layout, assets, team, garage, topBar: screenBar, debugEnabled: debug.enabled, goTrain: (id) => goTrain(id), confirm: (o) => dialog.confirm(o), toast: (a, b) => toast(a, b), afterLetGo: () => back() });
+const staffScreen = createStaffDetailScreen({ layout, assets, team, garage, topBar: screenBar, debugEnabled: debug.enabled, goTrain: (id) => goTrain(id), giveItem: (id) => openMenu('giveTo', id), confirm: (o) => dialog.confirm(o), toast: (a, b) => toast(a, b), afterLetGo: () => back() });
 const recruitScreen = createRecruitScreen({ layout, assets, team, topBar: screenBar, toast: (a, b) => toast(a, b), goStaff, debugEnabled: debug.enabled }); // Milestone 12 (Milestone 13: ?debug=1 spawns on the Special tab)
 const trainScreen = createTrainScreen({ layout, assets, team, topBar: screenBar, toast: (a, b) => toast(a, b), goDrill: (p) => goSub('drill', p), goMedals: () => goSub('medals') }); // Milestone 12 (14: drills)
 // Milestone 14: a drill, and the medal history. A finished drill returns to where it was opened from.
@@ -704,7 +907,7 @@ const drillScreen = createDrillScreen({ renderer, layout, assets, team, bus, set
   if (result?.medal) toast(`${result.medal[0].toUpperCase()}${result.medal.slice(1)} medal!`, result.pct ? `+${result.pct}% on this course` : 'Saved in your medal history');
   team.save();
 } });
-const medalsScreen = createMedalsScreen({ layout, assets, topBar: screenBar, records: drillRecords, settings, debugEnabled: debug.enabled, goPractice: (drillId) => goSub('drill', { drillId, practice: true }), toast: (a, b) => toast(a, b) });
+const medalsScreen = createMedalsScreen({ layout, assets, topBar: screenBar, records: drillRecords, settings, onSettings: () => openSettings(), debugEnabled: debug.enabled, goPractice: (drillId) => goSub('drill', { drillId, practice: true }), toast: (a, b) => toast(a, b) });
 // The car screens (Milestone 4): the builder, one finished car, the Car Garage.
 const carBuilderScreen = createCarBuilderScreen({
   layout,
@@ -724,7 +927,7 @@ const carResultScreen = createCarResultScreen({ layout, assets, team, topBar: sc
 const carGarageScreen = createCarGarageScreen({ layout, assets, team, topBar: screenBar, goCar });
 const researchScreen = createResearchScreen({ layout, assets, team, topBar: screenBar, toast: (a, b) => toast(a, b), debugEnabled: debug.enabled }); // Milestone 11
 const raceIntroScreen = createRaceIntroScreen({ layout, assets, team, topBar: screenBar, onStart: startRace });
-const raceScreen = createRaceScreen({ renderer, layout, assets, team, bus, settings, onFinished: raceFinished, onLeave: () => leaveRace(), toast: (a, b) => toast(a, b), debug: debug.enabled }); // Milestone 16: + the debug tyre call
+const raceScreen = createRaceScreen({ renderer, layout, assets, team, bus, settings, onFinished: raceFinished, onLeave: () => leaveRace(), toast: (a, b) => toast(a, b), debug: debug.enabled, lowFx, shakeScale: () => SHAKE_LEVELS[settings.get('screenShake')] ?? 1 }); // Milestone 16: + the debug tyre call
 const weekendScreen = createWeekendScreen({ layout, assets, team, topBar: screenBar, onStartRace: startRace, onDriveLap: () => goSub('drill', { qualiLap: true }), toast: (a, b) => toast(a, b) }); // Milestone 15: + the Drive lap
 // The result: prize Credits and Reputation (through the Milestone 5 ledger and rank), setup and qualifying.
 const resultLines = (e) => {
@@ -803,6 +1006,7 @@ async function openTeam(n) {
   assets.ensure(team.recruitment.cardsOf('special').map((c) => c.art).filter((k) => k && assets.isPending(k)));
   garage.loadTeam();
   teamReady = true;
+  audio.playMusic('music_garage'); // Milestone 25b
   const acc = await slots.loadAccount();
   await slots.saveAccount({ ...acc, lastSlot: n });
   router.go('garage');
@@ -909,6 +1113,7 @@ const menuScreen = createMainMenuScreen({
   onNew: () => newGame(),
   onLoad: () => router.go('slots', { mode: 'load' }),
   onHelp: showHelp,
+  onSettings: () => openSettings(), // Milestone 25b
 });
 const slotsScreen = createSlotsScreen({
   layout,
@@ -933,7 +1138,7 @@ const setupScreen = createTeamSetupScreen({
   onBack: () => router.go(setupFrom, setupFrom === 'slots' ? { mode: slotsScreen.mode } : {}),
 });
 
-if (debug.enabled) window.__rw = { comboRecords, slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, get events() { return team.events; }, eventCard, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, drillScreen, medalsScreen, drillRecords, taps: [] };
+if (debug.enabled) window.__rw = { hintLine, MENU_OPEN, openMenuRow, menuState, openSettings, syncMenuSlot, bottomItems, governor, lowFx, audio, haptics, openMenu, menus, comboRecords, slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, get events() { return team.events; }, eventCard, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, drillScreen, medalsScreen, drillRecords, taps: [] };
 
 router
   .register('boot', bootScreen)

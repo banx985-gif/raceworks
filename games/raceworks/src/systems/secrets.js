@@ -151,6 +151,8 @@ export function createSecrets({ bus, team, rules = [] }) {
     .define('run.wins', () => team.careers.facts.wins ?? 0)
     .define('run.podiums', () => team.careers.facts.podiums ?? 0)
     .define('run.facilities', () => team.facilities.builtIds())
+    .define('run.facilityLevels', () => team.facilities.levels()) // Milestone 25b: facilityLevel(id) for rules
+    .define('run.maxFacilityLevel', () => Math.max(0, ...team.facilities.levels().map((x) => x.level)))
     .define('run.research', () => team.research.doneIds())
     .define('run.combos', () => [...new Set(log.cars.flatMap((c) => c.combos))])
     .define('run.sponsorDeals', () => team.sponsors.deals.length + team.sponsors.history.length)

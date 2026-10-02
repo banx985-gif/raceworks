@@ -24,6 +24,20 @@
 //
 // Emits: 'facility:placed' { item }, 'facility:moved' { item }, 'facility:sold' { item, refund },
 //        'facility:expansion' { zone }, 'facility:layout' { version } (after any change).
+//
+// Levels (series common feature §3; RACEWORKS Milestone 25b; any series game) — OPTIONAL: pass levels: { max, mult }
+// (default none: every facility behaves exactly as before and the save has no levels). Built on core/FacilityLevels,
+// one level per placed facility (by uid), so a move keeps it and a sale takes it away. Money, rank gates and days are
+// the game's; this system only keeps the level and applies it:
+//   effects: each copy's value × its level's multiplier (an effect's own levelMult [×L1, ×L2, ×L3], else the def's
+//     levelMult, else levels.mult; an effect with scale: false — a count, an unlock flag — never changes; one with
+//     levelMult [0, 1, 2] is a bonus only upgrades give). A cap grows with the best counted copy's ×.
+//   level(uid) · levelOfDef(defId) (the best copy) · levelMult(uid) · upgradePending(uid) · invested(uid)
+//   startUpgrade(uid, { cost, today, days }) → { ok, why?, to, doneDay } (it works at the old level meanwhile)
+//   tickUpgrades(today) → [{ uid, level }] finished today ('facility:levelUp' { id: uid, level } from FacilityLevels)
+//   sellValue(item) pays sellRefundPct of the build price AND of what its upgrades cost.
+import { FacilityLevels } from './FacilityLevels.js';
+
 const REASONS = {
   outside: 'Outside the workshop',
   locked: 'That area is locked — buy the expansion first',
@@ -35,8 +49,9 @@ const REASONS = {
 };
 
 export class FacilitySystem {
-  constructor({ bus = null, defs, area, zones = [], entrance, keepClear = [], fixed = [], sellRefundPct = 50, reasons = {}, zoneShown = () => true }) {
+  constructor({ bus = null, defs, area, zones = [], entrance, keepClear = [], fixed = [], sellRefundPct = 50, reasons = {}, zoneShown = () => true, levels = null }) {
     this.zoneShown = zoneShown;
+    this.levels = levels ? new FacilityLevels({ maxLevel: levels.max ?? 3, mult: levels.mult ?? [1, 1.5, 2], bus }) : null;
     this.fixed = new Set(fixed.map((f) => `${f.col},${f.row}`));
     this.bus = bus;
     this.defs = defs;
@@ -56,7 +71,48 @@ export class FacilitySystem {
     this.placed = []; // [{ uid, def, col, row, rot }]
     this.nextUid = 1;
     this.owned = new Set(); // opened zone ids
+    this.levels?.load(null);
     this._changed(false);
+  }
+
+  // --- levels (optional) ------------------------------------------------------------------------------------------
+  level(uid) {
+    return this.levels ? this.levels.level(uid) : 1;
+  }
+
+  // The best level among the owned copies of a facility (0 when none stands).
+  levelOfDef(defId) {
+    let best = 0;
+    for (const p of this.placed) if (p.def === defId) best = Math.max(best, this.level(p.uid));
+    return best;
+  }
+
+  levelMult(uid) {
+    const it = this.get(uid);
+    if (!this.levels || !it) return 1;
+    return this.levels.mult(uid, this.defs[it.def]?.levelMult ?? null);
+  }
+
+  upgradePending(uid) {
+    return this.levels?.pending(uid) ?? null;
+  }
+
+  invested(uid) {
+    return this.levels?.invested(uid) ?? 0;
+  }
+
+  startUpgrade(uid, { cost = 0, today = 0, days = 0 } = {}) {
+    if (!this.levels) return { ok: false, why: 'No levels here' };
+    if (!this.get(uid)) return { ok: false, why: this.reasons.unknown };
+    const r = this.levels.start(uid, { cost, today, days });
+    if (r.ok && days <= 0) this._changed();
+    return r;
+  }
+
+  tickUpgrades(today) {
+    const done = this.levels ? this.levels.tick(today) : [];
+    if (done.length) this._changed();
+    return done.map((d) => ({ uid: Number(d.id), level: d.level }));
   }
 
   // --- floor ------------------------------------------------------------------
@@ -144,7 +200,7 @@ export class FacilitySystem {
   }
 
   sellValue(item) {
-    return Math.floor((this.defs[item.def].cost * this.sellRefundPct) / 100);
+    return Math.floor(((this.defs[item.def].cost + this.invested(item.uid)) * this.sellRefundPct) / 100);
   }
 
   // Can defId go here? ignoreUid: the facility being moved. Returns { ok, code, reason }.
@@ -198,8 +254,9 @@ export class FacilitySystem {
   remove(uid) {
     const item = this.get(uid);
     if (!item) return null;
-    this.placed = this.placed.filter((p) => p !== item);
     const refund = this.sellValue(item);
+    this.placed = this.placed.filter((p) => p !== item);
+    this.levels?.remove(item.uid); // its levels go with it
     this._changed();
     this.bus?.emit('facility:sold', { item, refund });
     return { item, refund };
@@ -224,23 +281,35 @@ export class FacilitySystem {
   // Where a total comes from: [{ defId, name, count, value }].
   breakdown(key) {
     const out = [];
-    for (const [defId, n] of this._counts()) {
+    for (const [defId, lv] of this._counts()) {
       const d = this.defs[defId];
-      for (const e of d.effects ?? []) if (e.key === key) out.push({ defId, name: d.name, count: n, value: effectValue(e, n) });
+      for (const e of d.effects ?? []) if (e.key === key) out.push({ defId, name: d.name, count: lv.length, value: effectValue(e, this._mults(d, e, lv)) });
     }
     return out;
   }
 
+  // defId → each owned copy's level, oldest first (all 1 without levels).
   _counts() {
     const m = new Map();
-    for (const p of this.placed) m.set(p.def, (m.get(p.def) ?? 0) + 1);
+    for (const p of this.placed) {
+      if (!m.has(p.def)) m.set(p.def, []);
+      m.get(p.def).push(this.level(p.uid));
+    }
     return m;
+  }
+
+  // Each copy's multiplier for one effect (all 1 without levels, so totals are exactly as before).
+  _mults(def, e, levels) {
+    if (!this.levels || e.scale === false) return levels.map(() => 1);
+    const table = e.levelMult ?? def.levelMult ?? this.levels.defaultMult;
+    return levels.map((l) => table[l - 1] ?? 1);
   }
 
   _sumEffects() {
     const out = {};
-    for (const [defId, n] of this._counts()) {
-      for (const e of this.defs[defId].effects ?? []) out[e.key] = (out[e.key] ?? 0) + effectValue(e, n);
+    for (const [defId, lv] of this._counts()) {
+      const d = this.defs[defId];
+      for (const e of d.effects ?? []) out[e.key] = (out[e.key] ?? 0) + effectValue(e, this._mults(d, e, lv));
     }
     return out;
   }
@@ -367,14 +436,21 @@ export class FacilitySystem {
 
   // --- save -----------------------------------------------------------------------
   serialize() {
-    return { expansions: [...this.owned], placement: this.placed.map((p) => ({ ...p })), nextUid: this.nextUid };
+    const out = { expansions: [...this.owned], placement: this.placed.map((p) => ({ ...p })), nextUid: this.nextUid };
+    if (this.levels) out.levels = this.levels.serialize();
+    return out;
   }
 
-  // Restores exactly what was saved (no rule checks: a saved layout was valid when it was made).
+  // Restores exactly what was saved (no rule checks: a saved layout was valid when it was made). A save from before
+  // levels has none: everything is at level 1.
   load(s) {
     this.owned = new Set((s?.expansions ?? []).filter((id) => this.zone(id)));
     this.placed = (s?.placement ?? []).filter((p) => this.defs[p.def]).map((p) => ({ uid: p.uid, def: p.def, col: p.col, row: p.row, rot: p.rot ? 1 : 0 }));
     this.nextUid = s?.nextUid ?? this.placed.reduce((m, p) => Math.max(m, p.uid + 1), 1);
+    if (this.levels) {
+      const kept = Object.fromEntries(Object.entries(s?.levels ?? {}).filter(([uid]) => this.placed.some((p) => String(p.uid) === uid)));
+      this.levels.load(kept);
+    }
     this._changed();
   }
 }
@@ -386,9 +462,13 @@ const DIRS = [
   [0, -1],
 ];
 
-function effectValue(e, count) {
-  const n = Math.min(count, e.maxCount ?? Infinity);
-  let v = e.value * n;
-  if (e.cap !== undefined && e.cap !== null) v = e.value < 0 ? Math.max(v, e.cap) : Math.min(v, e.cap);
+// mults: each owned copy's level multiplier (oldest first; all 1 without levels — then this is value × count, as before).
+function effectValue(e, mults) {
+  const counted = mults.slice(0, Math.min(mults.length, e.maxCount ?? Infinity));
+  let v = e.value * counted.reduce((t, m) => t + m, 0);
+  if (e.cap !== undefined && e.cap !== null) {
+    const cap = e.cap * Math.max(1, ...counted);
+    v = e.value < 0 ? Math.max(v, cap) : Math.min(v, cap);
+  }
   return v;
 }
