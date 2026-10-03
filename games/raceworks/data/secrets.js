@@ -104,7 +104,7 @@ export const FACTS = [
   { id: 'run.startersKept', scope: 'run', type: 'number', text: 'starting staff employed without a break since day 1' },
   { id: 'run.firstYearMechanicsKept', scope: 'run', type: 'number', text: 'Mechanics hired in Year 1 employed without a break since' },
   { id: 'run.endingReached', scope: 'run', type: 'boolean', text: 'the run has reached its Year-16 ending (Milestone 27)' },
-  { id: 'run.legacyTitles', scope: 'run', type: 'number', text: 'World-tier titles (C08–C12) a Legacy Staff member raced in (NG+, Milestone 28)' },
+  { id: 'run.legacyTitles', scope: 'run', type: 'number', text: 'World-tier titles (C08–C12) a Legacy Staff member raced in' },
   { id: 'run.months', scope: 'run', type: 'list', text: 'each finished month’s cash flow', fields: ['month', 'net', 'positive'] },
   { id: 'run.staff', scope: 'run', type: 'list', text: 'everyone employed now', fields: ['id', 'role', 'tier', 'hiredDay', 'daysEmployed', 'founder', 'level'] },
   // Milestone 26 (the achievements read them; src/systems/achievements.js defines them)
@@ -122,7 +122,7 @@ export const FACTS = [
   { id: 'run.racesDrive', scope: 'run', type: 'number', mode: true, text: 'race weekends with at least one Drive Stint' },
   { id: 'run.drillsPlayed', scope: 'run', type: 'number', mode: true, text: 'driver drills finished this run' },
   // account
-  { id: 'account.ngPlus', scope: 'account', type: 'number', text: 'New Game+ level (0 until NG+ exists)' },
+  { id: 'account.ngPlus', scope: 'account', type: 'number', text: 'New Game+ level of this run (0 for a first run)' },
   { id: 'account.golds', scope: 'account', type: 'set', text: 'drill ids with a gold ever earned' },
   { id: 'account.mastered', scope: 'account', type: 'set', text: 'drill ids Mastered' },
   { id: 'account.recipes', scope: 'account', type: 'set', text: 'combo ids discovered on this device' },
@@ -134,7 +134,7 @@ export const FACTS = [
   { id: 'account.recipeCount', scope: 'account', type: 'number', text: 'engineering synergies (combos) discovered on this device' },
   { id: 'account.secretsFound', scope: 'account', type: 'number', text: 'different secrets (of the 34) ever found on this device' },
   { id: 'account.secretsFoundIds', scope: 'account', type: 'set', text: 'the secret ids ever found on this device' },
-  { id: 'account.legacyChain', scope: 'account', type: 'number', text: 'NG+ levels one Legacy Staff member was carried through in a row (0 until NG+, Milestone 28)' },
+  { id: 'account.legacyChain', scope: 'account', type: 'number', text: 'NG+ levels one Legacy Staff member was carried through in a row (by person id, run to run)' },
 ];
 export const FACT_IDS = new Set(FACTS.map((f) => f.id));
 export const factDef = (id) => FACTS.find((f) => f.id === id) ?? null;

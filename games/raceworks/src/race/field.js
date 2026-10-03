@@ -57,11 +57,13 @@ export function playerEntry(team, rec) {
 // × the team's shape, crew from the band, drivers' §28.1 ratings grown by driverStep a band past the team's first
 // championship, privateers scaled by the championship's tier. Never anything from the player's car (no rubber-banding).
 // The M6 'club' band (the practice race) is the teams' own data, as before.
-export function rivalCarFor(teamId, band) {
+// Milestone 28 (bible §37.4): pct = the New Game+ rival development (+8 / 14 / 20 %, plus a challenge's extra) on the
+// band's car level — a fixed band for the run, still nothing from the player's car.
+export function rivalCarFor(teamId, band, pct = 0) {
   const def = RIVAL_TEAMS[teamId];
   if (def?.bands?.[band]) return { car: { ...def.bands[band].car }, crew: def.bands[band].crew };
   const b = CHAMP_BANDS[band];
-  const car = Object.fromEntries(Object.entries(def.shape).map(([k, v]) => [k, Math.round(b.carLevel * v)]));
+  const car = Object.fromEntries(Object.entries(def.shape).map(([k, v]) => [k, Math.round(b.carLevel * (1 + pct / 100) * v)]));
   return { car, crew: b.crew };
 }
 export function rivalRatingsFor(teamId, driver, band) {
@@ -71,13 +73,13 @@ export function rivalRatingsFor(teamId, driver, band) {
   return Object.fromEntries(SIX.map((k) => [k, clampRating(driver.ratings[k] * x)]));
 }
 
-export function buildField({ player, rivalPool, band, fieldSize, seed }) {
+export function buildField({ player, rivalPool, band, fieldSize, seed, rivalPct = 0 }) {
   const size = Math.min(FIELD_CAP, fieldSize);
   const entries = [player];
   const champ = !!CHAMP_BANDS[band];
   const teams = rivalPool.map((id) => ({ id, def: RIVAL_TEAMS[id] })).filter((t) => t.def);
   const rival = (t, d) => {
-    const c = rivalCarFor(t.id, band);
+    const c = rivalCarFor(t.id, band, champ ? rivalPct : 0);
     return {
       id: d.id,
       name: d.name,

@@ -50,6 +50,10 @@
 // Milestone 27: team.ending (src/systems/ending.js) — the Year-16 ending on core/CampaignEnding: the 1,000-point grade, the
 //   ceremony's cards, the archived run (Hall of Runs) and Prestige Tokens on the account; postgame carries on in Year 17+.
 //   team.prestigeTokens = the secrets' tokens + the endings'. The slot card shows "ended Grade X".
+// Milestone 28: New Game+ (src/systems/ngplus.js) — team.newGame(setup, carry) builds an NG+ run from a finished run's
+//   carry package: team.ngPlus (level, parent, Legacy Staff, blueprints, the facility blueprint, challenge modifiers,
+//   the research bonus, the rival %, each Legacy person's chain) · team.legacyStaff · team.isLegacy(id) ·
+//   team.rivalPct() · team.hasModifier(id) · team.noAutoNow(); team.ngplus = the account block (lineage, staff met).
 import { Clock } from '../../../../core/Clock.js';
 import { Rng } from '../../../../core/Rng.js';
 import { StaffSystem } from '../../../../core/StaffSystem.js';
@@ -81,6 +85,9 @@ import { createSecrets } from '../systems/secrets.js';
 import { createItems } from '../systems/items.js'; // Milestone 25b
 import { createAchievements } from '../systems/achievements.js'; // Milestone 26
 import { createEnding } from '../systems/ending.js'; // Milestone 27
+import { StaffModel } from '../../../../core/StaffModel.js';
+import { createNgPlusRecords, ngBlockOf, legacyModel, modifierById } from '../systems/ngplus.js'; // Milestone 28
+import { START_MONEY } from '../../data/economy.js';
 
 // A new game's setup when none is given (tests, and saves from before Milestone 4b).
 export const DEFAULT_SETUP = { teamName: 'RACEWORKS', principal: 'Principal', colour: 'red', founderId: 'MEC01' };
@@ -163,6 +170,9 @@ export const SAVE_MIGRATIONS = {
   //   id, the Year-16 notices shown). Nothing to change here — ending.load() gives a save without it no ending yet (a save
   //   already past Year 16 gets it on its next day tick).
   20: (record) => record,
+  //   21 → 22 (Milestone 28): New Game+ (the run's ngPlus block; the achievements met in this run). Nothing to change here —
+  //   a save without it is a first run (NG+ 0), and achievements.load() rebuilds its run list from the account history.
+  21: (record) => record,
 };
 
 const blankContractRecords = () => ({ partEvents: {}, facts: {} });
@@ -206,9 +216,9 @@ export class Team {
       busyElsewhere: (id) => (this.training?.trainingOf(id) ? 'Away on a training course' : null),
       combosFor: (job, prelim) => this.combos?.forCar(job, prelim) ?? null, // Milestone 22
     });
-    this.money = createTeamMoney({ bus, seed, clock: this.clock, staff: this.staff, cars: this.cars, revealBonus: () => this.facilities.bonus('revealReputation'), generateOffer: (rng, taken) => contractTerms(this, rng, taken), onPaid: (c) => this.contractPaid(c) }); // (Milestone 21: the §29 contracts)
+    this.money = createTeamMoney({ bus, seed, clock: this.clock, staff: this.staff, cars: this.cars, revealBonus: () => this.facilities.bonus('revealReputation'), generateOffer: (rng, taken) => contractTerms(this, rng, taken), onPaid: (c) => this.contractPaid(c), noCredit: () => this.hasModifier('noEmergency') }); // (Milestone 28: + the No Emergency Credit challenge) // (Milestone 21: the §29 contracts)
     // (Milestone 21: the sponsors' perks join the research bonuses in the one effect query)
-    this.facilities = createGarageFacilities({ bus, today: () => this.clock.totalDays, progress: () => ({ year: this.clock.year, trophies: this.championships?.trophyList().length ?? 0 }), money: this.money, research: () => new Set(this.unlocks.research), secrets: () => new Set(this.secrets?.unlockedIds() ?? []), extraBonus: (key) => this.research.bonus(key) + (this.sponsors?.bonus(key) ?? 0) + (this.events?.bonus(key) ?? 0), extraKeys: () => [...this.research.bonusKeys(), ...(this.sponsors?.bonusKeys() ?? []), ...(this.events?.bonusKeys() ?? [])] }); // Milestone 10 (Milestone 23: + the events' timed modifiers)
+    this.facilities = createGarageFacilities({ bus, today: () => this.clock.totalDays, progress: () => ({ year: this.clock.year, trophies: this.championships?.trophyList().length ?? 0 }), money: this.money, research: () => new Set(this.unlocks.research), secrets: () => new Set(this.secrets?.unlockedIds() ?? []), extraBonus: (key) => this.research.bonus(key) + (this.sponsors?.bonus(key) ?? 0) + (this.events?.bonus(key) ?? 0), extraKeys: () => [...this.research.bonusKeys(), ...(this.sponsors?.bonusKeys() ?? []), ...(this.events?.bonusKeys() ?? [])], discount: () => (this.ngPlus?.facility && !this.ngPlus.facility.used ? this.ngPlus.facility : null), onDiscountUsed: () => this.ngPlus?.facility && (this.ngPlus.facility.used = true) }); // (Milestone 28: + the New Game+ facility blueprint) // Milestone 10 (Milestone 23: + the events' timed modifiers)
     this.research = createResearch({ bus, team: this }); // Milestone 11
     this.combos = createCombos({ bus, team: this }); // Milestone 22 (after research: a discovery pays RP)
     this.races = createRaces({ bus, team: this }); // Milestone 6: the race being run (fixed seed) and the results
@@ -225,6 +235,8 @@ export class Team {
     this.achievements = createAchievements({ bus, team: this }); // Milestone 26 (after the secrets: their facts and records first)
     this.ending = createEnding({ bus, team: this }); // Milestone 27 (last: every system's month-end runs before the ending)
     this.runId = null;
+    this.ngPlus = null; // Milestone 28: this run's New Game+ block (null = a first run)
+    this.ngplus = createNgPlusRecords({ bus, team: this }); // Milestone 28: the account's lineage and staff met
     this.recruitment.extraBusy = (id) => {
       const t = this.training.trainingOf(id);
       return t ? `Away on a course (${t.days - t.daysDone} day${t.days - t.daysDone === 1 ? '' : 's'} left)` : null;
@@ -257,17 +269,25 @@ export class Team {
 
   // A new team (Milestone 4b): the founder plus two (data/setup.js FOUNDERS, spec §3), fresh Energy / Morale, on the
   // job (so no idle-morale loss). A fresh calendar, so every slot starts on day 1.
-  newGame(setup = DEFAULT_SETUP) {
+  // Milestone 28: carry = a New Game+ package (src/systems/ngplus.js buildCarry): the same new team, plus its Legacy
+  // Staff (one who is also a starter or the founder takes that place, with their own stats), the research bonus and the
+  // challenge modifiers' numbers. Everything else starts as in any new game.
+  newGame(setup = DEFAULT_SETUP, carry = null) {
     const f = FOUNDERS.find((x) => x.id === setup.founderId) ?? FOUNDERS.find((x) => x.id === DEFAULT_SETUP.founderId);
     const colour = TEAM_COLOURS.some((c) => c.id === setup.colour) ? setup.colour : DEFAULT_SETUP.colour;
     this.setup = { teamName: setup.teamName || DEFAULT_SETUP.teamName, principal: setup.principal || DEFAULT_SETUP.principal, colour, founderId: f.id };
     this.clock.load({ year: 1, month: 1, day: 1, totalDays: 0, dayProgress: 0, speed: this.clock.speeds[0], lastSpeed: this.clock.speeds[0] });
+    this.ngPlus = carry ? ngBlockOf(carry) : null;
+    const legacy = carry?.legacy ?? [];
     this.staff.staff = [];
     for (const id of f.team ?? STARTERS) {
+      if (legacy.some((e) => e.id === id)) continue; // Milestone 28: the Legacy version of this person joins below
       const s = this.staff.addFromDefinition(STAFF.find((d) => d.id === id));
       s.assigned = true;
     }
+    for (const e of legacy) this.staff.add(StaffModel.fromJSON(legacyModel(e, carry.level)));
     this.founder = newFounder(f.id);
+    if (this.isLegacy(f.id)) this.founder.history.legacyStaff = true; // spec §4: the founder chosen as Legacy Staff
     this.noCandidates = (f.team ?? STARTERS).filter((id) => START_CANDIDATES.includes(id));
     this.playSeconds = 0;
     this.cars.load(null);
@@ -275,6 +295,7 @@ export class Team {
     this.ratings = createRatingsCache();
     this.garageState = null;
     this.money.newGame(); // §30.2 starting state, month 1 salaries, the first contract offer
+    if (carry) this.applyCarryMoney(); // Milestone 28: the research memory, the half-Credits challenge
     this.facilities.newGame(); // Milestone 10: the starting garage (bible §19)
     this.research.newGame(); // Milestone 11: nothing researched; 120 RP came with the money (§30.2)
     this.races.load(null);
@@ -292,6 +313,35 @@ export class Team {
     this.achievements.newGame(); // Milestone 26 (the account's achievements, records and completion stay)
     if (this.achievements.attached) this.achievements.sync(); // the starting parts, garage and staff count for completion
     this.ending.newGame(); // Milestone 27 (the account's Hall of Runs and tokens stay)
+  }
+
+  // --- New Game+ (Milestone 28) -----------------------------------------------------------------------------------
+  applyCarryMoney() {
+    const ng = this.ngPlus;
+    const eco = this.money.economy;
+    if (ng.rpBonus) eco.add('rp', ng.rpBonus, `New Game+ research memory (${ng.parentTeam})`, 'start');
+    const half = modifierById('halfCredits');
+    if (this.hasModifier('halfCredits')) eco.add('credits', -Math.round((START_MONEY.credits * (100 - half.creditsPct)) / 100), `Challenge: ${half.name}`, 'start');
+  }
+  get ngLevel() {
+    return this.ngPlus?.level ?? 0;
+  }
+  get legacyStaff() {
+    return this.ngPlus?.legacyStaff ?? [];
+  }
+  isLegacy(id) {
+    return this.legacyStaff.includes(id);
+  }
+  hasModifier(id) {
+    return !!this.ngPlus?.modifiers?.includes(id);
+  }
+  // Rival development in the championship bands: the NG+ level's % plus the 'Rivals +10 % extra' challenge.
+  rivalPct() {
+    return (this.ngPlus?.rivalPct ?? 0) + (this.hasModifier('rivalsPlus') ? modifierById('rivalsPlus').rivalPct : 0);
+  }
+  // The 'No Auto Strategy in Year 1' challenge: the race car stays off AUTO until Year 2.
+  noAutoNow() {
+    return this.hasModifier('noAutoYear1') && this.clock.year < modifierById('noAutoYear1').untilYear;
   }
 
   // Milestone 27: every Prestige Token on this device — the secrets' (bible §36) and the endings' (by grade).
@@ -409,7 +459,7 @@ export class Team {
       year: this.clock.year,
       month: this.clock.month,
       rank: this.money.rank,
-      ngPlus: SLOT_PLACEHOLDERS.ngPlus,
+      ngPlus: this.ngPlus?.level ?? SLOT_PLACEHOLDERS.ngPlus, // Milestone 28
       grade: this.ending.result?.grade?.band ?? SLOT_PLACEHOLDERS.grade, // Milestone 27: "ended Grade A"
       ended: this.ending.reached,
       worldCrown: !!this.ending.result?.worldCrown,
@@ -461,12 +511,14 @@ export class Team {
       items: this.items.serialize(), // Milestone 25b
       achievements: this.achievements.serialize(), // Milestone 26
       ending: this.ending.serialize(), // Milestone 27
+      ngPlus: this.ngPlus ? JSON.parse(JSON.stringify(this.ngPlus)) : null, // Milestone 28
     };
   }
 
   load(data) {
     this.clock.load(data.clock);
     this.rng.setState(data.rng);
+    this.ngPlus = data.ngPlus ? JSON.parse(JSON.stringify(data.ngPlus)) : null; // Milestone 28 (none: a first run)
     this.staff.load(data.staff);
     this.cars.load(data.cars); // a Milestone 3 save has none yet: no project, an empty Car Garage
     this.cars.assignments.refresh();

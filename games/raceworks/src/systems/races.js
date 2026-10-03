@@ -86,7 +86,7 @@ export function createRaces({ bus, team }) {
     // MEC), the crew's pit traits, the pit facilities (pitBasePct) through the garage's effect query
     const mec = raceCrew(team).mechanic?.stats.MEC ?? best('MEC');
     const pitParts = { mech: mechanicSecs(mec), traitPct: trait('pitServicePct') + (team.facilities?.bonus('pitServicePct') ?? 0), basePct: team.facilities?.bonus('pitBasePct') ?? 0, mec }; // (Milestone 21: + IronPeak)
-    const player = { ...playerEntry(team, rec), pitParts, tyre: 'medium', auto: true };
+    const player = { ...playerEntry(team, rec), pitParts, tyre: 'medium', auto: !team.noAutoNow?.(), noAuto: !!team.noAutoNow?.() }; // (Milestone 28: the 'No Auto Strategy in Year 1' challenge)
     const sponsors = kind === 'weekend' ? team.sponsors?.decals() ?? [] : []; // Milestone 21: on the car this weekend
     const effPlus = kind === 'weekend' ? team.facilities?.bonus('raceEFF') ?? 0 : 0;
     if (effPlus) player.car.EFF = (player.car.EFF ?? 0) + effPlus;
@@ -106,7 +106,7 @@ export function createRaces({ bus, team }) {
     player.strategy = strategyProfile({ str, traits: strategist?.traits ?? [], workPct, autoPct: fx('autoStrategyPct'), tyres: player.openTyres });
     player.strategy.strategistId = strategist?.id ?? null;
     const forecast = forecastOf({ str, workPct, forecastPts: fx('forecast') + trait('forecastPts'), uncertaintyPct: fx('forecastUncertaintyPct') }); // Milestone 17: + Weather Watch
-    const { entries, grid } = buildField({ player, rivalPool: config.rivalPool, band: config.band, fieldSize: config.fieldSize, seed });
+    const { entries, grid } = buildField({ player, rivalPool: config.rivalPool, band: config.band, fieldSize: config.fieldSize, seed, rivalPct: team.rivalPct?.() ?? 0 }); // (Milestone 28: the New Game+ rival development)
     for (const e of entries) if (!e.isPlayer) {
       const rmec = 77 + ((e.crew ?? 80) - 80) / 2;
       e.pitParts = { mech: mechanicSecs(rmec), traitPct: 0, basePct: 0, mec: rmec };

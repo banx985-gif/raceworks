@@ -37,7 +37,7 @@ const VISIBLE_FACILITIES = FACILITIES.filter((f) => !f.prop && !f.unlock?.secret
 const NORMAL_WINGS = EXPANSIONS.filter((z) => !z.secret).map((z) => z.id);
 const DISCOVERABLE_PARTS = SR.licences.filter((id) => !PARTS[id]?.unlock?.start);
 const NAME = Object.fromEntries(ALL_STAFF.map((d) => [d.id, d.name]));
-const blankLog = () => ({ yearEnds: [], peakCredits: 0, sponsorMet: 0, tiers: [] });
+const blankLog = () => ({ yearEnds: [], peakCredits: 0, sponsorMet: 0, tiers: [], runEarned: [] }); // (Milestone 28: runEarned)
 const blankSets = () => ({ championships: [], research: [], parts: [], facilities: [], tiers: [] });
 
 export function createAchievements({ bus, team, rules = ACHIEVEMENTS }) {
@@ -87,6 +87,7 @@ export function createAchievements({ bus, team, rules = ACHIEVEMENTS }) {
   // The engine has already written it into the account history (once ever); pay, announce, save.
   function granted(got) {
     for (const { rule } of got) {
+      markRun(rule.id);
       pay(rule);
       bus.emit('achievement:unlocked', { def: rule, when: engine.account.history[rule.id]?.first ?? now() });
       team.events?.announce?.('EV_ACHIEVEMENT', { name: rule.name, recipe: rule.recipe, reward: rewardText(rule), icon: rule.icon });
@@ -98,14 +99,26 @@ export function createAchievements({ bus, team, rules = ACHIEVEMENTS }) {
   // earned or paid.
   function check(trigger, payload = {}) {
     if (!attached) return [];
-    return granted(engine.notify(trigger, payload));
+    const out = granted(engine.notify(trigger, payload));
+    metAgain(rules.filter((r) => r.triggerEvents?.includes(trigger)), trigger, payload);
+    return out;
+  }
+  // Milestone 28: what THIS run has achieved (the M27 grade reads it, so a New Game+ run grades on its own). An
+  // achievement already earned on the device is never earned or paid again, but its requirement met in this run is
+  // noted here — checked on the rule's own triggers, like earning it.
+  const firstHere = () => rules.filter((r) => team.runId && engine.account.history[r.id]?.first?.runId === team.runId).map((r) => r.id);
+  const markRun = (id) => !log.runEarned.includes(id) && log.runEarned.push(id);
+  function metAgain(list, event = 'sync', payload = {}) {
+    for (const rule of list) if (earned(rule.id) && !log.runEarned.includes(rule.id) && engine.evaluate(rule, { event, payload }).ok) markRun(rule.id);
   }
   // Every achievement not yet earned, looked at once (a save that loads may already meet some).
   function checkAll() {
     if (!attached) return [];
     const got = [];
     for (const rule of rules) if (engine.open(rule) && engine.evaluate(rule, { event: 'sync', payload: {} }).ok) got.push(engine.unlock(rule));
-    return granted(got.filter(Boolean));
+    const out = granted(got.filter(Boolean));
+    metAgain(rules);
+    return out;
   }
 
   // --- this team's records (read live from the slot) ----------------------------------------------------------------
@@ -266,6 +279,8 @@ export function createAchievements({ bus, team, rules = ACHIEVEMENTS }) {
     facts,
     earned,
     earnedList: () => rules.filter((r) => earned(r.id)).map((r) => ({ ...r, when: engine.account.history[r.id].first })),
+    // Milestone 28: the achievements this run earned or met again (ids, in order)
+    runEarned: () => [...log.runEarned],
     check,
     checkAll,
     completion,
@@ -308,12 +323,14 @@ export function createAchievements({ bus, team, rules = ACHIEVEMENTS }) {
       engine.loadRun(data?.run ?? null);
       if (data?.log) {
         log = { ...blankLog(), ...JSON.parse(JSON.stringify(data.log)) };
+        if (!data.log.runEarned) log.runEarned = firstHere(); // before Milestone 28: the ones first earned in this run (sync adds any met again)
         return true;
       }
       log = blankLog();
       log.peakCredits = team.money.credits;
       log.sponsorMet = (team.sponsors?.history ?? []).filter((h) => h.met).length;
       log.tiers = [...new Set(team.roster.map((s) => s.tier))];
+      log.runEarned = firstHere();
       return false;
     },
   };

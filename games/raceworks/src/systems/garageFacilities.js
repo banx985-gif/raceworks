@@ -31,7 +31,7 @@ export const FACILITY_DEFS = Object.fromEntries([...FACILITIES.map(leveled), { .
 // the shop only once its secret is found, and the Ghost Annex (a secret room) opens with SEC-FAC-02.
 // Milestone 25b: today() → the game day (upgrades take days; they finish on 'clock:day').
 // Milestone 27: progress() → { year, trophies } for an unlock by year and trophies won (F29 Heritage Room).
-export function createGarageFacilities({ bus, money, research = () => new Set(), secrets = () => new Set(), extraBonus = () => 0, extraKeys = () => [], today = () => 0, progress = () => ({ year: 1, trophies: 0 }) }) {
+export function createGarageFacilities({ bus, money, research = () => new Set(), secrets = () => new Set(), extraBonus = () => 0, extraKeys = () => [], today = () => 0, progress = () => ({ year: 1, trophies: 0 }), discount = () => null, onDiscountUsed = () => {} }) {
   const system = new FacilitySystem({
     bus,
     levels: { max: FACILITY_LEVELS.max, mult: FACILITY_LEVELS.mult }, // Milestone 25b
@@ -160,12 +160,19 @@ export function createGarageFacilities({ bus, money, research = () => new Set(),
       if (u.trophies && progress().trophies < u.trophies) return `Needs ${u.trophies} trophies (${progress().trophies} so far)`;
       return null;
     },
+    // Milestone 28: a New Game+ facility blueprint (bible §37.2 NG+2) takes its % off this facility's first build.
+    priceOf(defId) {
+      const def = FACILITY_DEFS[defId];
+      const d = discount();
+      return d && d.id === defId ? Math.round((def.cost * (100 - d.pct)) / 100) : def.cost;
+    },
     status(defId) {
       const def = FACILITY_DEFS[defId];
       if (!def) return null;
       const owned = system.has(defId);
-      const why = owned ? BUILD_TEXT.owned : api.lockReason(defId) ?? (money.economy.isBlocked('facility') ? BUILD_TEXT.debt : !money.affordable(def.cost) ? `Needs ${def.cost.toLocaleString('en-US')} Credits` : null);
-      return { def, owned, ok: !why, why, locked: !!api.lockReason(defId) };
+      const cost = api.priceOf(defId);
+      const why = owned ? BUILD_TEXT.owned : api.lockReason(defId) ?? (money.economy.isBlocked('facility') ? BUILD_TEXT.debt : !money.affordable(cost) ? `Needs ${cost.toLocaleString('en-US')} Credits` : null);
+      return { def, owned, ok: !why, why, locked: !!api.lockReason(defId), cost, discountPct: cost < def.cost ? discount().pct : 0 };
     },
     // The shop: every bible facility here (F01–F15, Milestone 11 adds the ones research opens), ready ones first, then
     // locked, then the ones already built.
@@ -182,9 +189,10 @@ export function createGarageFacilities({ bus, money, research = () => new Set(),
       if (!spot) return { ok: false, reason: BUILD_TEXT.noSpot };
       const r = system.place(defId, spot.col, spot.row);
       if (!r.ok) return { ok: false, reason: r.reason };
-      money.economy.spend('credits', s.def.cost, `Built: ${s.def.name}`, 'facilities');
-      bus.emit('facility:bought', { item: r.item, cost: s.def.cost });
-      return { ok: true, item: r.item, cost: s.def.cost };
+      money.economy.spend('credits', s.cost, `Built: ${s.def.name}${s.discountPct ? ` (New Game+ blueprint, −${s.discountPct}%)` : ''}`, 'facilities');
+      if (s.discountPct) onDiscountUsed(defId);
+      bus.emit('facility:bought', { item: r.item, cost: s.cost });
+      return { ok: true, item: r.item, cost: s.cost };
     },
     // Can this facility stand here? (Build Mode's red / green footprint.) → { ok, reason }
     check: (defId, col, row, ignoreUid = null) => system.check(defId, col, row, 0, ignoreUid),

@@ -61,6 +61,7 @@ import { createSlotsScreen } from './screens/SlotsScreen.js';
 import { createCeremonyScreen } from './screens/CeremonyScreen.js'; // Milestone 27
 import { createHallOfRunsScreen } from './screens/HallOfRunsScreen.js';
 import { createNgPlusScreen } from './screens/NgPlusScreen.js';
+import { offerFrom, buildCarry } from './systems/ngplus.js'; // Milestone 28
 import { ENDING_TEXT } from '../data/ending.js';
 import { createTeamSetupScreen } from './screens/TeamSetupScreen.js';
 import { createMenuHeader } from './ui/menuHeader.js';
@@ -417,6 +418,8 @@ team.secrets.setAccount({ load: async () => (slots ? ((await slots.loadAccount()
 team.achievements.setAccount({ load: async () => (slots ? ((await slots.loadAccount()).achievements ?? null) : null), save: (block) => saveAccountBlock('achievements', block) });
 // Milestone 27: the Hall of Runs and the endings' Prestige Tokens — account-wide too
 team.ending.setAccount({ load: async () => (slots ? ((await slots.loadAccount()).ending ?? null) : null), save: (block) => saveAccountBlock('ending', block) });
+// Milestone 28: the New Game+ lineage and the staff identities met — account-wide too
+team.ngplus.setAccount({ load: async () => (slots ? ((await slots.loadAccount()).ngplus ?? null) : null), save: (block) => saveAccountBlock('ngplus', block) });
 team.training.setDrillRecords(drillRecords);
 bus.on('stint:done', ({ record }) => drillRecords.recordStint(record)); // Milestone 18: Drive Stints on the account records
 // Milestone 20: the championship ladder — enter one (the fee on the ledger), race its next round (its race weekend).
@@ -802,7 +805,7 @@ function back() {
     if (!setupScreen.onBack()) router.go(setupFrom, setupFrom === 'slots' ? { mode: slotsScreen.mode } : {});
   } else if (router.currentName === 'slots') router.go('menu');
   else if (router.currentName === 'hall') router.go('slots', { mode: 'load' }); // Milestone 27
-  else if (router.currentName === 'ngplus') leaveNgPlus(ngPlusScreen.from);
+  else if (router.currentName === 'ngplus') leaveNgPlus();
   else if (router.currentName === 'ceremony') ceremonyScreen.next(); // Back moves the ceremony on (its last card waits for a choice)
   else if (router.currentName === 'garage' && garage.buildMode) garage.setBuildMode(false);
   else if (router.currentName === 'race') {
@@ -1035,7 +1038,9 @@ async function playSlot(n) {
     await team.secrets.loadAccount();
     await team.achievements.loadAccount(); // Milestone 26
     await team.ending.loadAccount(); // Milestone 27
+    await team.ngplus.loadAccount(); // Milestone 28
     team.load(data);
+    team.ngplus.sync();
   } catch (err) {
     debug.log(`slot ${n} would not load: ${err.message}`);
     dialog.show({ title: 'That save would not load', body: err.message, buttons: [{ id: 'ok', label: 'OK', accent: COL.progress }] });
@@ -1046,7 +1051,9 @@ async function playSlot(n) {
   return true;
 }
 // START TEAM: a fresh team in slot n (anything there was confirmed away already, so it is emptied first — never mixed).
-async function startNewTeam(setup, n) {
+// Milestone 28: carry = a New Game+ package (its parent's slot is never the one written).
+async function startNewTeam(setup, n, carry = null) {
+  if (carry && carry.parentSlot === n) throw new Error('New Game+ never writes over its parent run');
   await leaveTeam();
   await slots.remove(n);
   team.useSlot(slots.slot(n));
@@ -1054,8 +1061,10 @@ async function startNewTeam(setup, n) {
   await team.secrets.loadAccount(); // Milestone 24
   await team.achievements.loadAccount(); // Milestone 26
   await team.ending.loadAccount(); // Milestone 27
-  team.newGame(setup);
-  debug.log(`new team in slot ${n}: ${team.setup.teamName}, founder ${team.founder.id}`);
+  await team.ngplus.loadAccount(); // Milestone 28
+  team.newGame(setup, carry);
+  await team.ngplus.started(carry);
+  debug.log(`new team in slot ${n}: ${team.setup.teamName}, founder ${team.founder.id}${carry ? `, New Game+ ${carry.level} from slot ${carry.parentSlot}` : ''}`);
   await team.save();
   await refreshSlots();
   await openTeam(n);
@@ -1073,10 +1082,41 @@ async function newGame() {
     router.go('setup', { slot: n });
   } else router.go('slots', { mode: 'new' });
 }
-// Milestone 28 hook (spec §8): New Game+ must ask for a slot and never write over the parent run. Call this from the
-// NG+ flow: the slot screen locks the parent slot; a full slot asks before it is replaced.
+// Milestone 28 (spec §8): New Game+ asks for a slot and never writes over the parent run — the slot screen locks the
+// parent slot; a full slot asks before it is replaced. Then the New Game+ Setup screen (the picks), then the normal
+// new-team setup; START TEAM builds the run from the carry package. ngFlow holds the flow until then.
+let ngFlow = null; // { parentSlot, parent (a Team read from the parent's save), slot, replacing, offer, choices }
+async function startNgPlus(parentSlot) {
+  await leaveTeam();
+  await refreshSlots();
+  ngFlow = { parentSlot, parent: null, slot: null, replacing: null, offer: null, choices: null };
+  chooseNewGamePlusSlot(parentSlot);
+}
 function chooseNewGamePlusSlot(parentSlot) {
   router.go('slots', { mode: 'ngplus', parent: parentSlot });
+}
+// The new run's slot is chosen: read the parent's save (only read: a separate Team, never the one that saves) and show
+// the New Game+ Setup screen.
+async function openNgSetup(n, replacing = null) {
+  if (!ngFlow || n === ngFlow.parentSlot) return false;
+  try {
+    const data = await slots.load(ngFlow.parentSlot);
+    if (!data) throw new Error('The finished run would not load.');
+    const parent = new Team({ bus: { on() {}, emit() {} }, seed: 'ngplus-parent' });
+    parent.load(data);
+    if (!parent.ending.reached) throw new Error('New Game+ starts after the Year-16 ending.');
+    const offer = { ...offerFrom(parent), parentSlot: ngFlow.parentSlot };
+    await accountChain;
+    await team.secrets.loadAccount();
+    await team.ending.loadAccount();
+    Object.assign(ngFlow, { parent, slot: n, replacing, offer, choices: null });
+    router.go('ngplus', { offer, slot: n, replacing, tokens: team.prestigeTokens });
+    return true;
+  } catch (err) {
+    debug.log(`New Game+ setup failed: ${err.message}`);
+    dialog.show({ title: 'New Game+ can’t start', body: err.message, buttons: [{ id: 'ok', label: 'OK', accent: COL.progress }] });
+    return false;
+  }
 }
 function confirmDelete(n, s) {
   const name = s.summary?.teamName ?? `Slot ${n}`;
@@ -1101,6 +1141,7 @@ function confirmReplace(n, s) {
     yes: 'Replace',
     danger: true,
     onYes: () => {
+      if (slotsScreen.mode === 'ngplus') return openNgSetup(n, name); // Milestone 28
       setupFrom = 'slots';
       router.go('setup', { slot: n, replacing: name });
     },
@@ -1140,6 +1181,7 @@ const slotsScreen = createSlotsScreen({
   slots: () => slotList,
   onPlay: (n) => playSlot(n),
   onNewTeam: (n) => {
+    if (slotsScreen.mode === 'ngplus') return openNgSetup(n); // Milestone 28
     setupFrom = 'slots';
     router.go('setup', { slot: n });
   },
@@ -1147,7 +1189,7 @@ const slotsScreen = createSlotsScreen({
   onDelete: confirmDelete,
   onBack: () => router.go('menu'),
   onHall: () => goHall(), // Milestone 27
-  onNgPlus: (n, s) => router.go('ngplus', { from: 'slots', slot: n, summary: s.summary }),
+  onNgPlus: (n) => startNgPlus(n), // Milestone 28
 });
 // Milestone 27: the Year-16 ceremony, the Hall of Runs and the New Game+ stub.
 function endCeremony(then) {
@@ -1160,7 +1202,7 @@ const ceremonyScreen = createCeremonyScreen({
   assets,
   team,
   onContinue: () => endCeremony(() => router.go('garage')),
-  onNgPlus: () => endCeremony(() => router.go('ngplus', { from: 'ceremony' })),
+  onNgPlus: () => endCeremony(() => startNgPlus(activeSlot)), // Milestone 28
   sfx,
   haptic,
   reduced: () => !!settings.get('reducedMotion'),
@@ -1172,22 +1214,41 @@ async function goHall() {
   router.go('hall');
 }
 const hallScreen = createHallOfRunsScreen({ layout, header, archive: () => hallList, onBack: () => router.go('slots', { mode: 'load' }) });
-// The stub goes back where it came from: the garage (postgame, Year 17) or the slot screen. It never changes anything.
-function leaveNgPlus(from) {
-  if (from === 'slots' || !teamReady) router.go('slots', { mode: 'load' });
-  else router.go('garage');
+// Milestone 28: the New Game+ Setup screen goes back to the slot choice; Next goes on to the new-team setup.
+function leaveNgPlus() {
+  chooseNewGamePlusSlot(ngFlow?.parentSlot ?? null);
 }
-const ngPlusScreen = createNgPlusScreen({ layout, header, onBack: (from) => leaveNgPlus(from) });
+const ngPlusScreen = createNgPlusScreen({
+  layout,
+  assets,
+  header,
+  onNext: (choices) => {
+    if (!ngFlow) return;
+    ngFlow.choices = choices;
+    setupFrom = 'ngplus';
+    router.go('setup', { slot: ngFlow.slot, replacing: ngFlow.replacing, ngLevel: ngFlow.offer.level });
+  },
+  onBack: () => leaveNgPlus(),
+});
 const setupScreen = createTeamSetupScreen({
   layout,
   assets,
   header,
   textPrompt,
-  onStart: (setup, n) => startNewTeam(setup, n),
+  onStart: (setup, n) => {
+    // Milestone 28: a New Game+ team is built from the carry package (the parent's save is only read)
+    if (setupFrom === 'ngplus' && ngFlow?.parent && ngFlow.slot === n) {
+      const carry = buildCarry(ngFlow.parent, ngFlow.choices ?? {}, { parentSlot: ngFlow.parentSlot, slot: n });
+      ngFlow = null;
+      setupFrom = 'menu';
+      return startNewTeam(setup, n, carry);
+    }
+    return startNewTeam(setup, n);
+  },
   onBack: () => router.go(setupFrom, setupFrom === 'slots' ? { mode: slotsScreen.mode } : {}),
 });
 
-if (debug.enabled) window.__rw = { ceremonyScreen, hallScreen, ngPlusScreen, goHall, get hallList() { return hallList; }, hintLine, MENU_OPEN, openMenuRow, menuState, openSettings, syncMenuSlot, bottomItems, governor, lowFx, audio, haptics, openMenu, menus, comboRecords, slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, get events() { return team.events; }, eventCard, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, drillScreen, medalsScreen, drillRecords, taps: [] };
+if (debug.enabled) window.__rw = { ceremonyScreen, hallScreen, ngPlusScreen, startNgPlus, openNgSetup, get ngFlow() { return ngFlow; }, goHall, get hallList() { return hallList; }, hintLine, MENU_OPEN, openMenuRow, menuState, openSettings, syncMenuSlot, bottomItems, governor, lowFx, audio, haptics, openMenu, menus, comboRecords, slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, get events() { return team.events; }, eventCard, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, drillScreen, medalsScreen, drillRecords, taps: [] };
 
 router
   .register('boot', bootScreen)

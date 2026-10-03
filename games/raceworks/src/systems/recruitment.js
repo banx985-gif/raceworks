@@ -36,6 +36,7 @@ import { RANKS } from '../../data/economy.js';
 import { ROSTER, staffDefById, ROLES, TIERS, STAT_KEYS } from '../../data/staff.js';
 import { CHANNELS, channelById, RECRUIT, REFRESH_SERVICES, GENERIC, ROLE_IDS } from '../../data/recruitment.js';
 import { eligibilityWhy, eligibilityContext } from './staffEligibility.js';
+import { NGPLUS } from '../../data/ngplus.js'; // Milestone 28
 
 const BOARD_CHANNELS = CHANNELS.filter((c) => !c.special);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -51,7 +52,21 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
   const rankIndex = () => money.reputation.highestRankIndex;
   const hasRank = (id) => !id || rankIndex() >= rankIndexOf(RANKS, id);
   const employed = (id) => !!team.staff.get(id);
-  const state = { lastFreeDay: 0, paid: { month: -1, count: 0 }, nextGeneric: 1, debugCards: [] };
+  // Milestone 28 (bible §37.4 "stronger starting applicant variety", PLACEHOLDER): on a New Game+ run each board also
+  // draws one tier higher — a channel's Standard weight is added to Rare and its Rare weight to Elite (still behind the
+  // rank gates: Elite from Rank B) — and Local Contacts' "low Rare" limit is lifted.
+  const ngPlus = () => (team.ngPlus?.level ?? 0) > 0;
+  function weightsOf(ch) {
+    if (!ngPlus()) return ch.weights ?? {};
+    const out = { ...(ch.weights ?? {}) };
+    for (const [t, w] of Object.entries(ch.weights ?? {})) {
+      const up = NGPLUS.applicants.tierUp[t];
+      if (up) out[up] = (out[up] ?? 0) + w;
+    }
+    return out;
+  }
+  const bandOf = (ch) => (ngPlus() ? {} : ch.band ?? {});
+  const state ={ lastFreeDay: 0, paid: { month: -1, count: 0 }, nextGeneric: 1, debugCards: [] };
 
   // --- eligibility ---------------------------------------------------------------------------------------------------
   const chOpen = (ch) => !!ch && !ch.special && hasRank(ch.rank);
@@ -77,8 +92,8 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
     if (tr === undefined) return 'Not an ordinary candidate';
     if (!hasRank(tr)) return `${TIERS[p.tier].name} staff need Rank ${tr}`;
     if (ch) {
-      if (!ch.weights?.[p.tier]) return `${ch.name} doesn’t find ${TIERS[p.tier].name} staff`;
-      if (ch.band?.[p.tier] === 'low' && p.level > GENERIC.bandLevel.low) return `${ch.name} only finds low ${TIERS[p.tier].name} staff`;
+      if (!weightsOf(ch)[p.tier]) return `${ch.name} doesn’t find ${TIERS[p.tier].name} staff`;
+      if (bandOf(ch)[p.tier] === 'low' && p.level > GENERIC.bandLevel.low) return `${ch.name} only finds low ${TIERS[p.tier].name} staff`;
     }
     if (!p.generic) return namedWhy(staffDefById(p.personId));
     return null;
@@ -108,7 +123,7 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
     return `${rng.pick(GENERIC.firstNames)} ${rng.pick(GENERIC.lastNames)}`;
   }
   function generic(ch, tier, rng) {
-    const band = (ch.band?.[tier] === 'low' && GENERIC.low[tier]) || GENERIC.tiers[tier];
+    const band = (bandOf(ch)[tier] === 'low' && GENERIC.low[tier]) || GENERIC.tiers[tier];
     const miss = missingRoles();
     const role = miss.length && rng.chance(RECRUIT.missingRoleChance) ? rng.pick(miss) : rng.pick(ROLE_IDS);
     const main = ROLES[role].primaryStat;
@@ -134,7 +149,7 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
     return generic(ch, tier, rng);
   }
   // Tiers this channel may draw now (Elite only from Rank B).
-  const tierWeights = (ch) => Object.fromEntries(Object.entries(ch.weights).map(([t, w]) => [t, hasRank(RECRUIT.tierRank[t]) && !RECRUIT.neverInPools.includes(t) ? w : 0]));
+  const tierWeights = (ch) => Object.fromEntries(Object.entries(weightsOf(ch)).map(([t, w]) => [t, hasRank(RECRUIT.tierRank[t]) && !RECRUIT.neverInPools.includes(t) ? w : 0]));
   for (const ch of BOARD_CHANNELS) {
     boards[ch.id] = new RecruitmentSystem({
       rng: new Rng(`${seed}-recruit-${ch.id}`),
@@ -310,7 +325,7 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
     // They may turn up again later on a board that finds their tier (never the founder).
     if (!founder) {
       const person = { personId: s.id, name: s.name, role: s.role, tier: s.tier, level: s.level, stats: { ...s.stats }, salary: s.salary, traits: [...s.traits], art: s.art, generic: !!s.counters?.generic };
-      for (const ch of BOARD_CHANNELS) if (ch.weights[s.tier]) boards[ch.id].release(person);
+      for (const ch of BOARD_CHANNELS) if (weightsOf(ch)[s.tier]) boards[ch.id].release(person);
     }
     bus.emit('staff:letGo', { id: s.id, name: s.name, founder });
     bus.emit('team:changed', { staff: s, what: 'letGo' });
@@ -331,6 +346,7 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
   });
 
   const api = {
+    weightsFor: (id) => tierWeights(channelById(id)), // Milestone 28: the tier weights a board draws with now (tests)
     boards,
     channels: CHANNELS,
     state,

@@ -180,6 +180,12 @@ export function createStaffDetailScreen({ layout, assets, team, garage, topBar, 
         if (ctx) para(ctx, `${team.founder.flag ?? 'Founding Team Member'}${team.founder.history?.continuous ? ' · here since day 1' : ''}`, 8, y, w - 16, { size: S.small, bold: true, color: C.purple });
         y += 60;
       }
+      // Milestone 28: a Legacy Staff member's tag and the career they bring from earlier runs
+      if (team.isLegacy?.(s.id)) {
+        const past = team.ngPlus?.careers?.[s.id] ?? {};
+        if (ctx) para(ctx, `Legacy · New Game+ ${team.ngLevel} (${team.ngPlus?.chains?.[s.id] ?? 1} run${(team.ngPlus?.chains?.[s.id] ?? 1) === 1 ? '' : 's'} in a row) · before: ${past.races ?? 0} races, ${past.wins ?? 0} wins, ${past.carsBuilt ?? 0} cars`, 8, y, w - 16, { size: S.small, bold: true, color: C.purple });
+        y += 60;
+      }
     }
     y += 12;
 

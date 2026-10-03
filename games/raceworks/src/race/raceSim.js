@@ -233,6 +233,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
         pace: 'normal',
         order: 'neutral',
         auto: e.isPlayer ? e.auto !== false : true,
+        noAuto: !!(e.isPlayer && e.noAuto), // Milestone 28: a challenge keeps the player's car off AUTO
         pitReq: null, // { tyre, by: 'auto' | 'player' }
         pit: null, // { p, entryAbs, exitAbs, served, stopUntil, next }
         stops: 0,
@@ -906,6 +907,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     if (!c || c.finished || c.retired || sim.done) return false;
     if (type === 'auto') {
       if (c.pit) return false; // not during a pit stop (§24.3)
+      if (value && c.noAuto) return false; // Milestone 28: the 'No Auto Strategy in Year 1' challenge
       const on = !!value;
       sim.commands.push({ step: sim.stepCount, id, type, value });
       if (on === c.auto) return true;

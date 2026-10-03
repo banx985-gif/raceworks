@@ -29,6 +29,7 @@ import { ALL_STAFF, ROLES, STARTERS } from '../../data/staff.js';
 import { RIVAL_TEAMS } from '../../data/rivals.js';
 import { CHAMPIONSHIPS } from '../../data/championships.js';
 import { familyOfCar } from './carVisual.js';
+import { NGPLUS } from '../../data/ngplus.js'; // Milestone 28
 import { unlockContext, partState } from './carCatalog.js';
 
 const RANKS = ['E', 'D', 'C', 'B', 'A', 'S'];
@@ -140,7 +141,13 @@ export function createSecrets({ bus, team, rules = [] }) {
     for (const r of log.races) if (r.won && r.family) (by[r.family] ??= new Set()).add(r.trackId);
     return Object.entries(by).map(([family, t]) => ({ family, tracks: [...t] }));
   }
-  const legacyIds = () => [...(team.legacyStaff ?? [])]; // NG+ (Milestone 28): none yet
+  // Milestone 28: this run's Legacy Staff who carry the longest line (account.legacyChain) — Legacy Line's 'that staff
+  // member' (a person's id is the same in every run).
+  const legacyIds = () => {
+    const chains = team.ngPlus?.chains ?? {};
+    const top = Math.max(0, ...Object.values(chains));
+    return (team.legacyStaff ?? []).filter((id) => (chains[id] ?? 0) === top);
+  };
   const employed = (id) => !!team.get(id);
   const continuous = (id) => employed(id) && !log.left.includes(id);
   const secretFoundIds = () => SECRET_IDS.filter((id) => engine.everUnlocked(id));
@@ -196,7 +203,7 @@ export function createSecrets({ bus, team, rules = [] }) {
     .define('run.firstYearMechanicsKept', () => team.roster.filter((s) => s.role === 'mechanic' && (s.counters?.hiredDay ?? 0) < SR.yearDays && continuous(s.id)).length)
     .define('run.endingReached', () => !!log.ending)
     .define('run.legacyTitles', () => seasons().filter((s) => s.title && s.tier === 'world' && s.legacyCrew).length)
-    .define('account.ngPlus', () => 0) // NG+ is Milestone 28: level 0 for now
+    .define('account.ngPlus', () => team.ngPlus?.level ?? 0) // Milestone 28: this run's New Game+ level (0 for a first run)
     .define('account.golds', () => Object.entries(drillData()?.drills ?? {}).filter(([, d]) => d.goldEverEarned).map(([id]) => id))
     .define('account.mastered', () => Object.entries(drillData()?.drills ?? {}).filter(([, d]) => d.mastered).map(([id]) => id))
     .define('account.recipes', () => Object.keys(team.combos?.records?.data?.discovered ?? {}))
@@ -208,7 +215,9 @@ export function createSecrets({ bus, team, rules = [] }) {
     .define('account.recipeCount', () => facts.get('account.recipes').length)
     .define('account.secretsFound', () => secretFoundIds().length)
     .define('account.secretsFoundIds', () => secretFoundIds())
-    .define('account.legacyChain', () => accountFlags().legacyChain ?? 0);
+    // Milestone 28: the longest line of New Game+ runs in a row one of this run's Legacy Staff was carried through (their
+    // person id, run to run: NG+1 → NG+2 → NG+3 = 3)
+    .define('account.legacyChain', () => Math.max(0, ...Object.values(team.ngPlus?.chains ?? {})));
 
   // --- rewards: one function per type; the runner fires each (type, id) once per run ----------------------------
   const ruleName = (a) => byId[a.secret]?.name ?? a.secret;
@@ -269,7 +278,9 @@ export function createSecrets({ bus, team, rules = [] }) {
   // past 3 without finding it).
   // Milestone 27: + one more after the ending with a Heritage Room (F29, the garage's clueAfterEnding effect).
   const afterEnding = () => (postEnding ? CLUE.postEndingBonus + (team.facilities?.bonus('clueAfterEnding') > 0 ? CLUE.heritageBonus : 0) : 0);
-  const bonusOf = (id) => afterEnding() + (runClues[id] ?? 0) + (accountFlags()[`clue:${id}`] ?? 0);
+  // Milestone 28 (bible §37.4 stronger secret clues): on a New Game+ run a rule that already has progress shows one stage higher.
+  const ngClue = (id) => ((team.ngPlus?.level ?? 0) > 0 && rawStage(id) > 0 ? NGPLUS.clueBonus : 0);
+  const bonusOf = (id) => afterEnding() + (runClues[id] ?? 0) + (accountFlags()[`clue:${id}`] ?? 0) + ngClue(id);
   const stage = (id) => {
     const s = rawStage(id);
     return s >= CLUE.discovered ? s : Math.min(CLUE.discovered - 1, s + bonusOf(id));
@@ -407,10 +418,11 @@ export function createSecrets({ bus, team, rules = [] }) {
     log.monthStartCredits = cr;
   }
   // The starting staff (spec §3: the founder plus two) and the drivers among them still at Standard tier.
+  // Milestone 28: a Legacy Staff member is one of the starting staff too; their tier is the one they start this run with.
   function setStarters(ids) {
     log.starters = [...ids];
     log.standardDrivers = ids.filter((id) => {
-      const d = STAFF_ALL_BY_ID[id];
+      const d = team.get(id) ?? STAFF_ALL_BY_ID[id];
       return d?.role === 'driver' && d.tier === 'standard';
     });
   }

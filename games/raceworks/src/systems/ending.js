@@ -78,7 +78,9 @@ export function createEnding({ bus, team }) {
 
   // --- the facts ------------------------------------------------------------------------------------------------------
   const titleIds = () => [...new Set(team.championships.titles())].filter((id) => VISIBLE_CHAMPS.has(id));
-  const visibleCombos = () => Object.keys(team.combos?.records?.data?.discovered ?? {}).filter((id) => VISIBLE_COMBOS.includes(id));
+  // Milestone 28: the combos found on cars built in THIS run (not the device's discoveries), so a New Game+ run grades
+  // on its own.
+  const visibleCombos = () => (team.secrets.facts.get('run.combos') ?? []).filter((id) => VISIBLE_COMBOS.includes(id));
   const familyIds = () => team.cars.cars.list().map((rec) => familyOfCar(rec, team).id).filter((f) => VISIBLE_FAMILIES.has(f));
   function facts() {
     const roster = team.roster;
@@ -106,7 +108,7 @@ export function createEnding({ bus, team }) {
       solvent: team.money.credits >= 0 ? 1 : 0,
       facilityLevels: placed.reduce((t, p) => t + team.facilities.level(p.uid), 0),
       wingsOpen: team.facilities.expansions().filter((z) => NORMAL_WINGS.includes(z.id) && z.state === 'open').length,
-      achievements: team.achievements.attached ? team.achievements.earnedList().length : 0,
+      achievements: team.achievements.attached ? team.achievements.runEarned().length : 0, // Milestone 28: earned or met in THIS run
       combos: visibleCombos().length,
       c10: titles.includes(ENDING.c10) ? 1 : 0,
     };

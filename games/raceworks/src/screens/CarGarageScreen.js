@@ -5,6 +5,7 @@ import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { text, listRow, listRowHeight } from '../../../../core/ui/Kit.js';
 import { carArtKey } from '../ui/livery.js';
 import { pressedLook } from '../ui/pressable.js';
+import { CLASSES } from '../../data/cars.js';
 
 const C = THEME.color;
 const S = THEME.size;
@@ -42,7 +43,14 @@ export function createCarGarageScreen({ layout, assets, team, topBar, goCar }) {
     }
     y += 130;
     const list = cars();
-    if (!list.length && ctx) text(ctx, 'No cars yet — start one at the Pit Bay (Build → Pit Bay → New car).', 8, y, { size: S.body, color: C.textMuted, maxWidth: w - 16 });
+    if (!list.length && !team.ngPlus?.blueprints?.length && ctx) text(ctx, 'No cars yet — start one at the Pit Bay (Build → Pit Bay → New car).', 8, y, { size: S.body, color: C.textMuted, maxWidth: w - 16 });
+    // Milestone 28: the Legacy Car Blueprints this New Game+ team remembers (built from the Pit Bay's New car)
+    for (const b of team.ngPlus?.blueprints ?? []) {
+      const row = { art: b.art, title: `${b.name} · Legacy blueprint`, lines: [{ text: `${CLASSES[b.classId]?.name ?? b.classId} · QUALITY ${b.quality} in ${b.from}`, bold: true }, { text: 'Build it again: Pit Bay → New car → Legacy blueprints', size: S.small, color: C.textMuted }], right: 'Blueprint', rightColor: C.purple, artSize: 170 };
+      const h = listRowHeight(w, row);
+      if (ctx) listRow(ctx, assets, { x: 0, y, w, h }, row);
+      y += h + 16;
+    }
     for (const rec of list) {
       const row = { ...carRow(rec), art: carArtKey(assets, team, rec) }; // its resolved family, in the team colour, with the sponsors (Milestone 22)
       const h = listRowHeight(w, row);

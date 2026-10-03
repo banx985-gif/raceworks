@@ -27,7 +27,7 @@ import { CONTRACT_RULES, CONTRACT_FAIL_REPUTATION } from '../../data/contracts.j
 // revealBonus() → extra Reputation for a finished car (Milestone 10: the facilities' revealReputation, the Detail Bay).
 // Milestone 21: generateOffer(rng, takenTypes) → the terms of one development contract offer (null: none); onPaid(c) —
 // a contract's extra rewards.
-export function createTeamMoney({ bus, seed, clock, staff, cars, staffName = (s) => s.name, revealBonus = () => 0, generateOffer = null, onPaid = () => {} }) {
+export function createTeamMoney({ bus, seed, clock, staff, cars, staffName = (s) => s.name, revealBonus = () => 0, generateOffer = null, onPaid = () => {}, noCredit = () => false }) {
   const today = () => clock.totalDays;
   const economy = new EconomySystem({
     bus,
@@ -116,9 +116,11 @@ export function createTeamMoney({ bus, seed, clock, staff, cars, staffName = (s)
   const carDailyCost = (job) => Math.round(COSTS.carDaily * (1 + BUDGETS[job.data.budget].costPct / 100));
   const credits = () => economy.balance('credits');
 
-  // A purchase: refused if it would take the cash below the Emergency Credit floor.
+  // A purchase: refused if it would take the cash below the Emergency Credit floor (Milestone 28: below 0 under the
+  // "No Emergency Credit" challenge — the bills can still take the team under; only spending is stopped).
+  const spendFloor = () => (noCredit() ? Math.max(0, economy.debt.limit) : economy.debt.limit);
   function affordable(amount) {
-    return credits() - amount >= economy.debt.limit;
+    return credits() - amount >= spendFloor();
   }
 
   function paySalaries() {
@@ -142,7 +144,7 @@ export function createTeamMoney({ bus, seed, clock, staff, cars, staffName = (s)
       return economy.inDebt;
     },
     get floor() {
-      return economy.debt.limit;
+      return spendFloor();
     },
     get rank() {
       return reputation.rank.id;
@@ -201,7 +203,7 @@ export function createTeamMoney({ bus, seed, clock, staff, cars, staffName = (s)
     canStartCar(cost) {
       const rescue = contracts.active.some((c) => c.kind === 'rescue');
       if (economy.isBlocked('newCar') && !rescue) return { ok: false, reason: 'No new cars while on Emergency Credit (a rescue job allows one)' };
-      if (!rescue && !affordable(cost)) return { ok: false, reason: `Not enough Credits (the Emergency Credit floor is ${economy.debt.limit.toLocaleString('en-US')})` };
+      if (!rescue && !affordable(cost)) return { ok: false, reason: `Not enough Credits (${noCredit() ? 'no Emergency Credit: your challenge' : `the Emergency Credit floor is ${economy.debt.limit.toLocaleString('en-US')}`})` };
       return { ok: true };
     },
     chargeParts(name, cost) {

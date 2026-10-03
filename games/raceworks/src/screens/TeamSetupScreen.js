@@ -4,7 +4,8 @@
 // founders (portrait, role, trait, founder perk). RANDOMISE ALL fills everything; any field can still be changed.
 // Next shows the confirmation (spec §6); START TEAM hands the setup to main.js, which creates the save.
 //   createTeamSetupScreen({ layout, assets, header, textPrompt, onStart(setup, slot), onBack })
-//   enter({ slot, replacing })   slot = the save slot this team will go in; replacing = the team name it replaces
+//   enter({ slot, replacing, ngLevel })   slot = the save slot this team will go in; replacing = the team name it replaces;
+//                                ngLevel = a New Game+ team's level (Milestone 28: its picks were made on the NG+ screen)
 import { THEME, font } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
@@ -31,6 +32,7 @@ export function createTeamSetupScreen({ layout, assets, header, textPrompt, onSt
   let step = 'form';
   let slot = 1;
   let replacing = null;
+  let ngLevel = 0; // Milestone 28: the New Game+ level of the team being set up (0 = a first run)
   let hits = [];
   const panel = new ScrollPanel({
     getRect: () => {
@@ -87,7 +89,7 @@ export function createTeamSetupScreen({ layout, assets, header, textPrompt, onSt
       if (ctx) text(ctx, label, 8, y, { size: S.heading, bold: true, color: C.actionDark, maxWidth: w - 16 });
       y += 64;
     };
-    if (ctx) text(ctx, `Slot ${slot}${replacing ? ` · replaces ${replacing}` : ''}`, 8, y, { size: S.small, bold: true, color: replacing ? C.bad : C.textMuted, maxWidth: w - 16 });
+    if (ctx) text(ctx, `Slot ${slot}${ngLevel ? ` · New Game+ ${ngLevel}` : ''}${replacing ? ` · replaces ${replacing}` : ''}`, 8, y, { size: S.small, bold: true, color: replacing ? C.bad : C.textMuted, maxWidth: w - 16 });
     y += 50;
     const all = { x: 0, y, w, h: 130 };
     diceButton(ctx, all, 'RANDOMISE ALL', { accent: C.purple });
@@ -272,6 +274,7 @@ export function createTeamSetupScreen({ layout, assets, header, textPrompt, onSt
     enter(params = {}) {
       slot = params.slot ?? 1;
       replacing = params.replacing ?? null;
+      ngLevel = params.ngLevel ?? 0;
       step = 'form';
       state.teamName = '';
       state.principal = '';

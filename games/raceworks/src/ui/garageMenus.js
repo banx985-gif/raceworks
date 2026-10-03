@@ -331,7 +331,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
           buttons: fac.shopList().map((s) => ({
             id: `buy_${s.def.id}`,
             label: s.owned ? `${s.def.name} ✓` : s.def.name,
-            sub: s.ok ? `${fmt(s.def.cost)} Credits · ${s.def.effectText}` : `${s.why} · ${s.def.effectText}`,
+            sub: s.ok ? `${fmt(s.cost ?? s.def.cost)} Credits${s.discountPct ? ` (−${s.discountPct}% blueprint)` : ''} · ${s.def.effectText}` : `${s.why} · ${s.def.effectText}`,
             icon: s.def.art,
             disabled: !s.ok,
             locked: s.locked,
@@ -437,6 +437,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
         {
           lines: [
             ...(team.isFounder(s.id) ? [{ text: `${FOUNDER_FLAG} · ${team.founderDef()?.perkName ?? ''}`, color: C.gold }] : []),
+            ...(team.isLegacy?.(s.id) ? [{ text: `Legacy · carried into New Game+ ${team.ngLevel}`, color: C.purple }] : []), // Milestone 28
             { text: `Now: ${garage().stateText(s.id)}`, color: C.actionDark },
             `Energy ${Math.round(s.energy)} · Morale ${Math.round(s.morale)}`,
           ],

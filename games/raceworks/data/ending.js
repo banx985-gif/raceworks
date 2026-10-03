@@ -44,8 +44,8 @@ export const ENDING = {
       part('wingsOpen', 'Garage wings open', 4, 30),
     ] },
     { id: 'records', name: 'Records & discovery', max: 125, parts: [
-      part('achievements', 'Achievements earned', 30, 75),
-      part('combos', 'Combos discovered (visible)', 19, 50),
+      part('achievements', 'Achievements earned this run', 30, 75), // (Milestone 28: this run's, not the device's)
+      part('combos', 'Combos found this run (visible)', 19, 50),
     ] },
   ],
   // The letter on top (ascending by min; core GradeEngine bands).

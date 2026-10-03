@@ -18,7 +18,7 @@ import { structuralCombos } from '../systems/combos.js'; // Milestone 22
 import { CLASSES, CLASS_ORDER, PARTS, SLOTS, BUDGETS, BUDGET_ORDER, PHASES, PROJECT, CAR_STATS } from '../../data/cars.js';
 import { ROLES } from '../../data/staff.js';
 import { partsOf, leadRole, finalCar } from '../systems/carProject.js';
-import { unlockContext, classState, partsForSlot, tierFor, tierState, carCost, partsCost, generateCar } from '../systems/carCatalog.js';
+import { unlockContext, classState, partsForSlot, tierFor, tierState, carCost, partsCost, generateCar, checkCar } from '../systems/carCatalog.js';
 import { visualFamily } from '../systems/carVisual.js';
 import { COSTS } from '../../data/economy.js';
 
@@ -101,6 +101,28 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
       hits.push({ rect: a, id: 'debugAll', onTap: () => (debugAll = !debugAll) });
       hits.push({ rect: b, id: 'debugRandom', onTap: () => randomCar() });
       y += 130;
+    }
+
+    // --- Milestone 28: Legacy Car Blueprints (New Game+): the exact car again, once its class and parts are open ---
+    const blueprints = team.ngPlus?.blueprints ?? [];
+    if (blueprints.length) {
+      heading('Legacy blueprints');
+      for (const b of blueprints) {
+        const legal = checkCar({ classId: b.classId, parts: b.parts }, uc);
+        const using = classId === b.classId && parts.join() === b.parts.join();
+        const r = { art: b.art, title: `${b.name} · Legacy`, lines: [{ text: `${CLASSES[b.classId]?.name ?? b.classId} · QUALITY ${b.quality} in ${b.from}`, size: S.small, bold: true }, { text: legal.ok ? b.parts.map((id) => PARTS[id]?.name ?? id).join(' · ') : `Not yet: ${legal.reasons[0]}`, size: S.small, color: legal.ok ? C.textMuted : C.bad }], right: using ? 'In use' : legal.ok ? 'Use' : '', rightColor: C.progress, state: using ? 'selected' : undefined, locked: !legal.ok, artSize: 130 };
+        const h = listRowHeight(w, r);
+        const rect = { x: 0, y, w, h };
+        row(r, rect);
+        if (legal.ok)
+          choose(r, rect, () => {
+            classId = b.classId;
+            parts = [...b.parts];
+            openList = null;
+          }, `blueprint_${b.id}`);
+        y += h + 12;
+      }
+      y += 18;
     }
 
     // --- class ---

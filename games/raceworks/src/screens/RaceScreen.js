@@ -207,7 +207,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
       return false;
     }
     const ok = sim.command(PLAYER, type, value);
-    if (!ok && type === 'auto') toast('Not during a pit stop');
+    if (!ok && type === 'auto') toast(me()?.noAuto ? 'No Auto Strategy this year (your challenge)' : 'Not during a pit stop');
     if (ok) team.races.keep(sim);
     return ok;
   }
@@ -454,7 +454,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     }
     y += PLAN_H + GAP;
     row(y, [
-      { id: 'auto', label: auto ? 'AUTO on' : 'AUTO off', icon: RACE_ICONS.auto, w: 250, selected: auto, disabled: done || !!c?.pit, accent: C.good, onTap: () => cmd('auto', !auto) },
+      { id: 'auto', label: auto ? 'AUTO on' : 'AUTO off', icon: RACE_ICONS.auto, w: 250, selected: auto, disabled: done || !!c?.pit || !!c?.noAuto, accent: C.good, onTap: () => cmd('auto', !auto) }, // (Milestone 28: off for good under the Year-1 challenge)
       ...Object.entries(PACE_MODES).map(([id, m]) => ({ id: `pace_${id}`, label: m.name, selected: c?.pace === id, disabled: done, accent: auto ? C.textFaint : C.action, onTap: () => cmd('pace', id) })),
     ]);
     y += CTRL_H + GAP;
