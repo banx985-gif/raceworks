@@ -47,7 +47,9 @@ function qualiLapDrill(trackName) {
   };
 }
 
-export function createDrillScreen({ renderer, layout, assets, team, bus, settings, records, debugEnabled = false, onDone = () => {}, toast = () => {} }) {
+// Milestone 29: Help on every step (onHelp: this screen's help page; while it is open isHeld() is true and the drill
+// holds still) — under Hand Back while driving, top-right on the intro and the result.
+export function createDrillScreen({ renderer, layout, assets, team, bus, settings, records, debugEnabled = false, onDone = () => {}, toast = () => {}, onHelp = null, isHeld = () => false }) {
   let drill = null;
   let params = {};
   let step = 'intro';
@@ -72,6 +74,12 @@ export function createDrillScreen({ renderer, layout, assets, team, bus, setting
     return { x: z.x, y: z.y - 230, w: 300, h: 200 };
   };
   const handBackRect = () => ({ x: sr().x + sr().w - 324, y: sr().y + 24, w: 300, h: 116 });
+  const helpRect = () => (step === 'play' ? { x: sr().x + sr().w - 324, y: sr().y + 156, w: 300, h: 110 } : { x: sr().x + sr().w - 24 - 160, y: sr().y + 24, w: 160, h: 110 });
+  function drawHelp(ctx) {
+    if (!onHelp) return;
+    drawButton(ctx, helpRect(), 'Help', { accent: C.progress });
+    hits.push({ rect: helpRect(), id: 'help', onTap: () => onHelp() });
+  }
   const driver = () => team.get(params.staffId) ?? team.roster.find((s) => s.role === 'driver') ?? team.roster[0];
   const playerSprite = () => (team.cars.cars.latest() ? familyOfCar(team.cars.cars.latest(), team).top : CLASSES.clubHatch.raceArt); // (Milestone 22: the resolver)
   const aiSprites = Object.values(RIVAL_TEAMS).map((t) => t.sprite);
@@ -349,6 +357,8 @@ export function createDrillScreen({ renderer, layout, assets, team, bus, setting
     },
     rects: () => ({ steer: steerZone(), brake: brakeRect(), handBack: handBackRect() }),
     // Screen rect of a button by id, as drawn on the last frame (tests).
+    // Milestone 29: every tap area drawn last frame (the thumb-size check reads them; content units)
+    tapTargets: () => hits.map((h) => ({ id: h.id, rect: h.rect })),
     buttonRect: (id) => hits.find((h) => h.id === id)?.rect ?? null,
     enter(p = {}) {
       params = { ...p };
@@ -360,7 +370,7 @@ export function createDrillScreen({ renderer, layout, assets, team, bus, setting
       assets.ensure?.(['race_ui_22', 'race_ui_23', playerSprite(), ...aiSprites].filter((k) => assets.isPending?.(k)));
     },
     update(dt) {
-      if (step !== 'play' || !ctl) return;
+      if (step !== 'play' || !ctl || isHeld()) return;
       if (drill.kind === 'lights') {
         ctl.tick(dt, { tap: tapQueued, handBack });
         tapQueued = false;
@@ -369,7 +379,7 @@ export function createDrillScreen({ renderer, layout, assets, team, bus, setting
     },
     onDown(p) {
       if (step !== 'play') return;
-      if (hitRect(p, handBackRect())) return;
+      if (hitRect(p, handBackRect()) || (onHelp && hitRect(p, helpRect()))) return;
       if (drill.kind === 'lights') {
         tapQueued = true;
         return;
@@ -389,7 +399,7 @@ export function createDrillScreen({ renderer, layout, assets, team, bus, setting
     },
     onTap(p) {
       const h = hits.find((x) => hitRect(p, x.rect));
-      if (step === 'play' && h?.id !== 'handBack') return;
+      if (step === 'play' && h?.id !== 'handBack' && h?.id !== 'help') return;
       h?.onTap();
     },
     // System Back: during play it hands back; on the result it is Done; on the intro it leaves (a course carries on as
@@ -403,14 +413,15 @@ export function createDrillScreen({ renderer, layout, assets, team, bus, setting
     render(ctx) {
       hits = [];
       if (!drill) return;
-      if (step === 'intro') return drawIntro(ctx);
+      if (step === 'intro') return drawIntro(ctx), drawHelp(ctx);
       if (step === 'result') {
         if (ctl?.state?.car) drawWorld(ctx);
-        return drawResult(ctx);
+        return drawResult(ctx), drawHelp(ctx);
       }
-      if (drill.kind === 'lights') return drawLights(ctx);
+      if (drill.kind === 'lights') return drawLights(ctx), drawHelp(ctx);
       drawWorld(ctx);
       drawHud(ctx);
+      drawHelp(ctx);
     },
   };
   void toast;

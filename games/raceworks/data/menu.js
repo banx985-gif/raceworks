@@ -4,6 +4,7 @@
 const row = (id, label, line, icon) => ({ id, label, line, icon });
 export const MENU_GROUPS = [
   { title: 'Garage', rows: [
+    row('buildSheet', 'Build', 'New car, the car being built, the Car Garage and facilities', 'race_ui_01'), // Milestone 29
     row('pitBay', 'Pit Bay', 'Start a car and watch it being built', 'race_ui_01'),
     row('carBuilder', 'Car builder', 'Choose a class, parts and crew for a new car', 'race_ui_01'),
     row('carGarage', 'Car Garage', 'Every car you have finished', 'race_ui_01'),
@@ -15,7 +16,10 @@ export const MENU_GROUPS = [
     row('drills', 'Drills', 'Driver drills, medals and your best times', 'race_ui_02'),
     row('store', 'Parts Store (items)', 'Kit the team has earned: give it to raise a stat for good', 'item_25'),
   ] },
-  { title: 'Research', rows: [row('research', 'Research', 'Spend RP on new parts, facilities and tyres', 'race_ui_03')] },
+  { title: 'Research', rows: [
+    row('research', 'Research', 'Spend RP on new parts, facilities and tyres', 'race_ui_03'),
+    row('researchTree', 'Research tree', 'All six branches and what each topic opens', 'race_ui_03'), // Milestone 29
+  ] },
   { title: 'Build / Facilities', rows: [
     row('build', 'Build Mode', 'Move, sell or upgrade the garage stations', 'race_ui_01'),
     row('shop', 'Build a facility', 'Every station you can build, and what each does', 'race_ui_01'),
@@ -23,6 +27,7 @@ export const MENU_GROUPS = [
   { title: 'Compete', rows: [
     row('championships', 'Championships', 'The 12-championship ladder, rivals and trophies', 'race_ui_04'),
     row('raceWeekend', 'Race weekend', 'Practice, setup, qualifying and the race', 'race_ui_04'),
+    row('lastResult', 'Last race result', 'The finishing order, prize and standings', 'race_ui_14'), // Milestone 29
   ] },
   { title: 'Money', rows: [
     row('ledger', 'Ledger', 'Every Credit in and out', 'race_ui_05'),
@@ -32,6 +37,8 @@ export const MENU_GROUPS = [
   { title: 'Records', rows: [
     row('records', 'Records', 'Achievements, records, medals, completion and the trophy cabinet', 'race_reward_08'),
     row('inbox', 'Inbox', 'News, offers, rumours and big moments', 'race_ui_13'),
+    row('ceremony', 'Ending ceremony', 'Watch the Year-16 ceremony again', 'race_reward_07'), // Milestone 29
+    row('ngPlus', 'New Game+', 'Start a new run from this finished one', 'race_reward_02'),
   ] },
   { title: 'Archives', rows: [
     row('partsArchive', 'Parts Archive', 'Every part you can fit', 'race_ui_03'),
@@ -40,6 +47,9 @@ export const MENU_GROUPS = [
   ] },
   { title: 'More', rows: [
     row('settings', 'Settings', 'Sound, graphics, text size, the Menu button and hints', 'race_ui_menu'),
+    row('help', 'Help', 'One page for every screen', 'race_ui_13'), // Milestone 29
+    row('shopStore', 'Store', 'Optional extras · coming later', 'race_reward_02'),
+    row('credits', 'Credits / Legal', 'Who made RACEWORKS, privacy and legal', 'race_brand_02'),
     row('mainMenu', 'Save & main menu', 'Saves your team, then back to the title screen', 'race_brand_02'),
   ] },
 ];
@@ -69,4 +79,13 @@ export const NEXT_HINTS = {
   item: (n) => `${n} item${n === 1 ? '' : 's'} waiting in the Parts Store: tap to give one`,
   sponsor: 'A sponsor offer is waiting: tap to see it',
   upgrade: 'A station can be upgraded: tap for Build Mode',
+};
+
+// The Build sheet (bible §7 Build Sheet: New Car · Upgrade Project · Research Prototype · Active Builds · Car Garage). The
+// two project types not built yet (bible §14.1) are shown greyed until a later update (Milestone 29).
+export const BUILD_SHEET = {
+  later: [
+    { id: 'upgradeProject', label: 'Upgrade project', line: 'Rework a car’s parts · coming in a later update' },
+    { id: 'researchPrototype', label: 'Research prototype', line: 'Rank B experiments · coming in a later update' },
+  ],
 };

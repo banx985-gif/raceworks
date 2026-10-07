@@ -162,6 +162,8 @@ export function createNgPlusScreen({ layout, assets, header, onNext, onBack }) {
       note = null;
     },
     // Screen rect of a button by id (after scrolling it into view) — tests.
+    // Milestone 29: every tap area drawn last frame (the thumb-size check reads them; content units)
+    tapTargets: () => hits.map((h) => ({ id: h.id, rect: h.rect })),
     buttonRect(bid) {
       panel.contentHeight = layoutPage(null, panel.getRect().w);
       const h = hits.find((x) => x.id === bid);

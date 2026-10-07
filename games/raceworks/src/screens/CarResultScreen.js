@@ -3,7 +3,7 @@
 //   and a short history: phases (days, budget), faults, breakthroughs, the team and the parts.
 // Milestone 5: its Condition (0–100), the monthly upkeep and Repair (Credits per point; races damage cars from M6).
 // enter({ number, fresh, from }) — number = the Car Garage record; fresh = it has just been built (a gold sparkle).
-import { THEME } from '../../../../core/Theme.js';
+import { THEME, textScale } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { text, para, panel as drawPanel } from '../../../../core/ui/Kit.js';
@@ -57,7 +57,7 @@ export function createCarResultScreen({ layout, assets, team, topBar, goCarGarag
       const qx = art.x + art.w + 20;
       text(ctx, 'QUALITY', qx, y + 150, { size: S.body, bold: true, color: C.textMuted });
       text(ctx, String(r.quality), qx, y + 190, { size: 120, bold: true, color: C.text });
-      text(ctx, '/ 100', qx + 8, y + 330, { size: S.small, color: C.textMuted });
+      text(ctx, '/ 100', qx + 8, y + Math.max(330, 190 + 120 * textScale() + 6), { size: S.small, color: C.textMuted }); // (Milestone 29: clear of the number at any Text size)
       const small = [
         ['RATING', r.rating],
         ['FAULTS', r.faults],
@@ -152,6 +152,8 @@ export function createCarResultScreen({ layout, assets, team, topBar, goCarGarag
     update(dt) {
       t += dt;
     },
+    // Milestone 29: every tap area drawn last frame (the thumb-size check reads them; content units)
+    tapTargets: () => hits.map((h) => ({ id: h.id, rect: h.rect })),
     buttonRect(bid) {
       layoutPage(null, panel.getRect().w);
       const h = hits.find((x) => x.id === bid);

@@ -15,13 +15,17 @@ import { drawDriveWorld, drawDriveControls } from '../race/driveDraw.js';
 import { DRILL_SETTINGS } from '../../data/drills.js';
 import { WEATHER_NAMES } from '../../data/race.js';
 import { liveryKey, teamColourId } from '../ui/livery.js';
+import { cameraMode, setCameraMode, nextCamera, drawCameraToggle } from '../ui/cameraToggle.js'; // Milestone 29
+import { drawMinimap } from '../race/trackDraw.js';
+import { panel as drawPanel } from '../../../../core/ui/Kit.js';
 
 const C = THEME.color;
 const S = THEME.size;
 const PAD = 28;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
-export function createDriveStintView({ renderer, layout, assets, team, bus, settings = null, debug = false, drawWeather = () => {} }) {
+// Milestone 29: Help (onHelp) under the camera switch: it pauses the stint and opens the Drive Stint help page.
+export function createDriveStintView({ renderer, layout, assets, team, bus, settings = null, debug = false, drawWeather = () => {}, onHelp = null }) {
   let stint = null;
   let sim = null;
   let race = null;
@@ -46,7 +50,11 @@ export function createDriveStintView({ renderer, layout, assets, team, bus, sett
   const pushRect = () => ({ x: sr().x + sr().w - 324, y: sr().y + sr().h - 324, w: 300, h: 300 });
   const handBackRect = () => ({ x: sr().x + sr().w - 324, y: sr().y + 24, w: 300, h: 116 });
   const pauseRect = () => ({ x: sr().x + sr().w - 324, y: sr().y + 156, w: 300, h: 110 });
-  const autoRect = () => ({ x: sr().x + sr().w - 324, y: sr().y + 282, w: 300, h: 110 });
+  // Milestone 29: the shared camera switch (Whole track / Follow) under Pause; the debug autopilot below it
+  const camRect = () => ({ x: sr().x + sr().w - 324, y: sr().y + 282, w: 300, h: 110 });
+  const helpRect = () => ({ x: sr().x + sr().w - 324, y: sr().y + 408, w: 300, h: 110 });
+  const autoRect = () => ({ x: sr().x + sr().w - 324, y: sr().y + 534, w: 300, h: 110 });
+  const mapRect = () => ({ x: sr().x + 24, y: sr().y + 24 + 250 + 20, w: Math.min(360, sr().w * 0.4), h: Math.min(400, sr().h * 0.22) });
 
   bus.on('input:move', (p) => {
     if (!stint || p.id !== steerId) return;
@@ -71,7 +79,13 @@ export function createDriveStintView({ renderer, layout, assets, team, bus, sett
     get workMs() {
       return workMs;
     },
-    rects: () => ({ steer: steerZone(), brake: brakeRect(), push: pushRect(), handBack: handBackRect(), pause: pauseRect() }),
+    rects: () => ({ steer: steerZone(), brake: brakeRect(), push: pushRect(), handBack: handBackRect(), pause: pauseRect(), camera: camRect() }),
+    setPaused: (on) => (paused = !!on),
+    get paused() {
+      return paused;
+    },
+    // Milestone 29: every tap area drawn last frame (the thumb-size check reads them; content units)
+    tapTargets: () => hits.map((h) => ({ id: h.id, rect: h.rect })),
     buttonRect: (id) => hits.find((h) => h.id === id)?.rect ?? { steer: steerZone(), brake: brakeRect(), push: pushRect() }[id] ?? null,
     // Take the wheel. → null, or why not
     start(s, r, { forced = false } = {}) {
@@ -148,6 +162,20 @@ export function createDriveStintView({ renderer, layout, assets, team, bus, sett
       const pr = pauseRect();
       drawButton(ctx, pr, paused ? 'Play' : 'Pause', { accent: C.outline, selected: paused });
       hits.push({ rect: pr, id: 'stintPause', onTap: () => (paused = !paused) });
+      // Milestone 29: the shared camera switch; Whole track = the big map of the circuit with every car on it
+      const mode = cameraMode(settings);
+      if (mode === 'overview' && sim.geo) {
+        const mm = mapRect();
+        drawPanel(ctx, mm, { fill: 'rgba(255,248,236,0.88)', stroke: C.line, radius: 18 });
+        drawMinimap(ctx, sim.geo, mm, sim.cars.filter((c) => !c.retired).map((c) => ({ ...sim.carPose(c, 1, 1), colour: sim.byId[c.id].colour, player: c.id === 'PLAYER' })));
+      }
+      const cr = camRect();
+      drawCameraToggle(ctx, cr, mode);
+      hits.push({ rect: cr, id: 'stintCamera', onTap: () => setCameraMode(settings, nextCamera(mode)) });
+      if (onHelp) {
+        drawButton(ctx, helpRect(), 'Help', { accent: C.progress });
+        hits.push({ rect: helpRect(), id: 'stintHelp', onTap: () => ((paused = true), onHelp()) });
+      }
       if (debug) {
         const ar = autoRect();
         drawButton(ctx, ar, auto ? 'Debug: auto ✓' : 'Debug: autopilot', { accent: C.purple });
@@ -159,7 +187,7 @@ export function createDriveStintView({ renderer, layout, assets, team, bus, sett
     },
     onDown(p) {
       if (!stint) return false;
-      if ([handBackRect(), pauseRect(), ...(debug ? [autoRect()] : [])].some((r) => hitRect(p, r))) return true;
+      if ([handBackRect(), pauseRect(), camRect(), ...(onHelp ? [helpRect()] : []), ...(debug ? [autoRect()] : [])].some((r) => hitRect(p, r))) return true;
       if (hitRect(p, pushRect())) pushIds.add(p.id);
       else if (hitRect(p, brakeRect())) brakeIds.add(p.id);
       else if (hitRect(p, steerZone()) && steerId === null) {

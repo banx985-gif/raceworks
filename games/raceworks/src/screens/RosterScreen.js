@@ -4,7 +4,7 @@
 // (or the phone's Back) returns. Milestone 12: Hire and Train buttons at the top.
 import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
-import { drawStaffCard, STAFF_CARD_HEIGHT } from '../../../../core/ui/StaffCard.js';
+import { drawStaffCard, staffCardHeight } from '../../../../core/ui/StaffCard.js'; // (Milestone 29: the card grows with the Text size)
 import { text } from '../../../../core/ui/Kit.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { STAT_KEYS, ROLES, TRAITS } from '../../data/staff.js';
@@ -46,7 +46,7 @@ export function createRosterScreen({ layout, assets, team, garage, topBar, goSta
     },
   });
   const headButton = (i, w) => ({ x: i * ((w - 24) / 2 + 24), y: 140, w: (w - 24) / 2, h: 120 });
-  const cardRect = (i, w) => ({ x: 0, y: HEAD + i * (STAFF_CARD_HEIGHT + GAP), w, h: STAFF_CARD_HEIGHT });
+  const cardRect = (i, w) => ({ x: 0, y: HEAD + i * (staffCardHeight() + GAP), w, h: staffCardHeight() });
 
   const screen = {
     // Screen rect of the Hire (0) / Train (1) button (tests).
@@ -64,6 +64,11 @@ export function createRosterScreen({ layout, assets, team, garage, topBar, goSta
       return { x: r.x + c.x, y: r.y + c.y - panel.scrollY, w: c.w, h: c.h };
     },
     panel,
+    // Milestone 29: every tap area (content units; the thumb-size check reads them)
+    tapTargets: () => {
+      const w = panel.getRect().w;
+      return [{ id: 'hire', rect: headButton(0, w) }, { id: 'train', rect: headButton(1, w) }, ...team.roster.map((p, i) => ({ id: `card_${p.id}`, rect: cardRect(i, w) }))];
+    },
     enter() {
       panel.scrollY = 0;
     },
@@ -95,7 +100,7 @@ export function createRosterScreen({ layout, assets, team, garage, topBar, goSta
     },
     render(ctx) {
       const w = panel.getRect().w;
-      panel.contentHeight = HEAD + team.roster.length * (STAFF_CARD_HEIGHT + GAP);
+      panel.contentHeight = HEAD + team.roster.length * (staffCardHeight() + GAP);
       panel.begin(ctx);
       text(ctx, 'Your team', 8, 12, { size: S.title, bold: true });
       text(ctx, `${team.roster.length} of ${team.recruitment.staffCap()} people · tap someone for their details`, 8, 96, { size: S.small, color: C.textMuted, baseline: 'middle' });

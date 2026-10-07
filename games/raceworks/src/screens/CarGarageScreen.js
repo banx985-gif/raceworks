@@ -66,6 +66,7 @@ export function createCarGarageScreen({ layout, assets, team, topBar, goCar }) {
   }
 
   return {
+    tapTargets: () => rows.map((r) => ({ id: `car_${r.number}`, rect: r.rect })), // Milestone 29 (the thumb-size check)
     panel,
     rowRect(number) {
       layoutPage(null, panel.getRect().w);

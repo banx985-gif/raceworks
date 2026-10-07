@@ -3,7 +3,7 @@
 // team.races.history[index] (default: the latest).
 // Milestone 8: every row shows the car's showcase picture — the same family as its race sprite (data/cars.js
 // CAR_FAMILIES), yours in the team colour.
-import { THEME } from '../../../../core/Theme.js';
+import { THEME, textScale } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { text, para, panel as drawPanel } from '../../../../core/ui/Kit.js';
@@ -47,13 +47,13 @@ export function createRaceResultScreen({ layout, assets, team, topBar, goGarage,
     const res = e.result;
     const me = res.rows.find((r) => r.isPlayer);
     let y = 0;
-    const headH = 250;
+    const headH = Math.round(250 + (textScale() - 1) * 140); // (Milestone 29: grows with the Text size)
     if (ctx) {
       const podium = me && me.pos <= 3 && me.status === 'finished';
       drawPanel(ctx, { x: 0, y, w, h: headH }, { fill: podium ? C.panelGold : C.panel, stroke: podium ? C.gold : C.line, lineWidth: podium ? 5 : 3, radius: THEME.panel.radius });
       text(ctx, 'Race result', 32, y + 24, { size: S.body, bold: true, color: C.textMuted });
       text(ctx, me ? (me.status === 'retired' ? 'Retired' : `${ordinal(me.pos)} of ${res.rows.length}`) : '—', 32, y + 70, { size: 96, bold: true });
-      text(ctx, `${TRACKS[e.trackId].name} · ${e.laps} laps`, 32, y + 186, { size: S.small, color: C.textMuted, maxWidth: w - 64 });
+      text(ctx, `${TRACKS[e.trackId].name} · ${e.laps} laps`, 32, y + Math.max(186, 70 + 96 * textScale() + 8), { size: S.small, color: C.textMuted, maxWidth: w - 64 });
     }
     y += headH + 24;
     const fl = res.fastestLap ? res.rows.find((r) => r.id === res.fastestLap.id) : null;
@@ -93,6 +93,8 @@ export function createRaceResultScreen({ layout, assets, team, topBar, goGarage,
 
   return {
     panel,
+    // Milestone 29: every tap area drawn last frame (the thumb-size check reads them; content units)
+    tapTargets: () => hits.map((h) => ({ id: h.id, rect: h.rect })),
     buttonRect(bid) {
       layoutPage(null, panel.getRect().w);
       const h = hits.find((x) => x.id === bid);

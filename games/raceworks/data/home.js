@@ -15,8 +15,3 @@ export const TOP_BAR = {
   icons: { credits: 'race_reward_01', tokens: 'race_reward_02' },
   speeds: [1, 2, 4], // bible §6.1: Pause / 1× / 2× / 4×
 };
-
-// The Help placeholder sheet (Milestone 23: the Inbox is a real sheet now — src/ui/garageMenus.js).
-export const TOP_SHEETS = {
-  help: { title: 'Help', line: 'How to play, and Settings (sound, graphics, text size, the Menu button, hints).' },
-};

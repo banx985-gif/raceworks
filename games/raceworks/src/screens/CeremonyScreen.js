@@ -19,7 +19,8 @@ const S = THEME.size;
 const BAND_COLOUR = { S: C.purple, A: C.gold, B: C.good, C: C.progress, D: C.textMuted };
 const ease = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
 
-export function createCeremonyScreen({ layout, assets, team, onContinue, onNgPlus, sfx = () => {}, haptic = () => {}, reduced = () => false }) {
+// Milestone 29: Help (onHelp) left of Skip, on every card.
+export function createCeremonyScreen({ layout, assets, team, onContinue, onNgPlus, sfx = () => {}, haptic = () => {}, reduced = () => false, onHelp = null }) {
   let index = 0;
   let t = 0; // seconds on this card
   let hits = [];
@@ -49,6 +50,11 @@ export function createCeremonyScreen({ layout, assets, team, onContinue, onNgPlu
     return { x: sr.x + sr.w - 32 - 240, y: sr.y + 24, w: 240, h: 104 };
   };
 
+  const helpRect = () => {
+    const s = skipRect();
+    return { x: s.x - 16 - 160, y: s.y, w: 160, h: s.h };
+  };
+
   function next() {
     if (isLast()) return false;
     index++;
@@ -69,8 +75,9 @@ export function createCeremonyScreen({ layout, assets, team, onContinue, onNgPlu
     const sr = layout.safeRect;
     const colour = TEAM_COLOURS.find((c) => c.id === team.setup.colour) ?? TEAM_COLOURS[0];
     text(ctx, 'YEAR-16 CEREMONY', sr.x + 40, sr.y + 30, { size: S.small, bold: true, color: C.textMuted });
-    text(ctx, team.setup.teamName, sr.x + 40, sr.y + 70, { size: S.heading, bold: true, color: colour.dark ?? C.text, maxWidth: sr.w - 360 });
+    text(ctx, team.setup.teamName, sr.x + 40, sr.y + 70, { size: S.heading, bold: true, color: colour.dark ?? C.text, maxWidth: (onHelp ? helpRect().x : skipRect().x) - 24 - sr.x - 40 });
     if (!isLast()) drawButton(ctx, skipRect(), 'Skip ›', { accent: C.progress });
+    if (onHelp) drawButton(ctx, helpRect(), 'Help', { accent: C.progress });
     void r;
   }
   function footer(ctx) {
@@ -245,6 +252,7 @@ export function createCeremonyScreen({ layout, assets, team, onContinue, onNgPlu
     hits = [];
     if (!result() || !card()) return hits;
     const a = area();
+    if (onHelp) hits.push({ rect: helpRect(), id: 'help', onTap: () => onHelp() });
     if (isLast()) {
       const { cont, ng } = finalButtons(a);
       hits.push({ rect: cont, id: 'continue', onTap: () => onContinue() });
@@ -296,6 +304,8 @@ export function createCeremonyScreen({ layout, assets, team, onContinue, onNgPlu
     update(dt) {
       t += dt;
     },
+    // Milestone 29: every tap area drawn last frame (the thumb-size check reads them; content units)
+    tapTargets: () => hits.map((h) => ({ id: h.id, rect: h.rect })),
     buttonRect(id) {
       return layoutHits().find((h) => h.id === id)?.rect ?? null;
     },

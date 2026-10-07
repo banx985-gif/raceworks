@@ -27,6 +27,10 @@
 //   so every option shows what it costs; buttons without one draw as before
 //   Line extra (CAREWORKS Milestone 13; optional): a line may be { text, color?, glyph } where glyph(ctx, x, y, size) draws
 //   a small code-drawn mark before its first row (e.g. a heart); the text moves over to make room
+//   Line extra (RACEWORKS Milestone 29; optional): { text, right } — right (a number, e.g. '+1,200') is drawn right-aligned
+//   on the line's first row, so the numbers in a list line up; the text wraps short of it
+//   Header extra (RACEWORKS Milestone 29; optional): help — a function; a "?" Help button sits left of the ✕ and calls it
+//   (sheet.helpRect() finds it)
 // A MenuRegistry maps what was tapped (a station type, 'worker', 'floor'…) to the function that builds its menu.
 //   sheet.open(builder) — builder() → menu        sheet.close()        sheet.active
 //   sheet.handleInput(hook, p) → true when the sheet used it (tap a button, tap above it to close, drag to scroll)
@@ -213,6 +217,7 @@ export class BottomSheet {
         }
       }
       if (hitRect(p, this.closeRect())) this.close();
+      else if (this.menu?.help && hitRect(p, this.helpRect())) this.menu.help();
       return true;
     }
     if (hook === 'onDragStart') {
@@ -239,6 +244,13 @@ export class BottomSheet {
     return { x: r.x + r.w - PAD - 130, y: r.y + 30, w: 130, h: 110 };
   }
 
+  // The Help button (only when the menu has help): left of the ✕.
+  helpRect() {
+    if (!this.menu?.help) return null;
+    const c = this.closeRect();
+    return { x: c.x - 16 - 120, y: c.y, w: 120, h: c.h };
+  }
+
   // Lay the sections out (content coordinates). Also measures the text for wrapping.
   _layout(ctx, w) {
     const C = THEME.color;
@@ -254,9 +266,15 @@ export class BottomSheet {
       for (const line of sec.lines ?? []) {
         const glyph = typeof line === 'object' && typeof line.glyph === 'function' ? line.glyph : null;
         const indent = glyph ? S.body + 10 : 0;
-        const lines = wrap(ctx, typeof line === 'string' ? line : line.text, w - indent, font(S.body));
+        const right = typeof line === 'object' && line.right != null && line.right !== '' ? String(line.right) : null;
+        let rightW = 0;
+        if (right) {
+          ctx.font = font(S.body, true);
+          rightW = Math.min(w * 0.45, ctx.measureText(right).width) + 24;
+        }
+        const lines = wrap(ctx, typeof line === 'string' ? line : line.text, w - indent - rightW, font(S.body));
         lines.forEach((l, i) => {
-          items.push({ kind: 'line', text: l, y, color: line.color ?? C.text, glyph: i === 0 ? glyph : null, indent });
+          items.push({ kind: 'line', text: l, y, color: line.color ?? C.text, glyph: i === 0 ? glyph : null, indent, right: i === 0 ? right : null, rightW, rightColor: line.rightColor ?? line.color ?? C.text });
           y += lineH(S.body, 1.35);
         });
       }
@@ -335,7 +353,7 @@ export class BottomSheet {
       }
     }
     const tx = m.art ? art.x + art.w + 28 : r.x + PAD;
-    const tw = this.closeRect().x - 20 - tx;
+    const tw = (this.helpRect() ?? this.closeRect()).x - 20 - tx;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     let tagW = 0;
@@ -374,6 +392,7 @@ export class BottomSheet {
         .forEach((l, i) => ctx.fillText(l, tx, r.y + 124 + i * 44, tw));
     }
     drawButton(ctx, this.closeRect(), '✕', { accent: C.outline });
+    if (m.help) drawButton(ctx, this.helpRect(), '?', { accent: C.progress });
     for (const t of this.tabs ?? []) drawButton(ctx, this.tabRect(t.id), t.label, { active: t.id === this.currentTab.id, accent: C.progress, badge: t.badge ?? null, font: font(S.button, true) });
     // Body (scrolls)
     const b = this.bodyRect();
@@ -408,7 +427,14 @@ export class BottomSheet {
           ctx.restore();
           ctx.fillStyle = it.color;
         }
-        ctx.fillText(it.text, it.indent ?? 0, it.y, b.w - (it.indent ?? 0));
+        ctx.fillText(it.text, it.indent ?? 0, it.y, b.w - (it.indent ?? 0) - (it.rightW ?? 0));
+        if (it.right) {
+          ctx.font = font(S.body, true);
+          ctx.fillStyle = it.rightColor;
+          ctx.textAlign = 'right';
+          ctx.fillText(it.right, b.w, it.y, it.rightW - 24);
+          ctx.textAlign = 'left';
+        }
       } else if (it.kind === 'bar') this._bar(ctx, it.bar, it.y, b.w);
       else if (it.kind === 'laneHead') this._laneHead(ctx, it.button, it.rect);
       else if (it.kind === 'laneCard') this._laneCard(ctx, it.button, it.rect);

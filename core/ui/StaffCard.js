@@ -12,11 +12,14 @@
 //   footer,                                  "Now: working at the workbench"
 //   buttons: [{ id, label }],                optional small buttons (top-right)
 // }
-import { THEME, font } from '../Theme.js';
+import { THEME, font, textScale } from '../Theme.js';
 import { drawButton } from './Button.js';
 const COL = THEME.color;
 // Milestone 18: body text at the §33.2 body size (34), secondary labels 28 — the card grew to fit.
 export const STAFF_CARD_HEIGHT = 540;
+// RACEWORKS Milestone 29: the rows step down with the Text size setting (core/Theme textScale), so the label and the number
+// under it never overlap at Large / Larger; staffCardHeight() is the card's height at the current setting (540 at Normal).
+export const staffCardHeight = () => Math.round(STAFF_CARD_HEIGHT * Math.max(1, 0.25 + 0.75 * textScale()));
 
 export function drawStaffCard(ctx, r, view, assets, { highlight = false, accent = COL.progress } = {}) {
   ctx.save();
@@ -40,6 +43,7 @@ export function drawStaffCard(ctx, r, view, assets, { highlight = false, accent 
   if (view.badge2Key) drawContained(ctx, assets, view.badge2Key, pr.x - 6, pr.y + pr.h - 78, 84, 84);
 
   // Text column.
+  const k = textScale(); // (M29: 1 at Normal — exactly the old spacing)
   const tx = pr.x + pr.w + 28;
   const tw = r.x + r.w - pad - tx;
   let y = r.y + pad;
@@ -50,18 +54,18 @@ export function drawStaffCard(ctx, r, view, assets, { highlight = false, accent 
   ctx.fillStyle = COL.text;
   ctx.font = font(46, true);
   ctx.fillText(view.title, tx, y, tw - 230);
-  y += 56;
+  y += 56 * k;
   ctx.fillStyle = COL.textMuted;
   ctx.font = font(THEME.size.body);
   ctx.fillText(view.subtitle || '', tx, y, tw - 230);
-  y += 50;
+  y += 50 * k;
 
   if (view.xp) {
     drawBar(ctx, tx, y, sw, 14, view.xp.value / view.xp.max, COL.purple);
     ctx.fillStyle = COL.textMuted;
     ctx.font = font(THEME.size.small);
     ctx.fillText(`XP ${view.xp.value} / ${view.xp.max}`, tx, y + 20);
-    y += 60;
+    y += 20 + 40 * k;
   }
 
   // Stats row.
@@ -71,12 +75,12 @@ export function drawStaffCard(ctx, r, view, assets, { highlight = false, accent 
     const cx = tx + i * colW;
     ctx.fillStyle = COL.textMuted;
     ctx.font = font(28, true);
-    ctx.fillText(s.label, cx, y);
+    ctx.fillText(s.label, cx, y, colW - 8);
     ctx.fillStyle = COL.text;
     ctx.font = font(40, true);
-    ctx.fillText(String(s.value), cx, y + 26);
+    ctx.fillText(String(s.value), cx, y + Math.max(26, 30 * k - 4), colW - 8);
   });
-  y += 84;
+  y += 84 * k;
 
   // Bars.
   for (const b of view.bars || []) {
@@ -90,7 +94,7 @@ export function drawStaffCard(ctx, r, view, assets, { highlight = false, accent 
     ctx.fillStyle = COL.text;
     ctx.fillText(String(Math.round(b.value)), tx + sw, y - 2);
     ctx.textAlign = 'left';
-    y += 48;
+    y += 48 * k;
   }
   y += 6;
 
@@ -108,7 +112,7 @@ export function drawStaffCard(ctx, r, view, assets, { highlight = false, accent 
       break;
     }
     ctx.fillStyle = COL.panelInfo;
-    roundRect(ctx, cx, y, w, 50, 25);
+    roundRect(ctx, cx, y, w, 50 * k, 25 * k);
     ctx.fill();
     ctx.fillStyle = COL.purple;
     ctx.fillText(c.label, cx + 16, y + 6);
@@ -118,7 +122,7 @@ export function drawStaffCard(ctx, r, view, assets, { highlight = false, accent 
     drawContained(ctx, assets, key, cx, y - 6, 54, 54);
     cx += 60;
   }
-  y += 62;
+  y += 62 * k;
 
   if (view.footer) {
     ctx.fillStyle = COL.gold;

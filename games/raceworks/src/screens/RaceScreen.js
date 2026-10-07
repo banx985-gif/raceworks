@@ -26,7 +26,7 @@
 //   Greyed with the reason when it can't start (used, under caution, in the pits, too close to the flag). System Back or
 //   ‹ Garage during a stint hands back first.
 //   enter() takes the team's current race; onFinished(sim) when it ends; onLeave() for ‹ Garage.
-import { THEME, font } from '../../../../core/Theme.js';
+import { THEME, font, textScale } from '../../../../core/Theme.js';
 import { CachedLayer } from '../../../../core/CachedLayer.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { text, para, panel as drawPanel } from '../../../../core/ui/Kit.js';
@@ -35,6 +35,8 @@ import { RACE, TYRES, TYRE_ORDER, PACE_MODES, ORDERS, KEY_MOMENTS, RACE_ICONS, F
 import { createRaceFx } from '../race/raceFx.js';
 import { liveryKey, teamColourId } from '../ui/livery.js';
 import { createDriveStintView } from './DriveStintView.js';
+import { cameraMode, setCameraMode, nextCamera, cameraToggleRect, drawCameraToggle } from '../ui/cameraToggle.js'; // Milestone 29
+import { BACK_TEXT } from '../../data/screens.js';
 
 const C = THEME.color;
 const S = THEME.size;
@@ -59,7 +61,10 @@ const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 // Milestone 25b (Settings): lowFx() → true in Low graphics (fewer effects, like Reduced motion); shakeScale() → the Screen
 // shake setting (0 off … 1 normal): a short shake when your car is hit, spins with damage or breaks (never with Reduced
 // motion); settings 'keyMoments' Off = fast-forward never stops for a Key Moment.
-export function createRaceScreen({ renderer, layout, assets, team, bus, settings = null, onFinished, onLeave, toast = () => {}, debug = false, lowFx = () => false, shakeScale = () => 1 }) {
+// Milestone 29: the top-left button is "‹ Pause" — the same as the phone's Back (onPause: main.js opens the race pause
+// sheet, the only way out of a race); setPaused(on) holds / releases the race; the camera switch is the shared control
+// (src/ui/cameraToggle.js), also in the Drive Stint.
+export function createRaceScreen({ renderer, layout, assets, team, bus, settings = null, onFinished, onLeave, onPause = null, onHelp = null, toast = () => {}, debug = false, lowFx = () => false, shakeScale = () => 1 }) {
   let sim = null;
   let race = null;
   let speed = 1;
@@ -117,7 +122,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
   }
   const forecastLine = () => (race ? team.races.forecastLine(race, sim.leaderX()) : '');
   const energyWord = () => (team.races?.current ? team.races.energyWord : 'Fuel');
-  let camera = settings?.get('raceCamera') ?? 'overview';
+  let camera = cameraMode(settings);
   const layer = new CachedLayer({ width: 1, height: 1, draw: (g) => drawTrackLayer(g) });
   const ws = () => sim.geo.def.display?.widthScale ?? 1;
   const fx = createRaceFx({ assets, reduced: () => !!settings?.get('reducedMotion') || lowFx() }); // Milestone 17: Reduced motion (Milestone 14 setting) · Milestone 25b: Low graphics too
@@ -136,7 +141,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     }
   }
   // Milestone 18: the Drive Stint view
-  const stintView = createDriveStintView({ renderer, layout, assets, team, bus, settings, debug, drawWeather: (ctx, r, w) => fx.drawWeather(ctx, r, w) });
+  const stintView = createDriveStintView({ renderer, layout, assets, team, bus, settings, debug, drawWeather: (ctx, r, w) => fx.drawWeather(ctx, r, w), onHelp });
   stintView.onDone = (rec) => {
     team.races.keep(sim);
     fx.reset();
@@ -274,7 +279,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
 
   function setCamera(c) {
     camera = c;
-    settings?.set('raceCamera', c);
+    setCameraMode(settings, c);
   }
 
   // --- drawing ------------------------------------------------------------------------------------------------------
@@ -328,12 +333,12 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     const w = trackRect.w - 60;
     const x = trackRect.x + 30;
     const bodyH = para(null, banner.body, 0, 0, w - 60, { size: S.small });
-    const h = 104 + bodyH + (banner.kind === 'moment' ? 124 : 24);
+    const h = 128 + bodyH + (banner.kind === 'moment' ? 124 : 24); // (Milestone 29: room for a thumb-sized ✕)
     const y = trackRect.y + trackRect.h - h - 20;
     drawPanel(ctx, { x, y, w, h }, { fill: banner.kind === 'moment' ? C.panelGold : C.panelInfo, stroke: banner.kind === 'moment' ? C.gold : C.progress, lineWidth: 4, radius: 22 });
-    text(ctx, banner.title, x + 30, y + 22, { size: S.body, bold: true, maxWidth: w - 140 });
-    para(ctx, banner.body, x + 30, y + 92, w - 60, { size: S.small, color: C.text }); // starts below the ✕
-    const close = { x: x + w - 96, y: y + 12, w: 80, h: 70 };
+    text(ctx, banner.title, x + 30, y + 30, { size: S.body, bold: true, maxWidth: w - 170 });
+    para(ctx, banner.body, x + 30, y + 116, w - 60, { size: S.small, color: C.text }); // starts below the ✕
+    const close = { x: x + w - 122, y: y + 10, w: 110, h: 100 };
     drawButton(ctx, close, '✕', { accent: C.outline, font: font(S.body, true) });
     buttons.push({ id: 'bannerClose', rect: close, onTap: () => (banner = null) });
     if (banner.kind === 'moment') {
@@ -353,8 +358,8 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
   function drawTop(ctx, top) {
     drawPanel(ctx, top, { fill: C.panel, stroke: C.line, radius: THEME.panel.radius });
     const back = { x: top.x + 16, y: top.y + 20, w: 210, h: 110 };
-    drawButton(ctx, back, '‹ Garage', { accent: C.progress });
-    buttons.push({ id: 'leave', rect: back, onTap: () => onLeave() });
+    drawButton(ctx, back, onPause ? BACK_TEXT.pauseButton : '‹ Garage', { accent: C.progress });
+    buttons.push({ id: 'leave', rect: back, onTap: () => (onPause ? onPause() : onLeave()) });
     const c = me();
     const lead = sim.order()[0];
     const cx = top.x + top.w / 2 + 2;
@@ -386,8 +391,9 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     const pos = c ? sim.order().indexOf(c) + 1 : 0;
     const chip = { x: top.x + top.w - 176, y: top.y + 20, w: 160, h: 110 };
     drawPanel(ctx, chip, { fill: C.actionDark, stroke: C.outline, radius: 22 });
-    text(ctx, `P${pos}`, chip.x + chip.w / 2, chip.y + 12, { size: S.title, bold: true, color: C.textOnDark, align: 'center' });
-    text(ctx, `of ${sim.cars.length}`, chip.x + chip.w / 2, chip.y + 72, { size: S.small, color: C.textOnDark, align: 'center' });
+    // (Milestone 29: at Large / Larger text the place shrinks a step so "of N" stays clear under it)
+    text(ctx, `P${pos}`, chip.x + chip.w / 2, chip.y + 8, { size: textScale() > 1.1 ? S.heading : S.title, bold: true, color: C.textOnDark, align: 'center', maxWidth: chip.w - 16 });
+    text(ctx, `of ${sim.cars.length}`, chip.x + chip.w / 2, chip.y + chip.h - 8, { size: S.small, color: C.textOnDark, align: 'center', baseline: 'bottom' });
   }
 
   function drawBottom(ctx, bot) {
@@ -502,6 +508,17 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     get paused() {
       return paused;
     },
+    // Milestone 29: where the game's short notes (toasts) go — under the camera switch and the caution chip; mid-screen
+    // in a Drive Stint (clear of the HUD, the map and the controls)
+    toastTop() {
+      if (stintView.active) return layout.safeRect.y + layout.safeRect.h * 0.42;
+      return trackRect ? trackRect.y + 220 : null;
+    },
+    // Milestone 29: the race pause sheet holds the race (and lets it go on Resume)
+    setPaused(on) {
+      if (sim && !sim.done) paused = !!on;
+      if (on && stintView.active) stintView.setPaused?.(true);
+    },
     get camera() {
       return camera;
     },
@@ -523,6 +540,8 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     },
     layoutRects: () => rects(), // (tests)
     fx, // (tests)
+    // Milestone 29: every tap area drawn last frame (the thumb-size check reads them; content units)
+    tapTargets: () => buttons.map((h) => ({ id: h.id, rect: h.rect })),
     buttonRect(id) {
       return buttons.find((b) => b.id === id)?.rect ?? null;
     },
@@ -537,7 +556,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
       ended = false;
       banner = null;
       fx.reset();
-      camera = settings?.get('raceCamera') ?? camera;
+      camera = cameraMode(settings, camera);
       // the first weekend race: the crew runs it (bible §33 "First race weekend")
       if (!team.races.history.some((h) => h.kind === 'weekend') && !race.hinted && race.kind === 'weekend') {
         race.hinted = true;
@@ -615,6 +634,7 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
     },
     renderRace(ctx) {
       const r = rects();
+      camera = cameraMode(settings, camera); // (Milestone 29: the one device setting — the Drive Stint switch changes it too)
       if (r.track.w !== trackRect.w || r.track.h !== trackRect.h || r.track.y !== trackRect.y) relayout();
       layer.setPixelScale(renderer.pixelScale);
       buttons = [];
@@ -649,9 +669,9 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
         text(ctx, `Caution · no overtaking · ${left} lap${left === 1 ? '' : 's'} left`, chip.x + 90, chip.y + 20, { size: S.small, bold: true, color: '#2A241F', maxWidth: chip.w - 110 });
       }
       // camera switch (top-left of the track)
-      const cam = { x: trackRect.x + 20, y: trackRect.y + 14, w: 250, h: 96 };
-      drawButton(ctx, cam, camera === 'follow' ? 'Overview' : 'Follow', { accent: C.outline, font: font(S.small, true) });
-      buttons.push({ id: 'camera', rect: cam, onTap: () => setCamera(camera === 'follow' ? 'overview' : 'follow') });
+      const cam = cameraToggleRect(trackRect);
+      drawCameraToggle(ctx, cam, camera);
+      buttons.push({ id: 'camera', rect: cam, onTap: () => setCamera(nextCamera(camera)) });
       drawTop(ctx, r.top);
       drawBottom(ctx, r.bottom);
       drawBanner(ctx);

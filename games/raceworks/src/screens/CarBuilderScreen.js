@@ -30,7 +30,7 @@ const modsText = (mods) =>
     .map(([k, v]) => `${k} ${v >= 0 ? '+' : '−'}${Math.abs(v)}`)
     .join(' · ');
 
-export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, debugEnabled = false }) {
+export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, debugEnabled = false, refuse = () => {} }) {
   const panel = new ScrollPanel({
     getRect: () => {
       const t = topBar.rect();
@@ -178,7 +178,7 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
         for (const opt of partsForSlot(sl.id, uc)) {
           if (opt.id === parts[i]) continue;
           const p = PARTS[opt.id];
-          const or = { art: p.art, title: `${p.name}${p.secret ? ' · secret' : ''}`, lines: [{ text: opt.open ? modsText(p.mods) : opt.reason, size: S.small, color: opt.open ? C.progress : C.bad, bold: opt.open }], locked: !opt.open, right: `${fmt(p.cost)} · Cx ${p.cx}`, rightColor: opt.open ? C.progress : C.textFaint, artSize: 96 };
+          const or = { art: p.art, title: `${p.name}${p.secret ? ' · secret found' : ''}`, lines: [{ text: opt.open ? modsText(p.mods) : opt.reason, size: S.small, color: opt.open ? C.progress : C.bad, bold: opt.open }], locked: !opt.open, right: `${fmt(p.cost)} · Cx ${p.cx}`, rightColor: opt.open ? C.progress : C.textFaint, artSize: 96 };
           const oh = listRowHeight(w - 24, or);
           const orect = { x: 24, y, w: w - 24, h: oh };
           row(or, orect);
@@ -272,7 +272,8 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
     const start = { x: 0, y, w, h: 130 };
     const can = team.canStartCar({ classId, parts }, { debugAll });
     if (ctx) drawButton(ctx, start, 'Start', { disabled: !teamIds.length || !can.ok });
-    hits.push({ rect: start, id: 'start', onTap: () => teamIds.length && can.ok && onStart({ classId, parts: [...parts], budget, staffIds: [...teamIds], debugAll }) });
+    // (Milestone 29: a tap on a greyed Start says why in one line)
+    hits.push({ rect: start, id: 'start', onTap: () => (!teamIds.length ? refuse('Pick at least one person for the crew') : !can.ok ? refuse(can.reason) : onStart({ classId, parts: [...parts], budget, staffIds: [...teamIds], debugAll })) });
     y += 130 + 16;
     if (!can.ok) y += para(ctx, can.reason, 8, y, w - 16, { size: S.small, color: C.bad }) + 14;
     y += 14;
@@ -312,6 +313,8 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
     randomCar,
     estimateDays,
     // Screen rect of a button by id (after scrolling it into view) — tests.
+    // Milestone 29: every tap area drawn last frame (the thumb-size check reads them; content units)
+    tapTargets: () => hits.map((h) => ({ id: h.id, rect: h.rect })),
     buttonRect(bid) {
       layoutPage(null, panel.getRect().w);
       const h = hits.find((x) => x.id === bid);

@@ -13,6 +13,7 @@ import { ROLES } from '../../data/staff.js';
 import { pressedLook } from '../ui/pressable.js';
 import { DRILL_ART, DRILLS, MEDAL_NAMES } from '../../data/drills.js';
 import { drawMedal } from '../ui/medal.js';
+import { EMPTY_TEXT } from '../../data/screens.js'; // Milestone 29
 
 const C = THEME.color;
 const S = THEME.size;
@@ -55,7 +56,7 @@ export function createTrainScreen({ layout, assets, team, topBar, toast = () => 
         text(ctx, line, PAD, yy, { size: S.small, bold: c.used >= c.total, color: c.used >= c.total ? C.bad : C.text, maxWidth: w - PAD * 2 });
         yy += 52;
       }
-      if (!act.length) text(ctx, tr.open() ? 'Nobody is on a course.' : tr.lockedText, PAD, yy, { size: S.small, color: tr.open() ? C.textMuted : C.bad, bold: !tr.open(), maxWidth: w - PAD * 2 });
+      if (!act.length) text(ctx, tr.open() ? EMPTY_TEXT.trainScreen : tr.lockedText, PAD, yy, { size: S.small, color: tr.open() ? C.textMuted : C.bad, bold: !tr.open(), maxWidth: w - PAD * 2 });
       else {
         yy += 20;
         for (const a of act) {
@@ -206,6 +207,8 @@ export function createTrainScreen({ layout, assets, team, topBar, toast = () => 
     pick(id) {
       who = id;
     },
+    // Milestone 29: every tap area drawn last frame (the thumb-size check reads them; content units)
+    tapTargets: () => hits.map((h) => ({ id: h.id, rect: h.rect })),
     buttonRect(bid) {
       const r = panel.getRect();
       panel.contentHeight = layoutPage(null, r.w);

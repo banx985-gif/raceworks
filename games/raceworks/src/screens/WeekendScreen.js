@@ -308,6 +308,8 @@ export function createWeekendScreen({ layout, assets, team, topBar, onStartRace,
     get filling() {
       return fill;
     },
+    // Milestone 29: every tap area drawn last frame (the thumb-size check reads them; content units)
+    tapTargets: () => hits.map((h) => ({ id: h.id, rect: h.rect })),
     buttonRect(bid) {
       layoutPage(null, panel.getRect().w);
       const h = hits.find((x) => x.id === bid);

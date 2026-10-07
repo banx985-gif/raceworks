@@ -16,6 +16,7 @@ import { CHANNELS, REFRESH_SERVICES, RECRUIT } from '../../data/recruitment.js';
 import { TOP_BAR } from '../../data/home.js';
 import { driverRatings } from '../systems/driverRatings.js';
 import { hireFee } from '../systems/recruitment.js';
+import { EMPTY_TEXT } from '../../data/screens.js'; // Milestone 29
 
 const C = THEME.color;
 const S = THEME.size;
@@ -177,6 +178,8 @@ export function createRecruitScreen({ layout, assets, team, topBar, toast = () =
     // Milestone 24: a secret's special arrival is hireable on the Special tab in normal play
     if (why && channel === 'special') {
       const arrivals = rec.cardsOf('special').filter((c) => c.arrival);
+      if (!arrivals.length && ctx) text(ctx, EMPTY_TEXT.special, 8, y, { size: S.body, color: C.textMuted, maxWidth: w - 16 });
+      if (!arrivals.length) y += 70;
       for (const c of arrivals) y += candidate(ctx, y, w, c) + 24;
       return y + 40;
     }
@@ -197,7 +200,13 @@ export function createRecruitScreen({ layout, assets, team, topBar, toast = () =
     y += 140;
     if (ctx) text(ctx, 'Paid refreshes only redraw the people you can already find.', 8, y, { size: S.small, color: C.textMuted, maxWidth: w - 16 });
     y += 60;
-    for (const c of rec.cardsOf(channel)) y += candidate(ctx, y, w, c) + 24;
+    const board = rec.cardsOf(channel);
+    if (!board.length) {
+      // (Milestone 29: an empty board says so, and what to do)
+      if (ctx) text(ctx, EMPTY_TEXT.candidates, 8, y, { size: S.body, color: C.textMuted, maxWidth: w - 16 });
+      y += 70;
+    }
+    for (const c of board) y += candidate(ctx, y, w, c) + 24;
     return y + 40;
   }
 
@@ -210,6 +219,8 @@ export function createRecruitScreen({ layout, assets, team, topBar, toast = () =
       channel = id;
     },
     // Screen rect of a button by id (after scrolling it into view) — tests.
+    // Milestone 29: every tap area drawn last frame (the thumb-size check reads them; content units)
+    tapTargets: () => hits.map((h) => ({ id: h.id, rect: h.rect })),
     buttonRect(bid) {
       const r = panel.getRect();
       panel.contentHeight = layoutPage(null, r.w);

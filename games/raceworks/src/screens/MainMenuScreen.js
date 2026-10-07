@@ -10,6 +10,7 @@ import { TEAM_COLOURS } from '../../data/setup.js';
 import { drawTeamBadge, initialsOf } from '../ui/setupArt.js';
 import { liveryKey } from '../ui/livery.js';
 import { CLASSES } from '../../data/cars.js';
+import { MAIN_MENU_TEXT as T } from '../../data/screens.js';
 
 const KEY_ART = 'race_brand_02';
 const MENU_CAR = CLASSES.clubHatch.art;
@@ -17,7 +18,10 @@ const MENU_CAR = CLASSES.clubHatch.art;
 const C = THEME.color;
 const S = THEME.size;
 
-export function createMainMenuScreen({ renderer, layout, assets, slots, onContinue, onNew, onLoad, onHelp, onSettings = null }) {
+// Milestone 29 (bible §7 Main Menu: Continue · New Game · New Game+ · Records · Settings · Credits / Legal, plus Load and
+// Help): Continue across the top, then two columns, then Credits / Legal. New Game+ is greyed with its reason until a run
+// has reached the Year-16 ending.
+export function createMainMenuScreen({ renderer, layout, assets, slots, onContinue, onNew, onLoad, onHelp, onSettings = null, onNgPlus = null, onRecords = null, onCredits = null }) {
   let t = 0;
   const latest = () => {
     const list = slots() ?? [];
@@ -26,21 +30,33 @@ export function createMainMenuScreen({ renderer, layout, assets, slots, onContin
 
   function buttons() {
     const sr = layout.safeRect;
-    const w = Math.min(sr.w - 120, 760);
+    const w = Math.min(sr.w - 120, 820);
     const x = sr.x + (sr.w - w) / 2;
-    const h = onSettings ? 132 : 150; // (Milestone 25b: five buttons with Settings)
-    const gap = onSettings ? 24 : 30;
-    const n = onSettings ? 5 : 4;
-    const total = n * h + (n - 1) * gap;
-    const y0 = sr.y + sr.h - total - Math.max(80, sr.h * 0.07);
+    const h = 132;
+    const gap = 20;
+    const half = (w - gap) / 2;
+    const list = slots() ?? [];
     const last = latest();
-    return [
-      { id: 'continue', label: 'Continue', sub: last ? `${last.summary.teamName} · Year ${last.summary.year} · Month ${last.summary.month}` : 'No saved team yet', disabled: !last, onTap: () => last && onContinue(last.n) },
-      { id: 'new', label: 'New Game', onTap: onNew },
-      { id: 'load', label: 'Load', sub: `${(slots() ?? []).filter((s) => !s.empty).length} of ${(slots() ?? []).length || 4} slots used`, accent: C.progress, onTap: onLoad },
-      { id: 'help', label: 'Help', accent: C.progress, onTap: onHelp },
-      ...(onSettings ? [{ id: 'settings', label: 'Settings', sub: 'Sound, graphics, text size, Menu button, hints', accent: C.progress, onTap: onSettings }] : []),
-    ].map((b, i) => ({ ...b, r: { x, y: y0 + i * (h + gap), w, h } }));
+    const ended = list.filter((s) => !s.empty && !s.error && s.summary?.ended);
+    const rows = [
+      [{ id: 'continue', label: 'Continue', sub: last ? `${last.summary.teamName} · Year ${last.summary.year} · Month ${last.summary.month}` : T.continueNone, disabled: !last, onTap: () => last && onContinue(last.n) }],
+      [
+        { id: 'new', label: 'New Game', onTap: onNew },
+        { id: 'load', label: 'Load', sub: T.load(list.filter((s) => !s.empty).length, list.length || 4), accent: C.progress, onTap: onLoad },
+      ],
+      [
+        ...(onNgPlus ? [{ id: 'ngplus', label: T.ngPlus, sub: ended.length === 1 ? T.ngPlusOne(ended[0].summary.teamName) : ended.length ? T.ngPlusMany(ended.length) : T.ngPlusNone, disabled: !ended.length, accent: C.purple, onTap: onNgPlus }] : []),
+        ...(onRecords ? [{ id: 'records', label: T.records, accent: C.progress, onTap: onRecords }] : []),
+      ],
+      [
+        ...(onSettings ? [{ id: 'settings', label: 'Settings', accent: C.progress, onTap: onSettings }] : []),
+        { id: 'help', label: 'Help', accent: C.progress, onTap: onHelp },
+      ],
+      ...(onCredits ? [[{ id: 'credits', label: T.credits, accent: C.progress, onTap: onCredits }]] : []),
+    ].filter((r) => r.length);
+    const total = rows.length * h + (rows.length - 1) * gap;
+    const y0 = sr.y + sr.h - total - Math.max(60, sr.h * 0.05);
+    return rows.flatMap((row, i) => row.map((b, j) => ({ ...b, r: { x: row.length === 1 ? x : x + j * (half + gap), y: y0 + i * (h + gap), w: row.length === 1 ? w : half, h } })));
   }
 
   return {

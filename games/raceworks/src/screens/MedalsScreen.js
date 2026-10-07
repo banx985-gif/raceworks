@@ -99,6 +99,8 @@ export function createMedalsScreen({ layout, assets, topBar, records, settings, 
 
   return {
     panel,
+    // Milestone 29: every tap area drawn last frame (the thumb-size check reads them; content units)
+    tapTargets: () => hits.map((h) => ({ id: h.id, rect: h.rect })),
     buttonRect(bid) {
       const r = panel.getRect();
       panel.contentHeight = layoutPage(null, r.w);

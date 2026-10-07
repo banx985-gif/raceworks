@@ -11,6 +11,10 @@
 //     are still to open, show(id), dismiss(id) }; text: walksTab, noWalks, walksMore(n), showMe, showAgain, dismiss,
 //     walkStatus { new, later, done }
 //   icon: the Help picture (Robot Workshop's ui_icon_27 by default; DEVWORKS passes its own)
+//   RACEWORKS Milestone 29 (all optional): guide may be null (a game with no first-time guide yet) — then there is no
+//     "Tips seen" tab and no guide switch; footer: { label, onTap } puts one button in the guide switch's place (e.g.
+//     Settings); onLeave(back) — called instead of router.go(back) when Help closes (a game whose screens need params);
+//     enter({ topic, direct: true }) — opened straight on one page: Back (and ‹) leave Help from it, not to the list
 import { THEME, font, lineH } from '../Theme.js';
 import { ScrollPanel } from './ScrollPanel.js';
 import { drawButton, hitRect } from './Button.js';
@@ -23,17 +27,18 @@ const TABS_H = 110;
 const FOOT_H = 160;
 const GAP = 16;
 
-export function createHelpArchive({ renderer, layout, assets, router, guide, topics, text: T, fill = null, icon = 'ui_icon_27', walkthroughs = null }) {
+export function createHelpArchive({ renderer, layout, assets, router, guide, topics, text: T, fill = null, icon = 'ui_icon_27', walkthroughs = null, footer = null, onLeave = null }) {
   const W = renderer.width;
   let back = 'workshop';
   let tab = 'topics';
   let page = null; // an open topic
+  let direct = false; // opened straight on a page (RACEWORKS M29): Back leaves Help from it
   let rows = [];
   let walkHits = []; // the walkthrough buttons (content coordinates)
   const scroll = new ScrollPanel({ getRect: bodyRect, contentHeight: 0 });
   const TABS = [
     { id: 'topics', label: T.topicsTab },
-    { id: 'seen', label: T.seenTab },
+    ...(guide ? [{ id: 'seen', label: T.seenTab }] : []),
     ...(walkthroughs ? [{ id: 'walks', label: T.walksTab ?? 'Walkthroughs' }] : []),
   ];
 
@@ -42,10 +47,11 @@ export function createHelpArchive({ renderer, layout, assets, router, guide, top
   const tabsArea = () => ({ x: sr().x + 24, y: sr().y + HEAD_H, w: sr().w - 48, h: TABS_H });
   function bodyRect() {
     const s = sr();
-    const y = s.y + HEAD_H + (page ? 0 : TABS_H + GAP);
-    return { x: s.x + 24, y, w: s.w - 48, h: s.y + s.h - FOOT_H - y };
+    const y = s.y + HEAD_H + (page || !hasTabs() ? 0 : TABS_H + GAP);
+    return { x: s.x + 24, y, w: s.w - 48, h: s.y + s.h - (guide || footer ? FOOT_H : 24) - y };
   }
-  const toggleRect = () => ({ x: sr().x + 24, y: sr().y + sr().h - FOOT_H + 24, w: sr().w - 48, h: 110 });
+  const toggleRect = () => (guide || footer ? { x: sr().x + 24, y: sr().y + sr().h - FOOT_H + 24, w: sr().w - 48, h: 110 } : null);
+  const hasTabs = () => TABS.length > 1;
   const seen = () => (guide?.seenSteps ?? []).map((s) => (fill ? fill(s) : s));
 
   const screen = {
@@ -86,21 +92,26 @@ export function createHelpArchive({ renderer, layout, assets, router, guide, top
       back = params.back ?? (router.previous && router.previous !== 'help' ? router.previous : 'workshop');
       tab = params.tab ?? 'topics';
       page = params.topic ? topics.find((t) => t.id === params.topic) ?? null : null;
+      direct = !!(params.direct && page);
       scroll.scrollY = 0;
     },
     onBack() {
-      if (page) {
+      if (page && !direct) {
         page = null;
         scroll.scrollY = 0;
         return true;
       }
-      router.go(back);
+      if (onLeave) onLeave(back);
+      else router.go(back);
       return true;
     },
     onTap(p) {
       if (hitRect(p, backRect())) return screen.onBack();
-      if (hitRect(p, toggleRect())) return guide.state.off ? guide.turnOn() : guide.turnOff();
-      if (!page) {
+      if (hitRect(p, toggleRect())) {
+        if (!guide) return footer?.onTap();
+        return guide.state.off ? guide.turnOn() : guide.turnOff();
+      }
+      if (!page && hasTabs()) {
         const t = tabAt(p, tabRects(tabsArea(), TABS.length), TABS);
         if (t) {
           tab = t.id;
@@ -132,8 +143,8 @@ export function createHelpArchive({ renderer, layout, assets, router, guide, top
         text(ctx, page.title, s.x + 352, s.y + 78, { size: S.heading, bold: true, baseline: 'middle', maxWidth: s.w - 380 });
       } else {
         assets.drawContained(ctx, icon, { x: s.x + 240, y: s.y + 30, w: 96, h: 96 });
-        text(ctx, T.title, s.x + 352, s.y + 78, { size: S.title, bold: true, baseline: 'middle' });
-        drawTabs(ctx, tabRects(tabsArea(), TABS.length), TABS, tab);
+        text(ctx, T.title, s.x + 352, s.y + 78, { size: S.title, bold: true, baseline: 'middle', maxWidth: s.w - 380 });
+        if (hasTabs()) drawTabs(ctx, tabRects(tabsArea(), TABS.length), TABS, tab);
       }
       const w = bodyRect().w - 12;
       scroll.begin(ctx);
@@ -169,7 +180,8 @@ export function createHelpArchive({ renderer, layout, assets, router, guide, top
       }
       scroll.contentHeight = Math.max(1, y);
       scroll.end(ctx);
-      drawButton(ctx, toggleRect(), guide.state.off ? T.guideOn : T.guideOff, { accent: C.progress, font: font(S.button, true) });
+      if (guide) drawButton(ctx, toggleRect(), guide.state.off ? T.guideOn : T.guideOff, { accent: C.progress, font: font(S.button, true) });
+      else if (footer) drawButton(ctx, toggleRect(), footer.label, { accent: C.progress, font: font(S.button, true) });
     },
   };
 
@@ -221,9 +233,12 @@ export function createHelpArchive({ renderer, layout, assets, router, guide, top
   function drawPage(ctx, w) {
     let y = 0;
     const ph = Math.min(560, Math.round(w * 0.6));
-    card(ctx, { x: 0, y, w, h: ph + 40 });
-    assets.drawContained(ctx, page.art, { x: 20, y: y + 20, w: w - 40, h: ph });
-    y += ph + 40 + 28;
+    if (page.art) {
+      // (a page with no picture — RACEWORKS M29: "a picture where one exists" — starts with its words)
+      card(ctx, { x: 0, y, w, h: ph + 40 });
+      assets.drawContained(ctx, page.art, { x: 20, y: y + 20, w: w - 40, h: ph });
+      y += ph + 40 + 28;
+    }
     for (const t of page.paras) {
       y += para(ctx, t, 8, y, w - 16, { size: S.body }) + 26;
     }

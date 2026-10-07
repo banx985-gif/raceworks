@@ -28,10 +28,15 @@
 //   Staff sheet, the Compete sheet and the Menu. The Rumour Archive never says how many secrets exist before the ending.
 // Milestone 21: the Sponsor Wall's sheet also has Sponsors — the 'sponsors' sheet (src/ui/sponsorMenu.js, the same as the
 //   Money sheet's Sponsors tab): slots, deals, obligation progress and the offers.
+// Milestone 29 (the screen / UX pass): every station, facility and worker sheet comes from the one shared builder
+//   (core/ui/StationSheet: picture · name · one line · Now · main action · more · Upgrade, and Help in the header); a
+//   sheet opened from another has a "‹" button that does what the phone's Back does (sheetBack, main.js); a
+//   championship's own sheet ('champ': rounds, tracks, what it needs, prizes, standings, Enter); every list says why it
+//   is empty and what to do next; the Build sheet lists the project types still to come.
 import { MenuRegistry } from '../../../../core/ui/BottomSheet.js';
 import { THEME } from '../../../../core/Theme.js';
 import { STATIONS } from '../../data/garage.js';
-import { BOTTOM_SLOTS, TOP_SHEETS } from '../../data/home.js';
+import { BOTTOM_SLOTS } from '../../data/home.js';
 import { ROLES, TIERS } from '../../data/staff.js';
 import { STATUS_ORDER, STATUS_NAME } from './statusIcons.js';
 import { PHASES, BUDGETS, BUDGET_ORDER, CLASSES, PROJECT } from '../../data/cars.js';
@@ -58,6 +63,10 @@ import { STAT_NAMES } from '../../data/staff.js';
 import { itemIcon } from '../../../../core/ui/ItemArt.js';
 import { sponsorById } from '../../data/sponsors.js';
 import { recordsMenu } from './recordsMenu.js'; // Milestone 26
+import { stationSheet } from '../../../../core/ui/StationSheet.js'; // Milestone 29
+import { CHAMP_BANDS } from '../../data/championships.js';
+import { EMPTY_TEXT, SECRET_TEXT as SECRET_WORD, STORE_TEXT } from '../../data/screens.js';
+import { BUILD_SHEET } from '../../data/menu.js';
 
 const C = THEME.color;
 
@@ -67,7 +76,7 @@ export function staffLine(s) {
   return [ROLES[s.role].name, `Level ${s.level}`, TIERS[s.tier].name, ...status].join(' · ');
 }
 
-export function createGarageMenus({ garage, team, assets = null, open, close = () => {}, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null, goResearch = () => {}, goRecruit = () => {}, goTrain = () => {}, debugTracks = null, goChampRound = () => {}, enterChamp = () => {}, menuRow = () => {}, menuState = () => ({}), openSettings = () => {}, showHelp = () => {}, sfx = () => {}, haptic = () => {} }) {
+export function createGarageMenus({ garage, team, assets = null, open, close = () => {}, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null, goResearch = () => {}, goRecruit = () => {}, goTrain = () => {}, debugTracks = null, goChampRound = () => {}, enterChamp = () => {}, menuRow = () => {}, menuState = () => ({}), openSettings = () => {}, showHelp = () => {}, sfx = () => {}, haptic = () => {}, sheetBack = null, sheetBackLabel = () => null, refuse = null }) {
   const menus = new MenuRegistry();
   const fac = team.facilities;
   // What a facility does, for its sheets (bible §19): its effect, its role and what it cost.
@@ -84,28 +93,41 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
     if (!act) return [];
     const row = rowOf(act.row);
     const st = menuState(act.row) ?? {};
-    return [{ columns: 1, buttons: [{ id: 'mainAction', label: act.label, sub: st.locked ?? row?.line ?? '', icon: row?.icon ?? 'race_ui_01', locked: !!st.locked, accent: C.good, onTap: () => !st.locked && menuRow(act.row) }] }];
+    return [{ columns: 1, buttons: [{ id: 'mainAction', label: act.label, sub: st.locked ?? row?.line ?? '', icon: row?.icon ?? 'race_ui_01', locked: !!st.locked, accent: C.action, onTap: () => !st.locked && menuRow(act.row) }] }];
   }
   const multText = (m) => `×${Number.isInteger(m) ? m : m.toFixed(1)}`;
-  function levelSections(uid, reopen) {
+  const say = refuse ?? ((r) => toast(r));
+  // Milestone 29: the station sheet's Upgrade part (core/ui/StationSheet upgrade): what it does now, its level, the next
+  // level's cost and effect, and the rule that keeps it shut (a greyed Upgrade button with the reason).
+  function upgradeOf(uid, def, reopen) {
+    const lines = def && !def.prop ? [{ text: `Effect: ${def.effectText}`, color: C.actionDark }, `${def.role} station${def.cost ? ` · built for ${fmt(def.cost)} Credits` : ''}`] : [];
     const ls = uid != null ? fac.levelStatus(uid) : null;
-    if (!ls) return [];
-    const def = fac.defs[ls.defId];
-    const lines = [{ text: `Level ${ls.level} of ${ls.max}${ls.level > 1 ? ` — its effect ${multText(ls.mult)}` : ''}`, color: C.actionDark }];
-    if (ls.pending) lines.push({ text: `Upgrading to level ${ls.pending.to}: ready on day ${ls.pending.doneDay + 1} (it works at level ${ls.level} until then)`, color: C.progress });
-    const out = [{ title: 'Level', lines }];
-    if (ls.next && !ls.pending) {
-      const bonus = def.effects.some((e) => e.levelOnly) ? ' and an upgrade bonus' : '';
-      out.push({ columns: 1, buttons: [{ id: 'upgrade', label: `Upgrade to level ${ls.next.to}`, sub: ls.next.why ?? `${fmt(ls.next.cost)} Credits · its effect ${multText(ls.next.mult)}${bonus} · ${ls.next.days} days`, icon: 'race_ui_01', disabled: !ls.next.ok, accent: C.purple, onTap: () => {
-        const r = fac.upgrade(uid);
-        if (!r.ok) return toast(r.reason);
-        sfx('sfx_upgrade');
-        toast(`${def.name}: upgrading to level ${r.to}`, `−${fmt(r.cost)} Credits · ready in ${ls.next.days} days`);
-        reopen();
-      } }] });
+    const buttons = [];
+    if (ls) {
+      lines.push({ text: `Level ${ls.level} of ${ls.max}${ls.level > 1 ? ` — its effect ${multText(ls.mult)}` : ''}`, color: C.actionDark });
+      if (ls.pending) lines.push({ text: `Upgrading to level ${ls.pending.to}: ready on day ${ls.pending.doneDay + 1} (it works at level ${ls.level} until then)`, color: C.progress });
+      else if (!ls.next) lines.push({ text: 'Top level: it can’t go higher', color: C.good });
+      if (ls.next && !ls.pending) {
+        const bonus = fac.defs[ls.defId].effects.some((e) => e.levelOnly) ? ' and an upgrade bonus' : '';
+        buttons.push({ id: 'upgrade', label: `Upgrade to level ${ls.next.to}`, sub: ls.next.why ?? `its effect ${multText(ls.next.mult)}${bonus} · ${ls.next.days} days`, cost: ls.next.ok ? `${fmt(ls.next.cost)} Cr` : null, icon: 'race_ui_01', disabled: !ls.next.ok, accent: C.purple, onTap: () => {
+          const r = fac.upgrade(uid);
+          if (!r.ok) return say(r.reason);
+          sfx('sfx_upgrade');
+          toast(`${fac.defs[ls.defId].name}: upgrading to level ${r.to}`, `−${fmt(r.cost)} Credits · ready in ${ls.next.days} days`);
+          reopen();
+        } });
+      }
     }
-    return out;
+    return { lines, buttons };
   }
+  // Who is at a station right now (the garage's workers), in plain words.
+  const atStation = (defId) => {
+    const names = garage().peopleAt?.(defId) ?? [];
+    return names.length ? `${names.slice(0, 3).join(', ')}${names.length > 3 ? ` +${names.length - 3}` : ''} ${names.length === 1 ? 'is' : 'are'} here now` : 'Nobody here right now';
+  };
+  // A sheet opened from another: its "‹" button is the phone's Back (main.js sheetBack); with no sheet under it, it goes
+  // to its parent sheet (menu.parent). The label names the sheet it returns to.
+  const backButton = (id, parentLabel) => ({ id, label: sheetBackLabel() ?? `‹ ${parentLabel}`, accent: C.progress, onTap: () => sheetBack?.() });
 
   // --- Milestone 25b: the Sponsor Wall's logo slots ------------------------------------------------------------------
   function logoSlotSections() {
@@ -151,6 +173,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
       subtitle: itemLine(x),
       art: itemIcon(x.type, x.rarity),
       accent: C.progress,
+      parent: 'store', // (Milestone 29: Back returns here when the sheet was not opened from another)
       sections: [
         { lines: [`Given to one person, it raises their ${statWord(itemTypeById(x.type).stat)} for good, then it is used up. People who love ${itemGroupById(itemTypeById(x.type).group).name} kit get ×${ITEM_RULES.loveMult}.`] },
         { columns: 1, buttons: [
@@ -160,7 +183,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
             if (v != null) toast(`Sold: ${itemName(x)}`, `+${fmt(v)} Credits`);
             open('store');
           } },
-          { id: 'backStore', label: `‹ ${ITEM_RULES.storeName}`, accent: C.progress, onTap: () => open('store') },
+          backButton('backStore', ITEM_RULES.storeName),
         ] },
       ],
     };
@@ -169,6 +192,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
     const x = items.system.get(uid);
     if (!x) return null;
     return {
+      parent: { kind: 'item', target: uid },
       title: `Give: ${itemName(x)}`,
       subtitle: `${itemLine(x)} · tap someone to see the exact gain`,
       art: itemIcon(x.type, x.rarity),
@@ -178,7 +202,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
           const pv = items.preview(uid, p.id);
           return { id: `give_${p.id}`, label: p.name, sub: gainText(pv), icon: p.art, disabled: !pv.ok, accent: pv.like === 'love' ? C.good : C.progress, onTap: () => open('giveConfirm', { uid, id: p.id }) };
         }) },
-        { columns: 1, buttons: [{ id: 'backItem', label: '‹ Back', accent: C.progress, onTap: () => open('item', uid) }] },
+        { columns: 1, buttons: [backButton('backItem', itemName(x))] },
       ],
     };
   });
@@ -189,6 +213,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
     const pv = items.preview(t.uid, t.id);
     const lk = items.likesOf(t.id);
     return {
+      parent: { kind: 'giveItem', target: t.uid },
       title: `${itemName(x)} → ${p.name}`,
       subtitle: 'Used up when given · the gain is for good',
       art: p.art,
@@ -208,7 +233,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
             toast(`${p.name.split(' ')[0]}: +${r.gain} ${statWord(r.stat)}`, r.like === 'love' ? 'They love it!' : itemName(x));
             open('store');
           } },
-          { id: 'giveNo', label: '‹ Back', accent: C.progress, onTap: () => open('giveItem', t.uid) },
+          { ...backButton('giveNo', 'Back'), label: sheetBackLabel() ?? '‹ Back' },
         ] },
       ],
     };
@@ -269,15 +294,50 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
     return { id: 'sponsors', label: 'Sponsors', sub: `${sp.deals.length} of ${sp.slots()} slots · ${sp.offers.length} offer${sp.offers.length === 1 ? '' : 's'}`, icon: 'race_ui_02', accent: C.progress, onTap: () => open('sponsors') };
   };
   const extraFor = { F12: () => [trainButton()], F13: () => [storeButton()], F15: () => [sponsorsButton(), hireButton()] };
+  // Milestone 29: the Store (bible §7) — a placeholder sheet only: the four rows, each "coming later". No billing (M31).
+  menus.register('shopStore', () => ({
+    title: STORE_TEXT.title,
+    subtitle: STORE_TEXT.line,
+    art: 'race_reward_02',
+    accent: C.progress,
+    sections: [
+      { columns: 1, buttons: STORE_TEXT.rows.map((r) => ({ id: `store_${r.id}`, label: r.label, sub: `${r.line} · ${STORE_TEXT.later}`, icon: r.icon, locked: true, onTap: () => {} })) },
+      { lines: [{ text: STORE_TEXT.never, color: C.textMuted }] },
+    ],
+  }));
   menus.register('sponsors', () => ({ title: 'Sponsors', subtitle: `${team.sponsors.deals.length} of ${team.sponsors.slots()} slots · Rank ${team.money.rank}`, art: 'race_ui_02', accent: C.progress, sections: sponsorSections(team, toast) }));
 
+  // Milestone 29: a station's live "Now" — what is happening there, in plain words.
+  function nowFor(def) {
+    const out = [];
+    if (def.research) {
+      const act = research.active;
+      out.push(act ? `Researching ${NODE[act].name} · ${Math.floor(research.fraction(act) * 100)}%` : { text: EMPTY_TEXT.research, color: C.bad });
+    } else if (def.id === 'F12') {
+      const n = team.training.active.length;
+      out.push(n ? `${n} on a course now` : { text: EMPTY_TEXT.training, color: C.textMuted });
+    } else if (def.id === 'F13') out.push(items.count ? `${items.count} item${items.count === 1 ? '' : 's'} waiting to be given` : { text: ITEM_TEXT.empty, color: C.textMuted });
+    else if (def.id === 'F14') out.push(team.cars.cars.count ? `${team.cars.cars.count} car${team.cars.cars.count === 1 ? '' : 's'} · newest: ${team.cars.cars.latest()?.name ?? ''}` : { text: EMPTY_TEXT.cars, color: C.textMuted });
+    else if (def.id === 'F15') out.push(`${team.sponsors.deals.length} of ${team.sponsors.slots()} logo slots filled · ${team.sponsors.offers.length} offer${team.sponsors.offers.length === 1 ? '' : 's'}`);
+    else if (FACILITY_ACTIONS[def.id]?.row === 'raceWeekend' || FACILITY_ACTIONS[def.id]?.row === 'championships') {
+      const n = CH?.nextRound?.();
+      out.push(team.races.current ? 'A race weekend is under way' : n ? `Next round: ${TRACKS[n.trackId].name} · ${n.ready ? 'ready to race' : `in ${n.daysAway} days`}` : 'No championship round to race: enter one from Compete');
+    }
+    out.push({ text: atStation(def.id), color: C.textMuted });
+    return out;
+  }
   for (const def of STATIONS) {
     if (def.id === 'F02') continue; // the Pit Bay's sheet is the car project's (below)
-    if (def.research) {
-      menus.register(def.id, (st) => ({ title: def.name, subtitle: def.purpose, art: def.art, sections: [...mainActionSection(def.id), ...researchSections(), { lines: effectLines(def), columns: 1, buttons: [buildButton()] }, ...levelSections(uidOf(def.id, st), () => open(def.id, st))] }));
-      continue;
-    }
-    menus.register(def.id, (st) => ({ title: def.name, subtitle: def.purpose, art: def.art ?? 'race_ui_02', sections: [...mainActionSection(def.id), ...(extraFor[def.id] ? [{ columns: 1, buttons: extraFor[def.id]() }] : []), ...(def.id === 'F15' ? logoSlotSections() : []), { lines: effectLines(def), columns: 1, buttons: [buildButton()] }, ...levelSections(uidOf(def.id, st), () => open(def.id, st))] }));
+    menus.register(def.id, (st) => stationSheet({
+      title: def.name,
+      line: def.purpose,
+      art: def.art ?? 'race_ui_02',
+      now: nowFor(def),
+      main: mainActionSection(def.id)[0]?.buttons ?? [],
+      more: [...(extraFor[def.id]?.() ?? []), ...(def.research ? [{ id: 'researchTree', label: 'Research tree', sub: 'Six branches', icon: RESEARCH_ICONS.tree, onTap: goResearch }, { id: 'partsArchive', label: 'Parts Archive', sub: 'Parts and combos', icon: 'race_ui_03', onTap: () => open('partsArchive') }] : []), buildButton()],
+      body: def.id === 'F15' ? logoSlotSections() : [],
+      upgrade: upgradeOf(uidOf(def.id, st), def, () => open(def.id, st)),
+    }));
   }
 
   // Build Mode (Milestone 10): a tapped station or prop — what it does, and Sell (half its price back) when it may go.
@@ -287,34 +347,30 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
     const def = st.def;
     const why = fac.sellWhy(st.uid);
     const refund = fac.refundOf(st.uid);
-    return {
+    return stationSheet({
       title: def.name,
-      subtitle: def.prop ? 'Garage prop' : def.purpose,
+      line: def.prop ? 'Garage prop' : def.purpose,
       art: def.art,
-      sections: [
-        { lines: def.prop ? ['Drag it on the floor to move it.'] : [...effectLines(def), 'Drag it on the floor to move it.'] },
-        ...levelSections(st.uid, () => open('facility', st)), // Milestone 25b
+      now: ['In Build Mode: drag it on the floor to move it', ...(def.prop ? [] : [{ text: atStation(def.id), color: C.textMuted }])],
+      main: [
         {
-          columns: 1,
-          buttons: [
-            {
-              id: 'sell',
-              label: why ? 'Can’t sell' : `Sell for ${fmt(refund)} Credits`,
-              sub: why ?? (fac.system.invested(st.uid) ? `Half of its ${fmt(def.cost)} Credits and of its ${fmt(fac.system.invested(st.uid))} in upgrades back` : `Half of its ${fmt(def.cost)} Credits back`),
-              icon: def.art,
-              disabled: !!why,
-              accent: C.bad,
-              onTap: () => {
-                const r = fac.sell(st.uid);
-                toast(r.ok ? `Sold: ${def.name}` : r.reason, r.ok ? `+${fmt(r.refund)} Credits` : '');
-                if (r.ok) garage().say(`Sold: ${def.name} (+${fmt(r.refund)} Credits)`);
-                close();
-              },
-            },
-          ],
+          id: 'sell',
+          label: why ? 'Can’t sell' : `Sell for ${fmt(refund)} Credits`,
+          sub: why ?? (fac.system.invested(st.uid) ? `Half of its ${fmt(def.cost)} Credits and of its ${fmt(fac.system.invested(st.uid))} in upgrades back` : `Half of its ${fmt(def.cost)} Credits back`),
+          icon: def.art,
+          disabled: !!why,
+          accent: C.bad,
+          onTap: () => {
+            const r = fac.sell(st.uid);
+            if (!r.ok) return say(r.reason);
+            toast(`Sold: ${def.name}`, `+${fmt(r.refund)} Credits`);
+            garage().say(`Sold: ${def.name} (+${fmt(r.refund)} Credits)`);
+            close();
+          },
         },
       ],
-    };
+      upgrade: upgradeOf(st.uid, def, () => open('facility', st)), // (Milestone 25b: the level)
+    });
   });
   // The Shop (Milestone 10): every facility of the first fifteen, ready ones first; Build places it on the free spot
   // nearest the middle of the view and pays through the ledger.
@@ -331,7 +387,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
           buttons: fac.shopList().map((s) => ({
             id: `buy_${s.def.id}`,
             label: s.owned ? `${s.def.name} ✓` : s.def.name,
-            sub: s.ok ? `${fmt(s.cost ?? s.def.cost)} Credits${s.discountPct ? ` (−${s.discountPct}% blueprint)` : ''} · ${s.def.effectText}` : `${s.why} · ${s.def.effectText}`,
+            sub: (s.def.unlock?.secret ? `${SECRET_WORD.found} · ` : '') + (s.ok ? `${fmt(s.cost ?? s.def.cost)} Credits${s.discountPct ? ` (−${s.discountPct}% blueprint)` : ''} · ${s.def.effectText}` : `${s.why} · ${s.def.effectText}`),
             icon: s.def.art,
             disabled: !s.ok,
             locked: s.locked,
@@ -355,18 +411,18 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
   menus.register('F02', () => {
     const cars = team.cars;
     const job = cars.active;
+    const upgrade = upgradeOf(uidOf('F02'), pitBay, () => open('F02'));
     if (!job) {
       const can = team.canStartCar();
-      return {
+      return stationSheet({
         title: pitBay.name,
-        subtitle: pitBay.purpose,
+        line: pitBay.purpose,
         art: pitBay.art,
-        sections: [
-          { columns: 1, buttons: [{ id: 'newCar', label: 'New car', sub: can.ok ? 'Choose a class and parts' : can.reason, icon: assets ? liveryKey(assets, CLASSES.clubHatch.art, teamColourId(team)) : CLASSES.clubHatch.art, onTap: goBuilder }] },
-          { columns: 1, buttons: [garageButton()] },
-          ...levelSections(uidOf('F02'), () => open('F02')),
-        ],
-      };
+        now: [can.ok ? 'Free: ready for a new car' : { text: `Free · ${can.reason}`, color: C.bad }, { text: atStation('F02'), color: C.textMuted }],
+        main: [{ id: 'newCar', label: 'New car', sub: can.ok ? 'Choose a class and parts' : can.reason, icon: assets ? liveryKey(assets, CLASSES.clubHatch.art, teamColourId(team)) : CLASSES.clubHatch.art, disabled: !can.ok, onTap: goBuilder }],
+        more: [garageButton()],
+        upgrade,
+      });
     }
     const phase = cars.phase(job);
     const pct = Math.floor(cars.fraction(job) * 100);
@@ -379,38 +435,20 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
       const next = job.data.nextBudget === id;
       return { id: `budget_${id}`, label: BUDGETS[id].name, sub: now ? (job.data.nextBudget ? 'This phase' : 'Now') : next ? 'From next phase' : 'Tap: next phase', accent: now || next ? C.progress : C.action, onTap: () => cars.setNextBudget(job, id) };
     });
-    const sections = [
+    const body = [
       {
         lines: [
-          { text: `Phase ${job.phaseIndex + 1} of ${PHASES.length}: ${phase.name} · ${pct}% · about ${days} day${days === 1 ? '' : 's'} left`, color: C.actionDark },
           `In the bay: ${phase.stage}`,
           { text: `Faults: ${open} open (${job.data.faults.length} so far) · Breakthroughs: ${job.data.breakthroughs.length}`, color: open ? C.bad : C.text },
           `Team (${teamList.length} of ${PROJECT.teamSlots}): ${teamList.map((s) => s.name.split(' ')[0]).join(', ')}${lead ? ` · ${lead.name.split(' ')[0]} leads this phase (+${PROJECT.roleMatchPct}%)` : ''}`,
           `Budget focus (changes between phases): ${BUDGETS[job.data.budget].name}${job.data.nextBudget ? ` → ${BUDGETS[job.data.nextBudget].name} next phase` : ''}`,
-          `Running cost: ${fmt(team.money.carDailyCost(job))} Credits a day`,
+          { text: `Running cost: ${fmt(team.money.carDailyCost(job))} Credits a day`, right: `−${fmt(team.money.carDailyCost(job))}` },
         ],
       },
       { buttons: budgetButtons, columns: 3 },
-      {
-        columns: 1,
-        buttons: [
-          {
-            id: 'emergencyFix',
-            label: 'Emergency Fix',
-            sub: open ? `Fix one fault now: ${fmt(COSTS.emergencyFix.credits)} Credits, −${COSTS.emergencyFix.innovation} Innovation` : 'No open faults',
-            disabled: !open || !team.money.affordable(COSTS.emergencyFix.credits),
-            accent: C.bad,
-            onTap: () => {
-              const r = team.money.emergencyFix(job);
-              toast(r.ok ? 'Fault fixed' : r.reason);
-            },
-          },
-          garageButton(),
-        ],
-      },
     ];
     if (debug) {
-      sections.push({
+      body.push({
         title: 'Debug',
         buttons: [
           { id: 'dbgDays', label: '+5 days', accent: C.purple, onTap: () => debug.days(5) },
@@ -420,35 +458,56 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
         ],
       });
     }
-    sections.push(...levelSections(uidOf('F02'), () => open('F02')));
-    return { title: `${pitBay.name} · ${job.name}`, subtitle: `Building: ${phase.stage.toLowerCase()} (${phase.name})`, art: pitBay.art, sections };
+    return stationSheet({
+      title: `${pitBay.name} · ${job.name}`,
+      line: `Building: ${phase.stage.toLowerCase()} (${phase.name})`,
+      art: pitBay.art,
+      now: [`Phase ${job.phaseIndex + 1} of ${PHASES.length}: ${phase.name} · ${pct}% · about ${days} day${days === 1 ? '' : 's'} left`],
+      main: [
+        {
+          id: 'emergencyFix',
+          label: 'Emergency Fix',
+          sub: open ? `Fix one fault now · −${COSTS.emergencyFix.innovation} Innovation` : 'No open faults',
+          cost: open ? `${fmt(COSTS.emergencyFix.credits)} Cr` : null,
+          disabled: !open || !team.money.affordable(COSTS.emergencyFix.credits),
+          accent: C.bad,
+          onTap: () => {
+            const r = team.money.emergencyFix(job);
+            if (!r.ok) return say(r.reason);
+            toast('Fault fixed');
+          },
+        },
+      ],
+      more: [garageButton()],
+      body,
+      upgrade,
+    });
   });
 
-  // A worker's card (style guide §6): who they are, what they are doing now, and the way to their details.
+  // A worker's card (style guide §6, Milestone 29 on the shared station sheet): who they are, what they are doing now,
+  // Train / Details, and an item for them.
   menus.register('worker', (agent) => {
     const s = team.get(agent.staffId);
     if (!s) return null;
-    return {
+    return stationSheet({
       title: s.name,
-      subtitle: staffLine(s),
+      line: staffLine(s),
       art: s.art,
+      badge: ROLES[s.role]?.badge ?? null,
+      tag: team.isFounder(s.id) ? { text: 'FOUNDER' } : team.isLegacy?.(s.id) ? { text: 'LEGACY', color: C.purple } : null,
       accent: C.progress,
-      sections: [
-        {
-          lines: [
-            ...(team.isFounder(s.id) ? [{ text: `${FOUNDER_FLAG} · ${team.founderDef()?.perkName ?? ''}`, color: C.gold }] : []),
-            ...(team.isLegacy?.(s.id) ? [{ text: `Legacy · carried into New Game+ ${team.ngLevel}`, color: C.purple }] : []), // Milestone 28
-            { text: `Now: ${garage().stateText(s.id)}`, color: C.actionDark },
-            `Energy ${Math.round(s.energy)} · Morale ${Math.round(s.morale)}`,
-          ],
-          columns: 1,
-          buttons: [
-            { id: 'details', label: 'Details', sub: team.isDriver(s) ? 'Driver ratings, stats and traits' : 'Stats and traits', icon: ROLES[s.role].badge, onTap: () => goStaff(s.id) },
-            team.training.trainingOf(s.id) ? { id: 'train', label: 'On a course', sub: `${team.training.courseOf(s.id).name}: ${team.training.daysLeft(s.id)} days left`, icon: 'race_ui_02', accent: C.progress, onTap: () => goTrain(s.id) } : trainButton(s.id),
-          ],
-        },
+      now: [
+        garage().stateText(s.id) || 'In the garage',
+        { text: `Energy ${Math.round(s.energy)} · Morale ${Math.round(s.morale)}`, color: s.energy < 30 || s.morale < 30 ? C.bad : C.text },
+        ...(team.isFounder(s.id) ? [{ text: `${FOUNDER_FLAG} · ${team.founderDef()?.perkName ?? ''}`, color: C.gold }] : []),
+        ...(team.isLegacy?.(s.id) ? [{ text: `Legacy · carried into New Game+ ${team.ngLevel}`, color: C.purple }] : []), // Milestone 28
       ],
-    };
+      main: [
+        { id: 'details', label: 'Details', sub: team.isDriver(s) ? 'Driver ratings, stats and traits' : 'Stats and traits', icon: ROLES[s.role].badge, onTap: () => goStaff(s.id) },
+        team.training.trainingOf(s.id) ? { id: 'train', label: 'On a course', sub: `${team.training.courseOf(s.id).name}: ${team.training.daysLeft(s.id)} days left`, icon: 'race_ui_02', accent: C.progress, onTap: () => goTrain(s.id) } : trainButton(s.id),
+      ],
+      more: [{ id: 'giveTo', label: 'Give an item', sub: items.count ? `${items.count} in the ${ITEM_RULES.storeName}` : ITEM_TEXT.empty, icon: ITEM_RULES.storeIcon, disabled: !items.count, onTap: () => open('giveTo', s.id) }],
+    });
   });
 
   // Bottom bar: each slot's sheet. Build also leads to the Pit Bay and the Car Garage; Staff to the roster and each person.
@@ -459,7 +518,9 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
         const job = team.cars.active;
         const wings = fac.expansions().filter((z) => z.state !== 'hidden');
         menu.sections = [
-          { columns: 1, buttons: [{ id: 'pitBay', label: pitBay.name, sub: job ? `${job.name}: ${team.cars.phase(job).name}` : 'New car', icon: pitBay.art, onTap: () => open(pitBay.id) }] },
+          { columns: 1, buttons: [{ id: 'pitBay', label: job ? `Active build: ${job.name}` : 'New car', sub: job ? `${pitBay.name} · ${team.cars.phase(job).name} · ${Math.floor(team.cars.fraction(job) * 100)}%` : `${pitBay.name} · choose a class and parts`, icon: pitBay.art, onTap: () => open(pitBay.id) }] },
+          // Milestone 29: the other project types in bible §7 / §14.1, shown and greyed until a later update builds them
+          { columns: 1, buttons: BUILD_SHEET.later.map((p) => ({ id: p.id, label: p.label, sub: p.line, icon: 'race_ui_01', locked: true, onTap: () => {} })) },
           { columns: 1, buttons: [garageButton()] },
           // Milestone 10: Build → Facilities (Build Mode) and the Shop.
           {
@@ -481,7 +542,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
           { buttons: team.roster.map((s) => ({ id: `staff_${s.id}`, label: s.name.split(' ')[0], sub: ROLES[s.role].name, icon: s.art, accent: C.progress, onTap: () => goStaff(s.id) })), columns: 3 },
         ];
       }
-      if (slot.id === 'money') return moneyMenu({ slot, team, goMainMenu, debug, toast });
+      if (slot.id === 'money') return moneyMenu({ slot, team, goMainMenu, debug, toast, openStore: () => open('shopStore') });
       if (slot.id === 'research') return { ...menu, sections: researchSections() }; // Milestone 11
       if (slot.id === 'compete' && goWeekend) {
         // Milestone 7: race weekends (Practice → Setup → Qualifying → Race). Milestone 20: the championship ladder — the
@@ -525,12 +586,11 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
           buttons: CH ? CH.list().filter((x) => x.def.type !== 'secret' || !x.locked || CH.debugSecrets).map((x) => ({
             id: `champ_${x.def.id}`,
             label: `${x.def.id} ${x.def.name}`,
-            sub: x.state === 'active' ? 'In progress' : x.state === 'won' ? `Champions · ${x.def.rounds} rounds` : x.why ? x.why : `${x.def.rounds} rounds · entry ${fmt(x.fee)} Cr${x.best < 99 ? ` · best P${x.best}` : ''}`,
+            sub: (x.def.type === 'secret' ? `${SECRET_WORD.found} · ` : '') + (x.state === 'active' ? 'In progress' : x.state === 'won' ? `Champions · ${x.def.rounds} rounds` : x.why ? x.why : `${x.def.rounds} rounds · entry ${fmt(x.fee)} Cr${x.best < 99 ? ` · best P${x.best}` : ''}`),
             icon: TROPHY_ART[x.def.tier],
-            locked: x.locked,
-            disabled: !!x.why && x.state !== 'active',
-            accent: x.state === 'won' ? C.good : C.action,
-            onTap: () => enterChamp(x.def.id),
+            // (Milestone 29: a locked one is grey with its reason, and still opens its own sheet — what it needs, its prizes)
+            accent: x.state === 'won' ? C.good : x.why && x.state !== 'active' ? C.outline : C.action,
+            onTap: () => open('champ', x.def.id), // Milestone 29: the championship's own sheet (Enter is there)
           })) : [],
         });
         champSections.push({
@@ -628,7 +688,8 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
   const STAGE_WORD = ['', 'Rumour', 'Hint', 'Almost', 'Found'];
   function secretLines() {
     const r = team.secrets.rumours();
-    return r.length ? r.map((x) => ({ text: `${STAGE_WORD[x.stage]}: ${x.text}`, color: x.found ? C.good : x.stage >= 3 ? C.actionDark : C.text })) : ['No whispers yet.'];
+    // (Milestone 29: an unfound secret is ??? with its clue — never its name or unlock; a found one says so)
+    return r.length ? r.map((x) => ({ text: x.found ? `${STAGE_WORD[4]}: ${x.text} — ${x.name}` : `${SECRET_WORD.unknown} · ${STAGE_WORD[x.stage]}: ${x.text}`, color: x.found ? C.good : x.stage >= 3 ? C.actionDark : C.text })) : [{ text: 'No whispers yet — near misses in races and builds leave clues here.', color: C.textMuted }];
   }
   const secretInspectorButton = () => ({ id: 'secretInspector', label: 'Debug: secret inspector', sub: `${team.secrets.rules.length} rules · why each is not met`, icon: 'race_ui_28', accent: C.purple, onTap: () => open('secretInspector') });
   menus.register('secretInspector', () => {
@@ -696,18 +757,58 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
       const def = champById(CH.current?.id ?? CH.history[CH.history.length - 1]?.id);
       const rows = CH.standings();
       return {
+        parent: 'compete',
         title: def ? `${def.name}${CH.current ? '' : ' (final)'}` : 'Standings',
         subtitle: def ? `${def.rounds} rounds · ${def.tracks.map((t) => TRACKS[t].name).join(' · ')}` : 'Enter a championship first',
         art: 'race_ui_14',
         accent: C.progress,
         sections: [
-          { title: 'Drivers', lines: rows.length ? rows.map((r) => ({ text: `${r.pos}. ${r.name}${r.team ? ` (${r.team})` : ''} — ${r.points} pts${r.wins ? ` · ${r.wins} win${r.wins === 1 ? '' : 's'}` : ''}`, color: r.isPlayer ? C.actionDark : undefined })) : ['No rounds raced yet'] },
-          { title: 'Teams', lines: CH.teamTable().map((t) => ({ text: `${t.pos}. ${t.team} — ${t.points} pts`, color: t.isPlayer ? C.actionDark : undefined })) },
-          { columns: 1, buttons: [{ id: 'backCompete', label: '‹ Compete', accent: C.progress, onTap: () => open('compete') }] },
+          { title: 'Drivers', lines: rows.length ? rows.map((r) => ({ text: `${r.pos}. ${r.name}${r.team ? ` (${r.team})` : ''}${r.wins ? ` · ${r.wins} win${r.wins === 1 ? '' : 's'}` : ''}`, right: `${r.points} pts`, color: r.isPlayer ? C.actionDark : undefined })) : [{ text: EMPTY_TEXT.standings, color: C.textMuted }] },
+          { title: 'Teams', lines: CH.teamTable().length ? CH.teamTable().map((t) => ({ text: `${t.pos}. ${t.team}`, right: `${t.points} pts`, color: t.isPlayer ? C.actionDark : undefined })) : [{ text: EMPTY_TEXT.standings, color: C.textMuted }] },
+          { columns: 1, buttons: [backButton('backCompete', 'Compete')] },
         ],
       };
     });
+
+    // Milestone 29 (bible §7 Championship Detail): one championship — rounds and tracks, what it needs, the prizes, the
+    // standings while it runs — and its main action (Enter, or race the next round). A locked one shows the reason; a
+    // secret one is only ever listed once found (it never shows ??? or its unlock: that would tell how many exist).
+    menus.register('champ', (id) => {
+      const x = CH.list().find((c) => c.def.id === id);
+      if (!x) return null;
+      const def = x.def;
+      const band = CHAMP_BANDS[def.id] ?? {};
+      const active = x.state === 'active';
+      const n = active ? CH.nextRound() : null;
+      const cur = team.races.current;
+      const me = active ? CH.standings().find((r) => r.isPlayer) : null;
+      const now = active
+        ? [`In progress · round ${Math.min((CH.current?.round ?? 0) + 1, def.rounds)} of ${def.rounds}`, me ? `You: P${me.pos} · ${me.points} pts` : 'No points yet', ...(n ? [`Next: ${TRACKS[n.trackId].name} · ${n.ready ? 'ready to race' : `in ${n.daysAway} days`}`] : [])]
+        : x.state === 'won' ? [{ text: `Champions${x.best < 99 ? '' : ''} — the trophy is in your cabinet`, color: C.good }]
+        : x.locked ? [{ text: `Locked · ${x.why}`, color: C.bad }]
+        : x.why ? [{ text: x.why, color: C.bad }] : ['Open: enter to race its rounds'];
+      const main = active
+        ? [{ id: 'champRound', label: cur?.champ?.id === def.id ? 'Carry on: this round' : n?.ready ? `Race round ${n.index + 1}` : `Round ${(n?.index ?? 0) + 1}`, sub: n ? `${TRACKS[n.trackId].name}${n.ready ? '' : ` · in ${n.daysAway} days`}` : '', icon: 'race_ui_04', disabled: cur?.champ?.id !== def.id && (!n?.ready || !!cur), onTap: () => goChampRound() }]
+        : x.state === 'won' ? []
+        : [{ id: 'champEnter', label: `Enter ${def.name}`, sub: x.why ?? `${def.rounds} rounds · paid on entry`, cost: x.why ? null : `${fmt(x.fee)} Cr`, icon: TROPHY_ART[def.tier], disabled: !!x.why, locked: x.locked, onTap: () => enterChamp(def.id) }];
+      return Object.assign(stationSheet({
+        title: def.name,
+        line: `${def.id} · ${CH.tierName?.(def.tier) ?? def.tier} · ${def.rounds} rounds · ${def.classText}`,
+        art: TROPHY_ART[def.tier],
+        accent: C.progress,
+        now,
+        main,
+        more: [...(active ? [{ id: 'champStandings', label: 'Standings', sub: 'Drivers and teams', icon: 'race_ui_14', onTap: () => open('champStandings') }] : []), { id: 'rivals', label: 'Rivals', sub: 'Teams and drivers', icon: 'race_ui_27', onTap: () => open('rivals') }],
+        body: [
+          { title: 'Rounds', lines: def.tracks.map((t, i) => ({ text: `Round ${i + 1}: ${TRACKS[t]?.name ?? t}`, color: active && CH.current?.round > i ? C.textMuted : C.text })) },
+          { title: 'What it needs', lines: [`To enter: ${def.unlockText}`, `Cars: ${def.classText}`, `Entry fee: ${fmt(x.fee)} Credits`] },
+          { title: 'Prizes', lines: [{ text: 'Champions', right: `+${fmt(band.title ?? 0)} Cr` }, { text: 'Reputation for the title', right: `+${band.titleRep ?? 0}` }, `Trophy: ${CH.tierName?.(def.tier) ?? def.tier} · ${def.reward}`] },
+          { columns: 1, buttons: [backButton('backCompete', 'Compete')] },
+        ],
+      }), { parent: 'compete' });
+    });
     menus.register('rivals', () => ({
+      parent: 'compete',
       title: 'Rivals',
       subtitle: 'Eight teams (one is a secret); their cars follow each championship’s band, never yours',
       art: 'race_ui_27',
@@ -715,17 +816,18 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
       sections: [
         // (Milestone 25: Ghostline once SEC-RIVAL-01 is found — it races in the World-tier championships)
         ...Object.entries(RIVAL_TEAMS).filter(([, t]) => !t.secret || CH.debugSecrets || team.unlocks.secrets.includes(t.secret)).map(([id, t]) => ({
-          title: t.name,
+          title: t.secret ? `${t.name} · ${SECRET_WORD.found}` : t.name,
           lines: [`${t.identity} · ${t.strength} · from ${t.secret ? 'the World-tier championships (C08–C12)' : champById(t.first)?.name ?? t.first}`],
           columns: 1,
           buttons: [{ id: `rival_${id}`, label: t.drivers.map((d) => d.name).join(' · '), sub: t.drivers.map((d) => `${d.name.split(' ')[0]}: Q${d.ratings.qualifying} R${d.ratings.racecraft} W${d.ratings.wet} T${d.ratings.tyreCare} C${d.ratings.consistency} F${d.ratings.feedback}`).join(' · '), icon: t.logo, accent: C.outline, onTap: () => {} }],
         })),
-        { columns: 1, buttons: [{ id: 'backCompete', label: '‹ Compete', accent: C.progress, onTap: () => open('compete') }] },
+        { columns: 1, buttons: [backButton('backCompete', 'Compete')] },
       ],
     }));
     menus.register('trophies', () => {
       const list = CH.trophyList();
       return {
+        parent: 'compete',
         title: 'Trophy cabinet',
         subtitle: `${list.length} title${list.length === 1 ? '' : 's'} · ${(team.careers?.facts.wins ?? 0)} race wins · ${(team.careers?.facts.podiums ?? 0)} podiums`,
         art: 'race_reward_08',
@@ -733,19 +835,12 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
         sections: [
           list.length
             ? { columns: 2, buttons: list.map((t) => ({ id: `trophy_${t.id}`, label: t.name, sub: `${CH.tierName(t.tier)} trophy · day ${t.day ?? '—'}`, icon: t.art, accent: C.good, onTap: () => {} })) }
-            : { lines: ['No titles yet: win a championship and its trophy goes here (Club, National or World).'] },
+            : { lines: [{ text: EMPTY_TEXT.trophies, color: C.textMuted }] },
           { lines: CH.history.map((h) => `${champById(h.id).name} (year ${h.year}): P${h.pos} · ${h.points} pts${h.title ? ' · champions' : ''}`) },
-          { columns: 1, buttons: [{ id: 'backCompete', label: '‹ Compete', accent: C.progress, onTap: () => open('compete') }] },
+          { columns: 1, buttons: [backButton('backCompete', 'Compete')] },
         ],
       };
     });
-  }
-  // Milestone 25b: Help (top bar) — how to play, and Settings (reachable even with the Menu button off).
-  for (const [id, t] of Object.entries(TOP_SHEETS)) {
-    menus.register(id, () => ({ title: t.title, subtitle: t.line, accent: C.progress, sections: id === 'help' ? [{ columns: 2, buttons: [
-      { id: 'howToPlay', label: 'How to play', sub: 'The garage, cars and race weekends', icon: 'race_ui_13', accent: C.progress, onTap: () => showHelp() },
-      { id: 'helpSettings', label: 'Settings', sub: 'Sound, graphics, text size, Menu, hints', icon: 'race_ui_menu', accent: C.progress, onTap: () => openSettings() },
-    ] }] : [] }));
   }
   return menus;
 }

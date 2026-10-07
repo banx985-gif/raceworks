@@ -620,6 +620,8 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
 
     activityOf,
     stateText,
+    // Milestone 29: the first names of everyone working or resting at this station right now (its sheet's Now line)
+    peopleAt: (defId) => workers.filter((a) => a.stop?.at === defId && (a.phase === 'working' || a.phase === 'resting')).map((a) => team.get(a.staffId)?.name.split(' ')[0]).filter(Boolean),
     snapshot,
     restore,
 

@@ -42,7 +42,6 @@ import { TextPrompt } from '../../../core/ui/TextPrompt.js';
 import { drawButton, hitRect, setPressPoint, clearPress } from '../../../core/ui/Button.js';
 import { ASSETS, LATER_ASSETS, STAFF_PORTRAITS } from '../data/assets.js';
 import { BOTTOM_SLOTS, TOP_BAR } from '../data/home.js';
-import { createBackNav } from './app/backNav.js';
 import { createGarageScreen } from './screens/GarageScreen.js';
 import { createTestScreen } from './screens/TestScreen.js';
 import { createRouteTestScreen } from './screens/RouteTestScreen.js';
@@ -100,13 +99,23 @@ import { MENU_GROUPS, MENU_TEXT, NEXT_HINTS } from '../data/menu.js';
 import { SETTINGS, SETTINGS_DEFAULTS, SETTINGS_KEY, SHAKE_LEVELS, TEXT_SCALE, SETTINGS_TEXT } from '../data/settings.js';
 import { SOUNDS, MUSIC, AUDIO_RULES } from '../data/audio.js';
 import { ITEM_TYPES, ITEM_GROUPS, ITEM_RARITIES, ITEM_RULES, ITEM_ART } from '../data/items.js';
+// Milestone 29: the screen / UX pass — the phone's Back on core/SystemBack, long words cut with "…" (core/TextFit), the
+// Help archive (core/ui/HelpArchive, data/help.js) behind every Help button, the studio splash, Credits, the Store
+// placeholder and the race pause sheet.
+import { SystemBack } from '../../../core/SystemBack.js';
+import { installTextFit } from '../../../core/TextFit.js';
+import { createHelpArchive } from '../../../core/ui/HelpArchive.js';
+import { createStudioSplash } from '../../../core/ui/StudioSplash.js';
+import { HELP_TOPICS, HELP_FOR, HELP_TEXT } from '../data/help.js';
+import { STATIONS } from '../data/garage.js';
+import { createCreditsScreen } from './screens/CreditsScreen.js';
+import { STORE_TEXT, MAIN_MENU_TEXT, BACK_TEXT, SAVE_TEXT, EMPTY_TEXT } from '../data/screens.js';
 const COL = THEME.color;
 
 const W = 1080;
 const BASE_H = 1920; // 9:16; taller phones grow the height (see Renderer)
 const MAX_H = 2640; // up to 9:22 fills edge to edge; taller still gets thin bars top and bottom
 const START_SCREEN = new URLSearchParams(window.location.search).get('screen') === 'test' ? 'test' : 'menu';
-const MENU_SCREENS = ['slots', 'setup', 'hall', 'ngplus']; // screens off the main menu: Back returns towards it (Milestone 27: the Hall of Runs, New Game+)
 const TEST_SCREENS = ['test', 'route']; // the Milestone 0 screens: pause button, full debug box
 const GAME_SCREENS = ['garage', 'roster', 'staff', 'carBuilder', 'car', 'cars', 'weekend', 'raceIntro', 'race', 'raceResult', 'research', 'recruit', 'train', 'medals'];
 const RACE_SCREENS = ['weekend', 'raceIntro', 'race', 'raceResult']; // Milestone 6: the garage calendar waits while a race is on // the game's screens: P pauses the game clock here
@@ -122,7 +131,15 @@ const PARAMS = new URLSearchParams(window.location.search);
 const bus = new EventBus();
 const rng = new Rng('raceworks-m0');
 const renderer = new Renderer(document.getElementById('game'), { width: W, height: BASE_H, maxHeight: MAX_H, maxDpr: 2, bus });
-const layout = new UiLayout(renderer);
+installTextFit(renderer.ctx); // Milestone 29: a text too long for its place ends in "…" instead of being squashed
+// Milestone 29 (?debug=1&insets=top,right,bottom,left in CSS px): a stand-in notch / home bar, to check the safe areas
+const FORCE_INSETS = (() => {
+  const q = new URLSearchParams(window.location.search);
+  if (q.get('debug') !== '1' || !q.get('insets')) return null;
+  const [top = 0, right = 0, bottom = 0, left = 0] = q.get('insets').split(',').map(Number);
+  return { top, right, bottom, left };
+})();
+const layout = new UiLayout(renderer, { forceInsets: FORCE_INSETS });
 bus.on('renderer:resize', () => layout.refresh());
 const input = new Input(renderer, bus);
 const assets = new AssetManager({ bus });
@@ -133,8 +150,12 @@ const sheet = new BottomSheet({
   onClose: () => {
     garage.selection.clear();
     garage.setSheetTarget(null); // Milestone 10: Build Mode's facility sheet
+    if (raceHeld && router.currentName === 'race') raceScreen.setPaused?.(false); // Milestone 29: ✕ / a tap above the pause sheet (or a sheet opened from it) = Resume
+    raceHeld = false;
+    sheetNow = null;
   },
 });
+sheet.onLocked = (b) => b?.sub && refuse(b.sub); // Milestone 29: a tap on a greyed button repeats why, in one line
 const dialog = new Dialog({ layout, assets }); // "are you sure" boxes and Help (Milestone 4b)
 const textPrompt = new TextPrompt({ renderer }); // typing the team and player names
 
@@ -174,12 +195,12 @@ const loop = new FixedStepLoop({
     sheet.update(dt);
     dialog.update(dt);
     // Milestone 23: one event card at a time (nothing on the race screens; a card waits for a dialog or a car reveal)
-    if (teamReady) team.events.frame(dt, { screen: router.currentName, busy: dialog.active || textPrompt.active || !!pendingCar, reduced: !!settings.get('reducedMotion') });
+    if (teamReady) team.events.frame(dt, { screen: router.currentName, busy: dialog.active || textPrompt.active || !!pendingCar || helpOpen || creditsOpen, reduced: !!settings.get('reducedMotion') });
     eventCard.update(dt);
     hintLine.update(dt); // Milestone 25b
+    if (creditsOpen) creditsScreen.update(dt); // Milestone 29
     for (const t of toasts) t.age += dt;
     while (toasts.length && toasts[0].age > TOAST_LIFE) toasts.shift();
-    backNav.sync();
   },
   render: (alpha) => {
     const ctx = renderer.begin(COL.bg);
@@ -190,8 +211,12 @@ const loop = new FixedStepLoop({
     const tb = topBarRect(layout);
     // Milestone 23: the minor event strip (research done / a combo keep Milestone 11's gold card), then the game's own
     // short notes under it, then a major event card over everything but a dialog
-    const lane = onGame && teamReady ? drawEventToast(ctx, { x: tb.x + 24, y: tb.y + tb.h + 16, w: tb.w - 48 }) : 0;
-    if (toasts.length && onGame) drawToasts(ctx, toasts, { x: tb.x + 40, y: tb.y + tb.h + 16 + (lane ? lane + 16 : 0), w: tb.w - 80, life: TOAST_LIFE });
+    // (Milestone 29: on the race screen the notes go below the camera switch and the caution chip, never over a control)
+    const laneY = (router.currentName === 'race' ? raceScreen.toastTop?.() : null) ?? tb.y + tb.h + 16;
+    const lane = onGame && teamReady ? drawEventToast(ctx, { x: tb.x + 24, y: laneY, w: tb.w - 48 }) : 0;
+    if (toasts.length && onGame) drawToasts(ctx, toasts, { x: tb.x + 40, y: laneY + (lane ? lane + 16 : 0), w: tb.w - 80, life: TOAST_LIFE });
+    if (helpOpen) helpScreen.render(ctx); // Milestone 29: Help over the screen
+    if (creditsOpen) creditsScreen.render(ctx); // … and Credits
     if (teamReady) eventCard.render(ctx);
     dialog.render(ctx);
     if (onTestScreen()) drawButton(ctx, pauseButton(), loop.paused ? 'RESUME' : 'PAUSE', { selected: loop.paused });
@@ -295,10 +320,43 @@ function drawPaused(ctx) {
 // ---------------------------------------------------------------------------
 // Sheets: the stations, Tessa, the five bottom-bar slots, Inbox and Help — one registry, one sheet (a new one
 // replaces the open one). Plus the M0 test sheet.
+// Milestone 29: a sheet opened from another sheet remembers the way in, so Back (and the sheet's own "‹" button) returns to
+// it; ✕ or a tap above the sheet closes them all. Every sheet gets the Help button (its own page, data/help.js).
+let sheetWay = []; // [{ kind, target, title }] — the sheets under the open one, oldest first
+let sheetNow = null; // { kind, target } — the open sheet
 const openMenu = (kind, target = null) => {
   const build = menus.for(kind, target);
-  if (build) sheet.open(build);
+  if (!build) return;
+  const prev = sheet.active && sheetNow ? sheetNow : null;
+  if (prev && (prev.kind !== kind || prev.target !== target)) {
+    const at = sheetWay.findIndex((s) => s.kind === kind && s.target === target);
+    if (at >= 0) sheetWay = sheetWay.slice(0, at); // going back to one already under it: no loops
+    else sheetWay.push({ ...prev, title: sheet.menu?.title ?? '' });
+  } else if (!prev) sheetWay = [];
+  sheetNow = { kind, target };
+  const topic = helpTopicFor(kind, target);
+  sheet.open(() => {
+    const m = build();
+    if (m && !m.help) m.help = () => openHelp(topic);
+    return m;
+  });
+  if (reducedMotion()) sheet.instant = true;
 };
+// The sheet under this one (for its "‹" button), and stepping back to it.
+const sheetBackLabel = () => (sheetWay.length ? `‹ ${sheetWay[sheetWay.length - 1].title}` : null);
+function sheetBack() {
+  const prev = sheetWay.pop();
+  if (!prev) {
+    const p = sheet.menu?.parent; // a sheet's own parent (its ‹ button names it) when nothing is under it
+    if (!p) return sheet.close();
+    openMenu(p.kind ?? p, p.target ?? null);
+    sheetWay = [];
+    return;
+  }
+  const way = [...sheetWay];
+  openMenu(prev.kind, prev.target);
+  sheetWay = way;
+}
 // The staff screens (Milestone 3): the roster, and one person's details (from = where Back returns to).
 // Open a sub-screen: one step deeper (Back returns here).
 function goSub(name, params = {}) {
@@ -364,6 +422,7 @@ const carDebug = {
 // Milestone 14: the drill settings (steering sensitivity, aids, reduced motion / flashes) live here too.
 // Milestone 25b: the series Settings list (data/settings.js; the old ids kept, so earlier choices load as they were).
 const settings = new Settings({ key: SETTINGS_KEY, defaults: SETTINGS_DEFAULTS });
+const reducedMotion = () => !!settings.get('reducedMotion'); // (Milestone 29: sheets snap open too)
 // Graphics Auto / High / Low (core/FrameGovernor: Low = a steady 30 FPS); Low also means fewer race effects and simpler
 // figures in the garage. Text size → every font (core/Theme setTextScale).
 const govMode = () => ({ low: 'low', high: 'high' })[settings.get('fpsMode')] ?? 'auto';
@@ -537,7 +596,7 @@ carDebug.nextMonth = () => {
   const m = clock.month;
   while (clock.month === m) clock.advanceDay();
 };
-const menus = createGarageMenus({ garage: () => garage, team, assets, open: openMenu, close: () => sheet.close(), goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t, b) => toast(t, b), goWeekend: () => goWeekend(), goTestRace: debug.enabled ? () => goTestRace() : null, goRaceResult: (index) => goSub('raceResult', { index }), goResearch: () => goResearch(), goRecruit: () => goRecruit(), goTrain: (id) => goTrain(id), debugTracks: debug.enabled ? debugTracks : null, goChampRound: () => goChampRound(), enterChamp: (id) => enterChamp(id), menuRow: (id) => openMenuRow(id), menuState: (id) => menuState(id), openSettings: () => openSettings(), showHelp: () => showHelp(), sfx, haptic });
+const menus = createGarageMenus({ garage: () => garage, team, assets, open: openMenu, close: () => sheet.close(), goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t, b) => toast(t, b), goWeekend: () => goWeekend(), goTestRace: debug.enabled ? () => goTestRace() : null, goRaceResult: (index) => goSub('raceResult', { index }), goResearch: () => goResearch(), goRecruit: () => goRecruit(), goTrain: (id) => goTrain(id), debugTracks: debug.enabled ? debugTracks : null, goChampRound: () => goChampRound(), enterChamp: (id) => enterChamp(id), menuRow: (id) => openMenuRow(id), menuState: (id) => menuState(id), openSettings: () => openSettings(), showHelp: () => openHelp(null), sfx, haptic, sheetBack: () => sheetBack(), sheetBackLabel: () => sheetBackLabel(), openHelp: (t) => openHelp(t), refuse: (r) => refuse(r) });
 
 // ---------------------------------------------------------------------------
 // Milestone 25b: the Menu (core/ui/MenuSheet, rows in data/menu.js). A row runs the very code the art and the bars run.
@@ -574,6 +633,15 @@ const MENU_OPEN = {
   rumourArchive: () => openMenu('rumourArchive'),
   settings: () => openSettings(),
   mainMenu: () => goMainMenu(),
+  // Milestone 29: the rest of bible §7, each by the code its own button runs
+  researchTree: () => goResearch(),
+  buildSheet: () => (toGarage(), openMenu('build')),
+  lastResult: () => team.races.history.length && (sheet.close(), goSub('raceResult', { index: team.races.history.length - 1 })),
+  ceremony: () => team.ending.reached && (sheet.close(), toGarage(), router.go('ceremony', { replay: true })),
+  ngPlus: () => team.ending.reached && startNgPlus(activeSlot),
+  shopStore: () => openMenu('shopStore'),
+  help: () => openHelp(null),
+  credits: () => goCredits(),
 };
 function openMenuRow(id) {
   sheet.close();
@@ -588,9 +656,91 @@ function menuState(id) {
   if (id === 'store') return { badge: team.items.count || null, sub: `${team.items.count} of ${team.items.max} · kit that raises a stat for good` };
   if (id === 'inbox' && team.events.unread) return { badge: team.events.unread };
   if (id === 'sponsors' && team.sponsors.offers.length && team.sponsors.freeSlots()) return { badge: team.sponsors.offers.length };
+  // Milestone 29
+  if (id === 'lastResult' && !team.races.history.length) return { locked: EMPTY_TEXT.races };
+  if ((id === 'ceremony' || id === 'ngPlus') && !team.ending.reached) return { locked: MAIN_MENU_TEXT.ngPlusNone };
+  if (id === 'shopStore') return { sub: STORE_TEXT.line };
   return {};
 }
 menus.register('menu', () => menuSheet({ title: MENU_TEXT.title, subtitle: MENU_TEXT.subtitle, art: MENU_TEXT.icon, groups: MENU_GROUPS, open: openMenuRow, state: menuState }));
+
+// ---------------------------------------------------------------------------
+// Milestone 29: Help (core/ui/HelpArchive, data/help.js). Every screen's Help button — the top bar's, a sheet's "?", the
+// menu screens' header, the race pause sheet — opens that screen's one page over it; Settings → Help and the main menu's
+// Help open the list of every page. Help sits over the screen (nothing under it is reset), the calendar waits while it
+// is open, and Back closes it.
+let helpOpen = false;
+let helpSpeed = null; // the calendar speed to go back to
+const helpScreen = createHelpArchive({
+  renderer,
+  layout,
+  assets,
+  router,
+  guide: null, // (the first-time guide is Milestone 33)
+  topics: HELP_TOPICS,
+  text: HELP_TEXT,
+  icon: 'race_ui_13',
+  footer: { label: HELP_TEXT.settings, onTap: () => (closeHelp(), openSettings()) },
+  onLeave: () => closeHelp(),
+});
+const helpTopicFor = (kind = null, target = null) => {
+  if (kind == null) return HELP_FOR[router.currentName === 'race' && raceScreen.stintView?.active ? 'stint' : router.currentName] ?? 'garage';
+  if (HELP_FOR[`sheet_${kind}`]) return HELP_FOR[`sheet_${kind}`];
+  if (kind === 'facility' && target?.def) return HELP_FOR[`role_${target.def.role}`] ?? 'facilities';
+  const st = STATIONS.find((s) => s.id === kind);
+  return st ? HELP_FOR[`role_${st.role}`] ?? 'facilities' : 'garage';
+};
+// topic: a page id, null = the list of every page, undefined = the page for what is on screen now
+function openHelp(topic) {
+  if (topic === undefined) topic = sheet.active && sheetNow ? helpTopicFor(sheetNow.kind, sheetNow.target) : helpTopicFor();
+  helpScreen.enter({ topic: topic ?? undefined, back: router.currentName, direct: !!topic });
+  if (!helpOpen && teamReady && !clock.paused) {
+    helpSpeed = clock.speed;
+    clock.pause();
+  }
+  helpOpen = true;
+}
+function closeHelp() {
+  if (!helpOpen) return;
+  helpOpen = false;
+  if (helpSpeed) clock.setSpeed(helpSpeed);
+  helpSpeed = null;
+}
+router.layers.unshift({
+  get active() {
+    return helpOpen && !dialog.active;
+  },
+  handleInput: (hook, p) => {
+    helpScreen[hook]?.(p);
+    return true; // Help takes every touch while it is open
+  },
+});
+// A refused action says why in one line (no money, rank, Emergency Credit, in a race…).
+function refuse(reason) {
+  toast(BACK_TEXT.refused, reason);
+  haptic('light');
+}
+
+// Milestone 29: the race pause sheet (Back mid-race, or the race's "‹ Pause"): Resume, Leave (the race waits, saved),
+// Settings and Help. While it is open the race is paused.
+menus.register('racePause', () => {
+  const r = team.races.current;
+  const sim = raceScreen.sim;
+  return {
+    title: BACK_TEXT.raceTitle,
+    subtitle: sim ? `${TRACKS[r?.trackId]?.name ?? ''} · lap ${Math.min(sim.laps, sim.lapOf?.(sim.car?.('PLAYER')) ?? 0)} of ${sim.laps}` : BACK_TEXT.raceLine,
+    art: 'race_ui_04',
+    accent: COL.progress,
+    sections: [
+      { columns: 1, buttons: [{ id: 'raceResume', label: BACK_TEXT.resume, sub: BACK_TEXT.resumeLine, icon: 'race_ui_04', accent: COL.good, onTap: () => resumeRace() }] },
+      { columns: 2, buttons: [
+        { id: 'raceSettings', label: 'Settings', sub: 'Sound, camera, text', icon: 'race_ui_menu', accent: COL.progress, onTap: () => openSettings() },
+        { id: 'raceHelp', label: 'Help', sub: 'How the race works', icon: 'race_ui_13', accent: COL.progress, onTap: () => openHelp('race') },
+      ] },
+      { columns: 1, buttons: [{ id: 'raceLeave', label: BACK_TEXT.leave, sub: BACK_TEXT.leaveLine, icon: 'race_ui_01', accent: COL.action, onTap: () => (sheet.close(), leaveRace()) }] },
+    ],
+  };
+});
 // Settings (series §2): one sheet, the series list in Robot Workshop's order, then Help / Privacy / Credits, then the
 // RACEWORKS extras. Reachable from the main menu, the Menu sheet, Help (top bar) and Drills · Medals.
 function openSettings() {
@@ -615,9 +765,9 @@ function settingsMenu() {
   }
   heading('Help and about');
   sections.push({ columns: 1, buttons: [
-    { id: 'setHelp', label: SETTINGS_TEXT.help, sub: SETTINGS_TEXT.helpLine, icon: 'race_ui_13', accent: COL.progress, onTap: () => showHelp() },
+    { id: 'setHelp', label: SETTINGS_TEXT.help, sub: SETTINGS_TEXT.helpLine, icon: 'race_ui_13', accent: COL.progress, onTap: () => openHelp(null) },
     { id: 'setLegal', label: SETTINGS_TEXT.legal, sub: 'How your teams are kept', icon: 'race_ui_13', accent: COL.progress, onTap: () => dialog.show({ title: SETTINGS_TEXT.legal, body: SETTINGS_TEXT.legalBody, buttons: [{ id: 'ok', label: 'OK', accent: COL.progress }] }) },
-    { id: 'setCredits', label: SETTINGS_TEXT.credits, sub: 'The people behind RACEWORKS', icon: 'race_brand_02', accent: COL.progress, onTap: () => dialog.show({ title: SETTINGS_TEXT.credits, body: SETTINGS_TEXT.creditsBody, buttons: [{ id: 'ok', label: 'OK', accent: COL.progress }] }) },
+    { id: 'setCredits', label: SETTINGS_TEXT.credits, sub: 'The people behind RACEWORKS', icon: 'race_brand_02', accent: COL.progress, onTap: () => goCredits() }, // (Milestone 29: the Credits screen)
   ] });
   for (const d of SETTINGS.filter((x) => x.extra)) {
     heading(d.group);
@@ -702,7 +852,7 @@ const topBar = createTopBar({
   statsBad,
   onStats: () => openMenu('money'),
   onInbox: () => openMenu('inbox'),
-  onHelp: () => openMenu('help'),
+  onHelp: () => openHelp(), // Milestone 29: this place's Help page
   inboxCount: () => (teamReady ? team.events.unread : 0), // Milestone 23
   dateTag: () => (teamReady && team.ending.postgame ? ENDING_TEXT.postgame : null), // Milestone 27
 });
@@ -723,7 +873,7 @@ const screenBar = createTopBar({
   // From a staff screen these return to the garage and open their sheet there.
   onStats: () => fromScreen('money'),
   onInbox: () => fromScreen('inbox'),
-  onHelp: () => fromScreen('help'),
+  onHelp: () => openHelp(), // Milestone 29: this screen's Help page (the Help archive)
   inboxCount: () => (teamReady ? team.events.unread : 0), // Milestone 23
 });
 function fromScreen(kind) {
@@ -794,13 +944,22 @@ const testSheet = () => ({
 });
 bus.on('screen:change', () => sheet.close());
 
-// Back one level: close the sheet, leave Build Mode, leave a sub-screen (to where it was opened from), or leave the
-// second test screen.
+// Back one level (Milestone 29, the one rule for the phone's Back, Esc and every on-screen "‹"): a dialog, an event
+// card or the name prompt first; then the top sheet (back to the sheet it was opened from, else closed — in a race the
+// pause sheet closes and the race carries on); then Help; then the screen (to where it was opened from); in a race Back
+// opens the pause sheet (a Drive Stint hands back first) and never leaves by itself; on the garage with nothing open it
+// asks before leaving for the main menu. On the main menu nothing is open: the press goes to the phone (the app closes).
 function back() {
-  if (dialog.active) dialog.onBack();
+  if (loop.paused && onTestScreen()) loop.resume('back');
+  else if (dialog.active) dialog.onBack();
   else if (teamReady && eventCard.active) eventCard.onBack(); // Milestone 23: a question must be answered; news closes
   else if (textPrompt.active) textPrompt.close();
-  else if (sheet.active) sheet.close();
+  else if (helpOpen) helpScreen.onBack();
+  else if (sheet.active) {
+    if (sheetNow?.kind === 'racePause') resumeRace();
+    else sheetBack();
+  }
+  else if (creditsOpen) closeCredits();
   else if (router.currentName === 'setup') {
     if (!setupScreen.onBack()) router.go(setupFrom, setupFrom === 'slots' ? { mode: slotsScreen.mode } : {});
   } else if (router.currentName === 'slots') router.go('menu');
@@ -809,7 +968,7 @@ function back() {
   else if (router.currentName === 'ceremony') ceremonyScreen.next(); // Back moves the ceremony on (its last card waits for a choice)
   else if (router.currentName === 'garage' && garage.buildMode) garage.setBuildMode(false);
   else if (router.currentName === 'race') {
-    if (!raceScreen.onBack()) leaveRace(); // Milestone 18: during a Drive Stint, Back hands back first
+    if (!raceScreen.onBack()) pauseRace(); // Milestone 18: during a Drive Stint, Back hands back first; Milestone 29: then the pause sheet
   }
   else if (router.currentName === 'raceResult') router.go('garage');
   else if (router.currentName === 'drill' && drillScreen.onBack()) {
@@ -821,13 +980,35 @@ function back() {
     router.go(prev.name, prev.params);
   }
   else if (router.currentName === 'route') router.go('test');
+  else if (router.currentName === 'garage' && teamReady) confirmLeaveGarage();
+  else if (router.currentName === 'boot' || router.currentName === 'splash') {
+    /* starting up: nothing to go back to yet */
+  }
   else return false;
   return true;
 }
-const backNav = createBackNav({
-  depth: () => (dialog.active || (teamReady && eventCard.active) || MENU_SCREENS.includes(router.currentName) || sheet.active || router.currentName === 'route' || router.currentName === 'ceremony' || SUB_SCREENS[router.currentName] || (router.currentName === 'garage' && garage.buildMode) ? 1 : 0),
-  back,
-});
+function confirmLeaveGarage() {
+  dialog.confirm({ title: BACK_TEXT.leaveTitle, body: BACK_TEXT.leaveBody, yes: BACK_TEXT.leaveYes, no: BACK_TEXT.leaveNo, onYes: () => goMainMenu() });
+}
+// The phone's Back / the browser's Back / Esc (core/SystemBack): one press = one back(). After a press that went to the
+// phone (the main menu), the next tap in the game catches Back again.
+const systemBack = new SystemBack({ onBack: () => back() });
+bus.on('input:down', () => systemBack.rearm());
+bus.on('screen:change', () => systemBack.rearm());
+
+// Milestone 29: the race pause sheet — Back (or the race's "‹ Pause") pauses the race and opens it; the race only ever
+// leaves from here, on purpose, and waits (saved) exactly where it was.
+let raceHeld = false; // the pause sheet (or a sheet opened from it) holds the race
+function pauseRace() {
+  raceScreen.setPaused?.(true);
+  raceHeld = true;
+  openMenu('racePause');
+}
+function resumeRace() {
+  sheet.close();
+  raceScreen.setPaused?.(false);
+  raceHeld = false;
+}
 
 // ---------------------------------------------------------------------------
 // Boot screen: shows while the art loads, then hands over to the garage (or the test screen).
@@ -879,9 +1060,9 @@ const firstFinishedCar = () => team.cars.cars.latest();
 const hintLine = new HintLine({
   rect: () => {
     const tb = topBarRect(layout);
-    return { x: tb.x + 24, y: tb.y + tb.h + 10, w: tb.w - 48, h: 72 };
+    return { x: tb.x + 24, y: tb.y + tb.h + 10, w: tb.w - 48, h: 96 }; // (Milestone 29: a thumb-sized tap, 96)
   },
-  quiet: () => !teamReady || settings.get('showHints') === false || router.currentName !== 'garage' || garage.buildMode || sheet.active || dialog.active || eventCard.active || !!team.events.toast || toasts.length > 0 || loop.paused,
+  quiet: () => !teamReady || helpOpen || creditsOpen || settings.get('showHints') === false || router.currentName !== 'garage' || garage.buildMode || sheet.active || dialog.active || eventCard.active || !!team.events.toast || toasts.length > 0 || loop.paused,
   rules: [
     { id: 'raceDay', text: NEXT_HINTS.raceDay, when: () => !team.races.current && !!team.championships.nextRound()?.ready, open: () => openMenu('compete') },
     { id: 'firstCar', text: NEXT_HINTS.firstCar, when: () => team.cars.cars.count === 0 && !team.cars.active, open: () => openMenu('F02') },
@@ -917,7 +1098,7 @@ const staffScreen = createStaffDetailScreen({ layout, assets, team, garage, topB
 const recruitScreen = createRecruitScreen({ layout, assets, team, topBar: screenBar, toast: (a, b) => toast(a, b), goStaff, debugEnabled: debug.enabled }); // Milestone 12 (Milestone 13: ?debug=1 spawns on the Special tab)
 const trainScreen = createTrainScreen({ layout, assets, team, topBar: screenBar, toast: (a, b) => toast(a, b), goDrill: (p) => goSub('drill', p), goMedals: () => goSub('medals') }); // Milestone 12 (14: drills)
 // Milestone 14: a drill, and the medal history. A finished drill returns to where it was opened from.
-const drillScreen = createDrillScreen({ renderer, layout, assets, team, bus, settings, records: drillRecords, debugEnabled: debug.enabled, toast: (a, b) => toast(a, b), onDone: (p, result) => {
+const drillScreen = createDrillScreen({ renderer, layout, assets, team, bus, settings, records: drillRecords, debugEnabled: debug.enabled, toast: (a, b) => toast(a, b), onHelp: () => openHelp(), isHeld: () => helpOpen, onDone: (p, result) => {
   back();
   // Milestone 15: the Qualifying Drive lap returns to the weekend with the grid set
   if (p.qualiLap && result?.quali) toast(`Qualified P${result.quali.rows.find((r) => r.isPlayer).pos}`, result.drive ? 'With your Drive lap' : 'Simulated after the hand back');
@@ -932,6 +1113,7 @@ const carBuilderScreen = createCarBuilderScreen({
   team,
   topBar: screenBar,
   debugEnabled: debug.enabled, // ?debug=1: unlock-all and a random legal car (Milestone 9)
+  refuse: (r) => refuse(r), // Milestone 29
   onStart: (opts) => {
     const r = team.startCar(opts); // pays for the parts (Milestone 5)
     debug.log(r.ok ? `car started: ${r.job.name} (${opts.budget}, ${r.job.data.tier}, parts ${r.job.data.parts.join(' ')}, team ${opts.staffIds.join(', ')})` : `car not started: ${r.reason}`);
@@ -944,7 +1126,7 @@ const carResultScreen = createCarResultScreen({ layout, assets, team, topBar: sc
 const carGarageScreen = createCarGarageScreen({ layout, assets, team, topBar: screenBar, goCar });
 const researchScreen = createResearchScreen({ layout, assets, team, topBar: screenBar, toast: (a, b) => toast(a, b), debugEnabled: debug.enabled }); // Milestone 11
 const raceIntroScreen = createRaceIntroScreen({ layout, assets, team, topBar: screenBar, onStart: startRace });
-const raceScreen = createRaceScreen({ renderer, layout, assets, team, bus, settings, onFinished: raceFinished, onLeave: () => leaveRace(), toast: (a, b) => toast(a, b), debug: debug.enabled, lowFx, shakeScale: () => SHAKE_LEVELS[settings.get('screenShake')] ?? 1 }); // Milestone 16: + the debug tyre call
+const raceScreen = createRaceScreen({ renderer, layout, assets, team, bus, settings, onFinished: raceFinished, onLeave: () => leaveRace(), onPause: () => back(), onHelp: () => openHelp('stint'), toast: (a, b) => toast(a, b), debug: debug.enabled, lowFx, shakeScale: () => SHAKE_LEVELS[settings.get('screenShake')] ?? 1 }); // Milestone 16: + the debug tyre call
 const weekendScreen = createWeekendScreen({ layout, assets, team, topBar: screenBar, onStartRace: startRace, onDriveLap: () => goSub('drill', { qualiLap: true }), toast: (a, b) => toast(a, b) }); // Milestone 15: + the Drive lap
 // The result: prize Credits and Reputation (through the Milestone 5 ledger and rank), setup and qualifying.
 const resultLines = (e) => {
@@ -1147,13 +1329,76 @@ function confirmReplace(n, s) {
     },
   });
 }
-function showHelp() {
-  dialog.show({
-    title: 'How to play',
-    body: 'Run a racing team from your garage. Tap a station or a person to see what they do, start a car at the Pit Bay and watch it being built, then take it to a race weekend from Compete (your crew runs the race on Auto — take over any time). Money shows every Credit in and out. Your team saves by itself, and there are four save slots, so you can run four teams at once.',
-    buttons: [{ id: 'ok', label: 'Got it', accent: COL.progress }],
-  });
+// (Milestone 29: the old "How to play" box is the Help archive's list now — every page, "Starting out" first.)
+const showHelp = () => openHelp(null);
+// Milestone 29: the main menu's New Game+ — one finished run starts straight away; several: pick one on the slot screen.
+function menuNgPlus() {
+  const ended = slotList.filter((s) => !s.empty && !s.error && s.summary?.ended);
+  if (ended.length === 1) return startNgPlus(ended[0].n);
+  router.go('slots', { mode: 'load' });
 }
+// Milestone 29: the main menu's Records — what this device has earned (the account: achievements, the best on this
+// device, the Hall of Runs), with no team open.
+async function menuRecords() {
+  await accountChain;
+  await team.achievements.loadAccount();
+  openMenu('mainRecords');
+}
+menus.register('mainRecords', () => {
+  const A = team.achievements;
+  const got = A.rules.filter((r) => A.engine.account.history[r.id]);
+  const bests = A.records().filter((d) => !d.key && !d.prestige).map((d) => ({ d, v: A.deviceRecords.get(d.id)?.value ?? null })).filter((x) => x.v != null && x.v !== 0);
+  return {
+    title: MAIN_MENU_TEXT.records,
+    subtitle: MAIN_MENU_TEXT.recordsLine,
+    art: 'race_reward_08',
+    accent: COL.progress,
+    sections: [
+      { columns: 1, buttons: [{ id: 'mainHall', label: 'Hall of Runs', sub: 'Every finished run on this device', icon: 'race_reward_08', accent: COL.progress, onTap: () => (sheet.close(), goHall()) }] },
+      { title: `Achievements · ${got.length} of ${A.rules.length}`, columns: 2, buttons: A.rules.map((r) => {
+        const h = A.engine.account.history[r.id]?.first;
+        return { id: `mach_${r.id}`, label: `${h ? '✓ ' : ''}${r.name}`, sub: r.recipe, icon: r.icon, accent: h ? COL.good : COL.outline, onTap: () => {} };
+      }) },
+      { title: 'Best on this device', lines: bests.length ? bests.map((x) => ({ text: x.d.label, right: typeof x.v === 'number' ? x.v.toLocaleString('en-US') : String(x.v) })) : [{ text: EMPTY_TEXT.races, color: COL.textMuted }] },
+    ],
+  };
+});
+// Credits sit over the screen like Help (nothing under them is reset); Back closes them.
+let creditsOpen = false;
+function goCredits() {
+  sheet.close();
+  closeHelp();
+  creditsScreen.enter({ from: router.currentName });
+  creditsOpen = true;
+}
+const closeCredits = () => (creditsOpen = false);
+router.layers.unshift({
+  get active() {
+    return creditsOpen && !dialog.active;
+  },
+  handleInput: (hook, p) => {
+    creditsScreen[hook]?.(p);
+    return true;
+  },
+});
+function showLegal() {
+  dialog.show({ title: SETTINGS_TEXT.legal, body: SETTINGS_TEXT.legalBody, buttons: [{ id: 'ok', label: 'OK', accent: COL.progress }] });
+}
+// Milestone 29: a failed save says so and tries again by itself (core/Autosave; the toast at most every 20 s).
+let saveRetry = null;
+let saveToastAt = -1e9;
+bus.on('autosave:failed', () => {
+  if (!teamReady) return;
+  const now = performance.now();
+  if (now - saveToastAt > SAVE_TEXT.quietMs) {
+    saveToastAt = now;
+    toast(SAVE_TEXT.failed, SAVE_TEXT.retry);
+  }
+  if (!saveRetry) saveRetry = setTimeout(() => {
+    saveRetry = null;
+    autosave.request('retry');
+  }, SAVE_TEXT.retryMs);
+});
 // ?debug=1&slot=N: straight into slot N (a new default team there if it is empty; &founder= picks the founder).
 async function debugOpenSlot(n) {
   const founderId = FOUNDERS.some((f) => f.id === PARAMS.get('founder')) ? PARAMS.get('founder') : DEFAULT_SETUP.founderId;
@@ -1162,7 +1407,7 @@ async function debugOpenSlot(n) {
 }
 
 // Test hook for automated checks (debug builds only).
-const header = createMenuHeader({ layout });
+const header = createMenuHeader({ layout, onHelp: () => openHelp() }); // Milestone 29: + Help on every menu screen
 const menuScreen = createMainMenuScreen({
   renderer,
   layout,
@@ -1173,7 +1418,21 @@ const menuScreen = createMainMenuScreen({
   onLoad: () => router.go('slots', { mode: 'load' }),
   onHelp: showHelp,
   onSettings: () => openSettings(), // Milestone 25b
+  onNgPlus: () => menuNgPlus(), // Milestone 29: the rest of bible §7's main menu
+  onRecords: () => menuRecords(),
+  onCredits: () => goCredits(),
 });
+const creditsScreen = createCreditsScreen({ layout, assets, header: createMenuHeader({ layout }), onBack: () => back(), onLegal: () => showLegal() });
+// The studio splash (style guide §7b): the Banx Gamex logo on every launch, then the loading screen (bible §7 Splash:
+// load, save migration — the slots migrate as they are read — and the entitlement check, none until Milestone 31).
+const splashScreen = createStudioSplash({
+  renderer,
+  assets,
+  key: 'studio_logo_dark',
+  prepare: () => assets.loadImage('studio_logo_dark', '../../art/brand/studio_logo_banx_gamex_dark.png'),
+  onDone: () => router.go('boot'),
+});
+assets.register?.({ studio_logo_cutout: '../../art/brand/studio_logo_banx_gamex.png' });
 const slotsScreen = createSlotsScreen({
   layout,
   assets,
@@ -1187,7 +1446,7 @@ const slotsScreen = createSlotsScreen({
   },
   onReplace: confirmReplace,
   onDelete: confirmDelete,
-  onBack: () => router.go('menu'),
+  onBack: () => back(), // (Milestone 29: the on-screen ‹ is the phone's Back)
   onHall: () => goHall(), // Milestone 27
   onNgPlus: (n) => startNgPlus(n), // Milestone 28
 });
@@ -1203,6 +1462,7 @@ const ceremonyScreen = createCeremonyScreen({
   team,
   onContinue: () => endCeremony(() => router.go('garage')),
   onNgPlus: () => endCeremony(() => startNgPlus(activeSlot)), // Milestone 28
+  onHelp: () => openHelp('ending'), // Milestone 29
   sfx,
   haptic,
   reduced: () => !!settings.get('reducedMotion'),
@@ -1213,7 +1473,7 @@ async function goHall() {
   hallList = slots ? ((await slots.loadAccount()).ending?.archive ?? []) : [];
   router.go('hall');
 }
-const hallScreen = createHallOfRunsScreen({ layout, header, archive: () => hallList, onBack: () => router.go('slots', { mode: 'load' }) });
+const hallScreen = createHallOfRunsScreen({ layout, header, archive: () => hallList, onBack: () => back() });
 // Milestone 28: the New Game+ Setup screen goes back to the slot choice; Next goes on to the new-team setup.
 function leaveNgPlus() {
   chooseNewGamePlusSlot(ngFlow?.parentSlot ?? null);
@@ -1228,7 +1488,7 @@ const ngPlusScreen = createNgPlusScreen({
     setupFrom = 'ngplus';
     router.go('setup', { slot: ngFlow.slot, replacing: ngFlow.replacing, ngLevel: ngFlow.offer.level });
   },
-  onBack: () => leaveNgPlus(),
+  onBack: () => back(),
 });
 const setupScreen = createTeamSetupScreen({
   layout,
@@ -1248,9 +1508,10 @@ const setupScreen = createTeamSetupScreen({
   onBack: () => router.go(setupFrom, setupFrom === 'slots' ? { mode: slotsScreen.mode } : {}),
 });
 
-if (debug.enabled) window.__rw = { ceremonyScreen, hallScreen, ngPlusScreen, startNgPlus, openNgSetup, get ngFlow() { return ngFlow; }, goHall, get hallList() { return hallList; }, hintLine, MENU_OPEN, openMenuRow, menuState, openSettings, syncMenuSlot, bottomItems, governor, lowFx, audio, haptics, openMenu, menus, comboRecords, slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, get events() { return team.events; }, eventCard, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, drillScreen, medalsScreen, drillRecords, taps: [] };
+if (debug.enabled) window.__rw = { menuHeader: header, helpScreen, openHelp, closeHelp, get helpOpen() { return helpOpen; }, get creditsOpen() { return creditsOpen; }, closeCredits, helpTopicFor, back, systemBack, get sheetNow() { return sheetNow; }, get sheetWay() { return sheetWay; }, sheetBack, pauseRace, resumeRace, creditsScreen, splashScreen, goCredits, menuRecords, menuNgPlus, refuse, get trail() { return trail; }, goSub, goStaff, goRoster, goBuilder, goCarGarage, goCar, goChampRound, enterChamp, ceremonyScreen, hallScreen, ngPlusScreen, startNgPlus, openNgSetup, get ngFlow() { return ngFlow; }, goHall, get hallList() { return hallList; }, hintLine, MENU_OPEN, openMenuRow, menuState, openSettings, syncMenuSlot, bottomItems, governor, lowFx, audio, haptics, openMenu, menus, comboRecords, slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, get events() { return team.events; }, eventCard, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, drillScreen, medalsScreen, drillRecords, taps: [] };
 
 router
+  .register('splash', splashScreen) // Milestone 29
   .register('boot', bootScreen)
   .register('menu', menuScreen)
   .register('slots', slotsScreen)
@@ -1275,5 +1536,5 @@ router
   .register('medals', medalsScreen)
   .register('test', createTestScreen({ renderer, layout, assets, openSheet: () => sheet.open(testSheet), onTapLogged: (p) => window.__rw?.taps.push({ x: p.x, y: p.y }) }))
   .register('route', createRouteTestScreen({ renderer, layout, onBack: back }));
-router.go('boot');
+router.go('splash');
 loop.start();

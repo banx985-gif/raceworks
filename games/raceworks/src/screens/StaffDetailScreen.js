@@ -294,6 +294,8 @@ export function createStaffDetailScreen({ layout, assets, team, garage, topBar, 
       return tab;
     },
     // Screen rect of a tab or debug button by id ('tab_stats', 'nudge_DRV_10'…), after scrolling it into view (tests).
+    // Milestone 29: every tap area drawn last frame (the thumb-size check reads them; content units)
+    tapTargets: () => hits.map((h) => ({ id: h.id, rect: h.rect })),
     buttonRect(bid) {
       layoutPage(null, panel.getRect().w);
       const h = hits.find((x) => x.id === bid);

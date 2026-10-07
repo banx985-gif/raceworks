@@ -12,12 +12,13 @@ import { PLAYER_TITLE } from '../../data/setup.js';
 import { LEDGER, CATEGORY_NAMES, DEBT, CURRENCIES } from '../../data/economy.js';
 import { goalText, progressText } from '../systems/contracts.js';
 import { sponsorSections } from './sponsorMenu.js';
+import { EMPTY_TEXT } from '../../data/screens.js'; // Milestone 29
 
 const C = THEME.color;
 export const fmt = (n) => Math.round(n).toLocaleString('en-US');
 export const signed = (n) => `${n >= 0 ? '+' : '−'}${fmt(Math.abs(n))}`;
 
-export function moneyMenu({ slot, team, goMainMenu = null, debug = null, toast = () => {} }) {
+export function moneyMenu({ slot, team, goMainMenu = null, debug = null, toast = () => {}, openStore = null }) {
   const m = team.money;
   const clock = team.clock;
   const month = m.monthInOut();
@@ -39,6 +40,8 @@ export function moneyMenu({ slot, team, goMainMenu = null, debug = null, toast =
         `Every month (day 1): salaries ${fmt(m.salaryBill())}${m.upkeepBill() ? ` · car upkeep ${fmt(m.upkeepBill())}` : ''}${team.sponsors?.deals.length ? ` · sponsor stipends +${fmt(team.sponsors.deals.reduce((t, d) => t + team.sponsors.stipendNow(d), 0))}` : ''}`,
         ...debtLines,
       ],
+      // Milestone 29: the Store (Racing Tokens, Remove Ads, VIP — a placeholder until Milestone 31)
+      ...(openStore ? { columns: 1, buttons: [{ id: 'openStore', label: 'Store', sub: 'Racing Tokens, Remove Ads, VIP · coming later', icon: 'race_reward_02', accent: C.progress, onTap: openStore }] } : {}),
     },
   ];
   if (goMainMenu) {
@@ -67,7 +70,8 @@ export function moneyMenu({ slot, team, goMainMenu = null, debug = null, toast =
     {
       lines: [
         { text: `Credits ledger · ${rec.ok ? 'the balance matches the ledger ✓' : 'LEDGER MISMATCH'}`, color: rec.ok ? C.good : C.bad },
-        ...lines.map((l) => ({ text: `${clock.shortLabel(l.day)} · ${signed(l.amount)} · ${l.reason} → ${fmt(l.balance)}`, color: l.amount < 0 ? C.text : C.good })),
+        // (Milestone 29: the amounts right-aligned, so they line up; an empty ledger says so)
+        ...(lines.length ? lines.map((l) => ({ text: `${clock.shortLabel(l.day)} · ${l.reason} → ${fmt(l.balance)}`, right: signed(l.amount), color: l.amount < 0 ? C.text : C.good })) : [{ text: EMPTY_TEXT.ledger, color: C.textMuted }]),
       ],
     },
     { lines: otherLedger(team) },

@@ -70,6 +70,7 @@ export const STAFF_PORTRAITS = Object.fromEntries(ALL_STAFF.map((d) => d.art).fi
 // a few at a time behind the game (main.js), so the first screen never waits for them; a picture still on its way
 // draws nothing for a moment and pops in.
 import { SPONSORS } from './sponsors.js';
+import { HELP_TOPICS, HELP_ART_FOLDERS } from './help.js'; // Milestone 29
 
 export const LATER_ASSETS = {
   // Milestone 26: the achievements' icons (the nearest existing art: race_ui / race_reward; the Records screen, toasts)
@@ -88,4 +89,11 @@ export const LATER_ASSETS = {
   ...Object.fromEntries(STATIONS.filter((s) => s.art && !START_IDS.has(s.id)).map((s) => art('facilities', s.art))), // Milestone 10
   ...Object.fromEntries(Object.values(CAR_FAMILIES).flatMap((f) => [art('cars', f.showcase), art('cars', f.top)])),
   ...Object.fromEntries(Object.values(PARTS).map((p) => art('parts', p.art))),
+  // Milestone 29: the Help pages' icons and pictures (existing art; code-drawn keys like race_ui_menu / item_25 are skipped)
+  ...Object.fromEntries(HELP_TOPICS.flatMap((t) => [t.icon, t.art]).filter((k) => k && /^(race_(ui|brand|reward|event)_\d+|facility_f\d+|car_v\d+_[a-z]+|track_t\d+)$/.test(k) && HELP_FOLDER(k) && !(k in ASSETS)).map((k) => art(HELP_FOLDER(k), k))),
 };
+// (Milestone 29) the folder a help picture lives in, by its key's prefix
+function HELP_FOLDER(k) {
+  const p = Object.keys(HELP_ART_FOLDERS).find((x) => k.startsWith(`${x}_`));
+  return p ? HELP_ART_FOLDERS[p] : null;
+}
