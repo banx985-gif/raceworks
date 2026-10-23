@@ -178,13 +178,16 @@ export function createCombos({ bus, team }) {
       }),
   };
 
-  // A finished car: discover what it made, note its near-misses.
-  bus?.on('project:complete', ({ record }) => {
+  // A finished car: discover what it made, note its near-misses. Milestone 30b: an upgraded car is checked again (its
+  // combos were worked out afresh on its new recipe when the upgrade finished).
+  const onCar = ({ record }) => {
     const r = record?.result;
     if (!r) return;
     for (const id of r.combos ?? []) api.discover(id, { car: record });
     for (const n of r.comboNear ?? []) api.clue(n.id, n.clue);
-  });
+  };
+  bus?.on('project:complete', onCar);
+  bus?.on('car:upgraded', onCar);
   return api;
 }
 

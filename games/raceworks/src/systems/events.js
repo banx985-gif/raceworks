@@ -183,7 +183,11 @@ export function createEvents({ bus, team, seed = 'raceworks' }) {
   function checkMilestones() {
     for (const m of MILESTONES) if (!events.seen(m.id) && MILESTONE_FACTS[m.on]?.()) events.milestone(m.id, today());
   }
-  bus.on('project:complete', () => checkMilestones());
+  bus.on('project:complete', ({ record }) => {
+    checkMilestones();
+    // Milestone 30b: the first Research Prototype (a minor event, once)
+    if (record?.result?.projectType === 'prototype' && !events.seen('EV_FIRST_PROTOTYPE')) fireNow('EV_FIRST_PROTOTYPE', { car: record.name });
+  });
   bus.on('race:created', ({ race }) => {
     if (race?.kind === 'weekend') latched.firstRace = true;
     checkMilestones();

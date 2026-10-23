@@ -247,9 +247,9 @@ export const SECRET_READINGS = {
   worldTier: ['C08', 'C09', 'C10', 'C11', 'C12'],
   // "the series recommendation" for a Power Unit: a technology tier (a part's complexity) per championship
   recommendedPuTier: { C01: 2, C02: 2, C03: 3, C04: 4, C05: 4, C06: 5, C07: 6, C08: 6, C09: 7, C10: 8, C11: 8, C12: 9 },
-  // "a Research Prototype project" (no such project type yet): a Prototype or Experimental car finished (those classes
-  // open at Rank B, the bible's Research Prototype rank)
-  researchPrototype: { classes: ['prototype', 'experimental'] },
+  // "a Research Prototype project" (Milestone 30b): a finished car whose project type is a Research Prototype (bible
+  // §14.1) — no longer any Prototype / Experimental-class car (M25's stand-in)
+  researchPrototype: { projectType: 'prototype' },
   // "car rating": the mean of the seven car stats in the race (combos and sponsor perks included); the field = every
   // other car's mean. "12% below the field" = 1 − yours ÷ field ≥ 12%; "a field rated 12%+ above your car" = field ÷
   // yours − 1 ≥ 12%

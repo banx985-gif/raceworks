@@ -385,7 +385,7 @@ bus.on('screen:change', ({ to }) => {
 });
 const goRoster = () => goSub('roster');
 const goStaff = (id) => goSub('staff', { id });
-const goBuilder = () => goSub('carBuilder');
+const goBuilder = (params = {}) => goSub('carBuilder', params); // (Milestone 30b: { mode: 'prototype' | 'upgrade', carNumber })
 // From a car that was opened from the Car Garage, its Car Garage button is simply Back (no pile of screens).
 const goCarGarage = () => (trail[trail.length - 1]?.name === 'cars' && router.currentName === 'car' ? back() : goSub('cars'));
 const goCar = (number) => goSub('car', { number });
@@ -406,7 +406,16 @@ const goTrain = (id = null) => {
 // A finished car: set when the project completes, opened after the reveal has played on the bay.
 let pendingCar = null;
 bus.on('project:complete', ({ record }) => {
+  if (!record) return; // Milestone 30b: an upgrade changes its car ('car:upgraded' below)
   debug.log(`car finished: ${record.name}, Quality ${record.result.quality}, ${record.days} days`);
+  const onGarage = router.currentName === 'garage';
+  if (onGarage) garage.reveal();
+  pendingCar = { number: record.number, wait: onGarage ? 2.6 : 0 };
+});
+// Milestone 30b: a finished upgrade — the same reveal on the bay, then its car's screen.
+bus.on('car:upgraded', ({ record }) => {
+  if (!record) return;
+  debug.log(`car upgraded: ${record.name}, Quality ${record.result.quality}`);
   const onGarage = router.currentName === 'garage';
   if (onGarage) garage.reveal();
   pendingCar = { number: record.number, wait: onGarage ? 2.6 : 0 };
@@ -617,6 +626,8 @@ const toGarage = () => router.currentName !== 'garage' && router.go('garage');
 const MENU_OPEN = {
   pitBay: () => openMenu('F02'),
   carBuilder: () => (sheet.close(), goBuilder()),
+  upgradeProject: () => openMenu('upgradePick'), // Milestone 30b
+  researchPrototype: () => (sheet.close(), goBuilder({ mode: 'prototype' })),
   carGarage: () => (sheet.close(), goCarGarage()),
   roster: () => (sheet.close(), goRoster()),
   hire: () => goRecruit(),
@@ -664,6 +675,9 @@ function openMenuRow(id) {
 function menuState(id) {
   if (!teamReady) return {};
   if (id === 'carBuilder' && team.cars.active) return { locked: 'A car is already being built (Pit Bay)' };
+  // Milestone 30b
+  if (id === 'upgradeProject') { const why = team.cars.active ? 'A car is already being built' : !team.cars.cars.count ? 'Build a car first' : team.cars.cars.list().every((r) => team.upgradeWhy(r.number)) ? team.upgradeWhy(team.cars.cars.latest().number) : null; return why ? { locked: why } : {}; }
+  if (id === 'researchPrototype') { const why = team.cars.active ? 'A car is already being built' : team.prototypeWhy(); return why ? { locked: why } : {}; }
   if (id === 'train' && !team.training.open()) return { locked: team.training.lockedText };
   if (id === 'raceWeekend' && !team.races.current && !team.races.canRace) return { locked: 'Build a car first (Pit Bay)' };
   if (id === 'store') return { badge: team.items.count || null, sub: `${team.items.count} of ${team.items.max} · kit that raises a stat for good` };
@@ -1176,14 +1190,14 @@ const carBuilderScreen = createCarBuilderScreen({
   debugEnabled: debug.enabled, // ?debug=1: unlock-all and a random legal car (Milestone 9)
   refuse: (r) => refuse(r), // Milestone 29
   onStart: (opts) => {
-    const r = team.startCar(opts); // pays for the parts (Milestone 5)
+    const r = opts.mode === 'upgrade' ? team.startUpgrade(opts) : team.startCar(opts); // pays for the parts (Milestone 5) (Milestone 30b: or the upgrade)
     debug.log(r.ok ? `car started: ${r.job.name} (${opts.budget}, ${r.job.data.tier}, parts ${r.job.data.parts.join(' ')}, team ${opts.staffIds.join(', ')})` : `car not started: ${r.reason}`);
     if (!r.ok) return toast(r.reason);
     router.go('garage');
     garage.focusPitBay?.();
   },
 });
-const carResultScreen = createCarResultScreen({ layout, assets, team, topBar: screenBar, goCarGarage, debugEnabled: debug.enabled, toast: (x) => toast(x) });
+const carResultScreen = createCarResultScreen({ layout, assets, team, topBar: screenBar, goCarGarage, goUpgrade: (carNumber) => goBuilder({ mode: 'upgrade', carNumber }), debugEnabled: debug.enabled, toast: (x) => toast(x) });
 const carGarageScreen = createCarGarageScreen({ layout, assets, team, topBar: screenBar, goCar });
 const researchScreen = createResearchScreen({ layout, assets, team, topBar: screenBar, toast: (a, b) => toast(a, b), debugEnabled: debug.enabled }); // Milestone 11
 const raceIntroScreen = createRaceIntroScreen({ layout, assets, team, topBar: screenBar, onStart: startRace });

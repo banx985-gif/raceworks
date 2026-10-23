@@ -21,11 +21,12 @@
 // api: rp · active · status(id) · why(id) · start(id) · stop() · perDay() · daysLeft() · fraction(id) · doneIds() ·
 //      has(id) · bonus(key) · bonusKeys() · flag(id) · tyreOpen(id) · unlocksOf(id) · secondQueue · complete(id) ·
 //      completeAll() · addRp(n, reason) · newGame() · serialize() · load(data)
+//      Milestone 30b: finishOne() (a Research Prototype's breakthrough); a finished Research Prototype's car RP × rpMult.
 // Events (core): 'research:start' / 'research:stop' / 'research:complete' { node, fired } / 'unlock:fired'.
 import { ResearchSystem } from '../../../../core/ResearchSystem.js';
 import { UnlockRunner } from '../../../../core/UnlockActions.js';
 import { RESEARCH, BRANCHES, RP_BALANCE, QUEUES } from '../../data/research.js';
-import { PARTS } from '../../data/cars.js';
+import { PARTS, PROJECT_TYPES } from '../../data/cars.js';
 import { FACILITIES } from '../../data/facilities.js';
 import { TYRES, TYRE_ORDER } from '../../data/race.js';
 
@@ -110,7 +111,8 @@ export function createResearch({ bus, team, R = RP_BALANCE }) {
     const r = record?.result;
     if (!r) return;
     const lines = [];
-    addRp(R.car.base + r.quality * R.car.perQuality, `Car finished: ${record.name}`, lines);
+    const proto = r.projectType === 'prototype'; // Milestone 30b: a Research Prototype's car RP × rpMult
+    addRp((R.car.base + r.quality * R.car.perQuality) * (proto ? PROJECT_TYPES.prototype.rpMult : 1), `${proto ? 'Research prototype' : 'Car'} finished: ${record.name}`, lines);
     first('carClass', r.classId, R.firsts.carClass, 'First car of this class', lines);
     if (r.parts) first('combo', `${r.classId}:${r.parts.join('+')}`, R.firsts.combo, 'New class and parts combination', lines);
     record.rp = lines.reduce((t, l) => t + l.amount, 0);
@@ -202,6 +204,13 @@ export function createResearch({ bus, team, R = RP_BALANCE }) {
     },
     completeAll() {
       for (const x of topoOrder()) system.complete(x);
+    },
+    // Milestone 30b: a Research Prototype's breakthrough finishes one node outright, free — the one being researched,
+    // else the cheapest one open now (ties by id). → its id, or null when nothing is open.
+    finishOne() {
+      system.rp = team.money.rp;
+      const id = api.active ?? Object.keys(NODE).filter((x) => system.status(x) === 'available').sort((a, b) => system.costOf(a) - system.costOf(b) || (a < b ? -1 : 1))[0] ?? null;
+      return id && system.complete(id) ? id : null;
     },
 
     // --- a new team, save / load -------------------------------------------------------------------------------------

@@ -60,7 +60,7 @@ export function createChampionships({ bus, team }) {
     // A finished car of a class the championship takes (the newest one), or null.
     eligibleCar(id) {
       const c = champById(id);
-      const cars = team.cars.cars.list().filter((r) => c.classes.includes(CLASSES[r.result?.classId]?.tag));
+      const cars = team.cars.raceable().filter((r) => c.classes.includes(CLASSES[r.result?.classId]?.tag)); // (Milestone 30b: not one in the bay)
       return cars[cars.length - 1] ?? null;
     },
     // Why you can't enter it now (null = you can): unlock, one at a time, a car of its classes, a race going, the fee.
@@ -127,7 +127,9 @@ export function createChampionships({ bus, team }) {
       if (!n.ready) return { ok: false, reason: `Round ${n.index + 1} is in ${n.daysAway} day${n.daysAway === 1 ? '' : 's'}` };
       const cur = team.races.current;
       if (cur) return cur.champ?.id === api.current.id && cur.champ.round === n.index ? { ok: true, race: cur, existing: true } : { ok: false, reason: 'Finish the race weekend in progress first' };
-      const carNumber = team.cars.cars.get(api.current.carNumber) ? api.current.carNumber : api.eligibleCar(api.current.id)?.number;
+      // (Milestone 30b: the season's car while it is in the bay being upgraded → another car of its classes, if any)
+      const own = team.cars.cars.get(api.current.carNumber) && !team.cars.inBay(api.current.carNumber);
+      const carNumber = own ? api.current.carNumber : (api.eligibleCar(api.current.id)?.number ?? api.current.carNumber);
       return team.races.createWeekend({ carNumber, config: api.raceConfig() });
     },
     // A round is over (bus race:finished): points (and the fastest lap's), the standings, the next round's day; the title

@@ -49,7 +49,7 @@ export const TEAM_FACTS = {
 };
 
 const blank = () => Object.fromEntries(CAREER_KEYS.map((k) => [k, 0]));
-const blankFacts = () => ({ raceStarts: 0, wins: 0, podiums: 0, poles: 0, setup80: 0, gained5: 0, cleanFinishes: 0, carsBuilt: 0, classWins: [], trackWins: {}, strategySwingWins: 0, undercutWins: 0, extendedStintWins: 0, neutralisationBenefits: 0, wetWins: 0, weatherTyreChanges: 0, raceFaultRepairs: 0, cautionBenefits: 0, stintsDriven: 0, stintOvertakes: 0, stintGains: 0, bestStintDelta: null, technicalPodiums: 0, titles: 0, seasonPodiums: 0 });
+const blankFacts = () => ({ raceStarts: 0, wins: 0, podiums: 0, poles: 0, setup80: 0, gained5: 0, cleanFinishes: 0, carsBuilt: 0, classWins: [], trackWins: {}, strategySwingWins: 0, undercutWins: 0, extendedStintWins: 0, neutralisationBenefits: 0, wetWins: 0, weatherTyreChanges: 0, raceFaultRepairs: 0, cautionBenefits: 0, stintsDriven: 0, stintOvertakes: 0, stintGains: 0, bestStintDelta: null, technicalPodiums: 0, titles: 0, seasonPodiums: 0, prototypesBuilt: 0, upgradesDone: 0 }); // (Milestone 30b: the last two)
 
 export function createCareers({ bus, team }) {
   const api = {
@@ -150,8 +150,10 @@ export function createCareers({ bus, team }) {
   bus.on('project:complete', ({ record }) => {
     if (!record) return;
     api.facts.carsBuilt++;
+    if (record.result?.projectType === 'prototype') api.facts.prototypesBuilt++; // Milestone 30b
     for (const m of record.team ?? []) api.credit(m.id, 'carsBuilt');
   });
+  bus.on('car:upgraded', () => api.facts.upgradesDone++); // Milestone 30b (an upgrade is not a car built)
   bus.on('race:finished', ({ race }) => api.raceFinished(race));
   // Milestone 20: a season over — a title, a podium in the final standings
   bus.on('championship:finished', ({ record }) => {

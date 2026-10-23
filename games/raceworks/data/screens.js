@@ -1,6 +1,7 @@
 // Milestone 29 (the screen / UX pass): the words of the screens and sheets added or tidied in this milestone — the main
 // menu, the Store placeholder, Back (leaving the garage, the race pause sheet), a failed save, Credits, and the empty
 // states every list shows. Plain data only.
+import { CREDITS } from './credits.js'; // Milestone 30b
 
 // The main menu (bible §7: Continue · New Game · New Game+ · Records · Settings · Credits / Legal; plus Load and Help).
 export const MAIN_MENU_TEXT = {
@@ -53,27 +54,12 @@ export const SAVE_TEXT = {
   quietMs: 20000, // at most one toast this often
 };
 
-// Credits / Legal (the main menu, Settings): the studio logo, then the roll.
+// Credits / Legal (the main menu, Settings): the studio logo, then the roll (Milestone 30b: the names live in
+// data/credits.js, for Aaron to edit).
 export const CREDITS_TEXT = {
   title: 'Credits',
   legal: 'Privacy & legal',
-  blocks: [
-    { heading: 'RACEWORKS' },
-    { line: 'A Canvas Management Series game' },
-    { gap: 40 },
-    { heading: 'Made by' },
-    { line: 'Aaron — Banx Games' },
-    { gap: 30 },
-    { heading: 'Art' },
-    { line: 'Aaron' },
-    { gap: 30 },
-    { heading: 'Code' },
-    { line: 'Claude Code' },
-    { gap: 30 },
-    { heading: 'Thank you' },
-    { line: 'for playing!' },
-    { gap: 120 },
-  ],
+  blocks: CREDITS,
 };
 
 // Empty states (bible §7 / M29): every list says, in plain words, why it is empty and what to do next.

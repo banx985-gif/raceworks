@@ -170,6 +170,8 @@ export const EVENTS = [
   { id: 'EV_COMBO', cls: 'secret', size: 'minor', trigger: { type: 'fact', fact: 'combo' }, cooldownDays: 0, look: 'combo', title: 'Combo discovered!', text: '{combo}: the recipe is in the Combo Archive (+{rp} RP).', effects: [] },
   { id: 'EV_CLUE', cls: 'secret', size: 'minor', trigger: { type: 'fact', fact: 'clue' }, cooldownDays: 0, title: 'A rumour in the paddock', text: '{clue}', effects: [] },
   { id: 'EV_OFFERS', cls: 'financial', size: 'minor', trigger: { type: 'calendar', on: 'month' }, cooldownDays: 0, title: 'New offers', text: '{offers}', effects: [] },
+  // Milestone 30b: the first Research Prototype finished (fired once by src/systems/events.js)
+  { id: 'EV_FIRST_PROTOTYPE', cls: 'car', size: 'minor', trigger: { type: 'fact', fact: 'firstPrototype' }, once: true, cooldownDays: 0, title: 'First research prototype', text: '{car} rolls out of the Prototype Bay. Half the paddock wants to know what you learned.', effects: [] },
   { id: 'EV_RESCUE', cls: 'financial', size: 'minor', trigger: { type: 'fact', fact: 'debt' }, cooldownDays: 0, title: 'Rescue job offered', text: 'Cash is below 0. A rescue job is on the contract board (Money → Contracts): it lets you build one car.', effects: [] },
   // Milestone 24: the secret engine's clue stages (a rumour) and a secret found (its exact recipe)
   { id: 'EV_SECRET_CLUE', cls: 'secret', size: 'minor', trigger: { type: 'fact', fact: 'secretClue' }, cooldownDays: 0, title: 'A rumour in the paddock', text: '{clue}', effects: [] },

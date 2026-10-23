@@ -7,6 +7,8 @@ export const MENU_GROUPS = [
     row('buildSheet', 'Build', 'New car, the car being built, the Car Garage and facilities', 'race_ui_01'), // Milestone 29
     row('pitBay', 'Pit Bay', 'Start a car and watch it being built', 'race_ui_01'),
     row('carBuilder', 'Car builder', 'Choose a class, parts and crew for a new car', 'race_ui_01'),
+    row('upgradeProject', 'Upgrade a car', 'Rework one or two parts of a car you have', 'race_ui_01'), // Milestone 30b
+    row('researchPrototype', 'Research prototype', 'A costly research car: Rank B and the Prototype Bay', 'race_ui_03'), // Milestone 30b
     row('carGarage', 'Car Garage', 'Every car you have finished', 'race_ui_01'),
   ] },
   { title: 'Staff', rows: [
@@ -64,7 +66,7 @@ export const FACILITY_ACTIONS = {
   F01: CAR, F02: CAR, F03: CAR, F04: CAR, F05: CAR, F06: CAR, F07: { row: 'raceWeekend', label: 'Race weekend' }, F08: CAR, F09: CAR, F10: CAR,
   F11: RESEARCH, F12: TRAIN, F13: { row: 'store', label: 'Parts Store' }, F14: { row: 'carGarage', label: 'Car Garage' }, F15: { row: 'sponsors', label: 'Sponsors' },
   F16: RESEARCH, F17: RESEARCH, F18: CAR, F19: CAR, F20: RESEARCH, F21: CAR, F22: { row: 'raceWeekend', label: 'Race weekend' }, F23: { row: 'raceWeekend', label: 'Race weekend' },
-  F24: RESEARCH, F29: { row: 'rumourArchive', label: 'Rumour Archive' }, F30: CAR, F32: { row: 'championships', label: 'Championships' }, F33: { row: 'raceWeekend', label: 'Race weekend' }, F34: RESEARCH, F35: CAR,
+  F24: RESEARCH, F29: { row: 'rumourArchive', label: 'Rumour Archive' }, F30: { row: 'researchPrototype', label: 'Research prototype' }, F32: { row: 'championships', label: 'Championships' }, F33: { row: 'raceWeekend', label: 'Race weekend' }, F34: RESEARCH, F35: CAR,
   REST: { row: 'roster', label: 'Roster' },
 };
 
@@ -81,11 +83,13 @@ export const NEXT_HINTS = {
   upgrade: 'A station can be upgraded: tap for Build Mode',
 };
 
-// The Build sheet (bible §7 Build Sheet: New Car · Upgrade Project · Research Prototype · Active Builds · Car Garage). The
-// two project types not built yet (bible §14.1) are shown greyed until a later update (Milestone 29).
+// The Build sheet (bible §7 Build Sheet; Milestone 30b: all four §14.1 project types): New Car · Upgrade · Research
+// Prototype · Development Contract · Active Builds · Car Garage. Each row opens the Menu row of the same id.
 export const BUILD_SHEET = {
-  later: [
-    { id: 'upgradeProject', label: 'Upgrade project', line: 'Rework a car’s parts · coming in a later update' },
-    { id: 'researchPrototype', label: 'Research prototype', line: 'Rank B experiments · coming in a later update' },
+  rows: [
+    { id: 'carBuilder', label: 'New car', line: 'Pit Bay · choose a class and parts', icon: 'race_ui_01' },
+    { id: 'upgradeProject', label: 'Upgrade', line: 'Pit Bay · rework one or two parts of a car', icon: 'race_ui_01' },
+    { id: 'researchPrototype', label: 'Research prototype', line: 'Prototype Bay · costly, big research payoff', icon: 'race_ui_03' },
+    { id: 'contracts', label: 'Development contract', line: 'Build or deliver a car for Credits and RP', icon: 'race_ui_05' },
   ],
 };

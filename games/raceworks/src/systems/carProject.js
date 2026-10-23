@@ -32,7 +32,15 @@
 import { ProjectSystem } from '../../../../core/ProjectSystem.js';
 import { AssignmentSystem } from '../../../../core/AssignmentSystem.js';
 import { JobHistory } from '../../../../core/JobHistory.js';
-import { CAR_STATS, CAR_STAT_MAX, PARTS, SLOTS, CLASSES, PHASES, BUDGETS, PROJECT } from '../../data/cars.js';
+// Milestone 30b: the project types (data/cars.js PROJECT_TYPES) — job.data.projectType 'newCar' | 'upgrade' | 'prototype'
+//   (an older save's jobs and cars load as 'newCar'; every finished car's result carries its projectType).
+//   startUpgrade({ carNumber, parts, … }) a Major Upgrade: the car's class and its development so far (devFromCar), one
+//                   or two slots reworked; the work per phase and each phase's development are perSlot × slots of a new
+//                   build's. On finish the car's own record is changed in place (new parts, Quality re-rolled, combos
+//                   checked again, an entry in rec.upgrades) — no new car — and 'car:upgraded' { job, record } follows
+//                   'project:complete' (which carries no record for an upgrade). inBay(number): that car can't race.
+//   prototype       the daily fault chance × faultMult; each breakthrough may finish a research node (finishResearch()).
+import { CAR_STATS, CAR_STAT_MAX, PARTS, SLOTS, CLASSES, PHASES, BUDGETS, PROJECT, PROJECT_TYPES, projectTypeOf } from '../../data/cars.js';
 import { partsCost, tierFor, checkCar, carCost } from './carCatalog.js';
 import { resolveFamily } from './carVisual.js';
 import { ROLES, TRAITS } from '../../data/staff.js';
@@ -74,11 +82,40 @@ export function finalCar({ classId, parts, dev = {}, faults = [], innovation = 0
   return { stats, classFit, rating: Math.round(clamp(classFit, 0, 999)), developmentScore, quality, faults: open.length };
 }
 
-export function createCarProjects({ bus, rng, staff, isResting = () => false, today = () => 0, stationIds = () => [], perkOf = () => null, facilities = () => null, busyElsewhere = () => null, combosFor = null }) {
+// Milestone 30b: a finished car's development points per stat, worked back from its record (its stats less the class
+// base, the parts and its combo bonuses, plus what its open faults took) — where a Major Upgrade starts from.
+export function devFromCar(rec) {
+  const r = rec.result;
+  const cls = CLASSES[r.classId];
+  const open = (r.faultList ?? []).filter((f) => !f.fixed);
+  const dev = {};
+  for (const k of CAR_STATS) {
+    let v = (r.stats?.[k] ?? 0) - cls.base[k] - (r.comboStats?.[k] ?? 0);
+    for (const id of r.parts) v -= PARTS[id].mods[k] ?? 0;
+    v += open.filter((f) => f.stat === k).length * PROJECT.faults.statLoss;
+    dev[k] = Math.max(0, v);
+  }
+  return dev;
+}
+// The slots a new recipe changes on a car.
+export const changedSlots = (oldParts, parts) => SLOTS.filter((sl, i) => oldParts[i] !== parts[i]).map((sl) => sl.id);
+
+export function createCarProjects({ bus, rng, staff, isResting = () => false, today = () => 0, stationIds = () => [], perkOf = () => null, facilities = () => null, busyElsewhere = () => null, combosFor = null, finishResearch = () => null }) {
   let projects = null;
   // busyElsewhere(id) → reason | null (Milestone 12: someone away on a training course can't join the car's team).
   const assignments = new AssignmentSystem({ staff, getJobs: () => projects.jobs, bus, otherBusyIds: stationIds, busyElsewhere });
   const cars = new JobHistory({ bus });
+  // Milestone 30b: a finished upgrade changes its car's own record instead of adding a car (core ProjectSystem's history).
+  const history = {
+    add(record) {
+      if (record.type !== 'upgrade') return cars.add(record);
+      applyUpgrade(record);
+      return null;
+    },
+  };
+  bus.on('project:complete', ({ job }) => {
+    if (job?.type === 'upgrade') bus.emit('car:upgraded', { job, record: cars.get(job.data.carNumber) });
+  });
 
   const budgetOf = (job) => BUDGETS[job.data.budget];
   const phaseDef = (phase) => PHASES.find((p) => p.id === phase.id);
@@ -120,6 +157,7 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
         pct *= 1 + budgetOf(job).faultPct / 100;
         pct *= 1 + traitPct(job, 'faultPct') / 100;
         pct *= 1 + founderFaultPct(job, def) / 100;
+        if (projectTypeOf(job.data) === 'prototype') pct *= PROJECT_TYPES.prototype.faultMult; // Milestone 30b
         if (rng.chance(pct / 100)) addFault(job, def);
       }
       if (def.fixes) {
@@ -138,13 +176,14 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
     },
     onPhaseComplete(job, phase, summary) {
       const def = phaseDef(phase);
-      const pts = summary.avgScore * PROJECT.development.pointsPerScore * (1 + budgetOf(job).qualityPct / 100);
+      const pts = summary.avgScore * PROJECT.development.pointsPerScore * (1 + budgetOf(job).qualityPct / 100) * (job.data.devScale ?? 1); // (Milestone 30b: an upgrade's share)
       addDevelopment(job, def, pts);
     },
     onComplete(job) {
       const sums = job.phaseSummaries;
       const avgScore = sums.length ? sums.reduce((t, p) => t + p.avgScore, 0) / sums.length : 0;
-      for (const [k, v] of Object.entries(facilities()?.devBonus() ?? {})) if (v) job.data.dev[k] = (job.data.dev[k] ?? 0) + v;
+      // (Milestone 30b: an upgraded car already carries its facility bonus in the development it started from)
+      if (job.type !== 'upgrade') for (const [k, v] of Object.entries(facilities()?.devBonus() ?? {})) if (v) job.data.dev[k] = (job.data.dev[k] ?? 0) + v;
       let car = finalCar({ classId: job.data.classId, parts: job.data.parts, dev: job.data.dev, faults: job.data.faults, innovation: job.data.innovation, avgScore });
       // Milestone 22: the combos, on the car as it is; their stat bonuses go in as development points
       const cb = combosFor?.(job, car) ?? { ids: [], stats: {}, near: [] };
@@ -175,10 +214,29 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
         baseCost: CLASSES[job.data.classId].baseCost,
         startedDay: job.data.startedDay,
         finishedDay: today(),
+        projectType: projectTypeOf(job.data), // Milestone 30b
+        ...(job.type === 'upgrade' ? { carNumber: job.data.carNumber, upgradeCost: job.data.cost } : {}),
+        ...(job.data.researchDone?.length ? { researchDone: [...job.data.researchDone] } : {}),
       };
     },
     now: () => today(),
   };
+
+  // Milestone 30b: a finished Major Upgrade on its car's record — the new parts, stats and Quality; the original build's
+  // days, team and phases stay; its breakthroughs are added to the car's; rec.upgrades keeps what each upgrade did.
+  function applyUpgrade(record) {
+    const rec = cars.get(record.result.carNumber);
+    if (!rec) return null;
+    const old = rec.result;
+    const { carNumber, upgradeCost, ...res } = JSON.parse(JSON.stringify(record.result));
+    const slots = changedSlots(old.parts, res.parts);
+    (rec.upgrades ??= []).push({
+      day: today(), days: record.days, slots, from: slots.map((id) => old.parts[SLOTS.findIndex((s) => s.id === id)]), to: slots.map((id) => res.parts[SLOTS.findIndex((s) => s.id === id)]),
+      qualityBefore: old.quality, qualityAfter: res.quality, team: record.team, cost: upgradeCost ?? null,
+    });
+    rec.result = { ...res, projectType: projectTypeOf(old), startedDay: old.startedDay, finishedDay: old.finishedDay, breakthroughs: [...(old.breakthroughs ?? []), ...res.breakthroughs], upgradedDay: today() };
+    return rec;
+  }
 
   function addFault(job, def) {
     const fault = { id: job.data.faults.length + 1, phase: def.id, stat: Object.keys(def.develops)[0], day: today(), fixed: false };
@@ -209,6 +267,14 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
     }
     job.data.innovation += PROJECT.breakthrough.innovation;
     const b = { phase: def.id, day: today(), kind };
+    // Milestone 30b: a Research Prototype's breakthrough may finish a research node outright
+    if (projectTypeOf(job.data) === 'prototype' && rng.chance(PROJECT_TYPES.prototype.researchPct / 100)) {
+      const node = finishResearch(job);
+      if (node) {
+        b.research = node;
+        (job.data.researchDone ??= []).push(node);
+      }
+    }
     job.data.breakthroughs.push(b);
     bus.emit('car:breakthrough', { job, breakthrough: b });
     return b;
@@ -218,7 +284,7 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
     bus,
     staff,
     assignments,
-    history: cars,
+    history, // (Milestone 30b: cars, but an upgrade changes its car)
     phases: PHASES.map((p) => ({ id: p.id, name: p.name, weights: p.weights })),
     rules: { progressBase: PROJECT.progress.base, progressDivisor: PROJECT.progress.divisor, progressScale: PROJECT.progress.scale, checkpoints: [PROJECT.checkpoint] },
     hooks,
@@ -233,23 +299,57 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
     },
     // Start a car: class, its six parts (default: the Start parts), budget focus, the team (staff ids, up to 5).
     // Only the car's shape is checked here; whether the team may build it is Team.canStartCar (carCatalog).
-    start({ classId = 'clubHatch', parts = null, budget = 'balanced', staffIds = [] }) {
+    // Milestone 30b: projectType 'newCar' or 'prototype' (a Research Prototype: its name says so).
+    start({ classId = 'clubHatch', parts = null, budget = 'balanced', staffIds = [], projectType = 'newCar' }) {
       if (api.active) return { ok: false, reason: 'A car is already being built' };
       parts = parts ? [...parts] : partsOf(classId);
       const shape = checkCar({ classId, parts });
       if (!shape.ok) return { ok: false, reason: shape.reasons[0] };
       const tier = tierFor(parts);
+      const proto = projectType === 'prototype';
       const job = projects.createJob({
         type: 'car',
-        name: `${CLASSES[classId].name} #${cars.count + 1}`,
+        name: `${CLASSES[classId].name}${proto ? ' Prototype' : ''} #${cars.count + 1}`,
         phaseTarget: tier.target,
         slots: PROJECT.teamSlots,
-        data: { classId, parts, tier: tier.id, cost: carCost({ classId, parts }), budget, nextBudget: null, budgets: [], faults: [], dev: {}, innovation: 0, breakthroughs: [], startedDay: today() },
+        data: { projectType: proto ? 'prototype' : 'newCar', classId, parts, tier: tier.id, cost: Math.round(carCost({ classId, parts }) * (proto ? PROJECT_TYPES.prototype.costMult : 1)), budget, nextBudget: null, budgets: [], faults: [], dev: {}, innovation: 0, breakthroughs: [], startedDay: today() },
       });
       for (const id of staffIds.slice(0, PROJECT.teamSlots)) assignments.assign(job, id);
       projects.start(job);
       return { ok: true, job };
     },
+    // Milestone 30b: the work and development share of a Major Upgrade that reworks n slots.
+    upgradeShare: (n) => PROJECT_TYPES.upgrade.perSlot * n,
+    // A Major Upgrade (bible §14.1) of finished car `carNumber` to `parts` (the same class; one or two slots changed).
+    // Only the shape is checked here (Team.canUpgrade checks the rest).
+    startUpgrade({ carNumber, parts, budget = 'balanced', staffIds = [], cost = null }) {
+      if (api.active) return { ok: false, reason: 'A car is already being built' };
+      const rec = cars.get(carNumber);
+      if (!rec?.result) return { ok: false, reason: 'No such car' };
+      const classId = rec.result.classId;
+      const slots = changedSlots(rec.result.parts, parts ?? []);
+      const shape = checkCar({ classId, parts });
+      if (!shape.ok) return { ok: false, reason: shape.reasons[0] };
+      if (!slots.length || slots.length > PROJECT_TYPES.upgrade.maxSlots) return { ok: false, reason: `Change one or ${PROJECT_TYPES.upgrade.maxSlots} part slots` };
+      const tier = tierFor(parts);
+      const share = api.upgradeShare(slots.length);
+      const r = rec.result;
+      const carried = (r.faultList ?? []).filter((f) => !f.fixed).map((f, i) => ({ ...f, id: i + 1, carried: true })); // its open faults come into the bay
+      const job = projects.createJob({
+        type: 'upgrade',
+        name: `Upgrade: ${rec.name}`,
+        phaseTarget: Math.round(tier.target * share),
+        slots: PROJECT.teamSlots,
+        data: { projectType: 'upgrade', carNumber, classId, parts: [...parts], oldParts: [...r.parts], slots, devScale: share, tier: tier.id, cost: cost ?? Math.round(carCost({ classId, parts }) * share), budget, nextBudget: null, budgets: [], faults: carried, dev: devFromCar(rec), innovation: r.innovation ?? 0, breakthroughs: [], startedDay: today() },
+      });
+      for (const id of staffIds.slice(0, PROJECT.teamSlots)) assignments.assign(job, id);
+      projects.start(job);
+      return { ok: true, job };
+    },
+    // Milestone 30b: a car in the bay (being upgraded) can't race.
+    inBay: (number) => !!number && projects.jobs.some((j) => j.type === 'upgrade' && j.data.carNumber === number),
+    raceable: () => cars.list().filter((r) => !api.inBay(r.number)),
+    typeOf: (job) => projectTypeOf(job?.data),
     // Budget focus for the next phase (bible §14.7: it only changes between phases).
     setNextBudget(job, budget) {
       job.data.nextBudget = budget === job.data.budget ? null : budget;
@@ -274,9 +374,12 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
       return breakthrough(job, PHASES[job.phaseIndex]);
     },
     serialize: () => ({ projects: projects.serialize(), cars: cars.serialize() }),
+    // (Milestone 30b: an older save's jobs and cars are all 'newCar')
     load(s) {
       projects.load(s?.projects);
       cars.load(s?.cars);
+      for (const j of projects.jobs) j.data.projectType ??= 'newCar';
+      for (const r of cars.list()) if (r.result) r.result.projectType ??= 'newCar';
     },
   };
   return api;

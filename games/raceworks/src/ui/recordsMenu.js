@@ -4,7 +4,7 @@
 //            the day and reward; the others with their requirement)
 //   Team     titles, wins, podiums, poles, fastest laps, money peak; best finish and top speed per track
 //   Staff    every person's career (Milestone 13): races, wins, podiums, cars built, years
-//   Cars     best QUALITY, wins by car family
+//   Cars     best QUALITY, cars built / Research prototypes / upgrades (Milestone 30b), wins by car family
 //   Races    lap records per track, the longest run without a retirement, the prestige records (empty until earned)
 //   Medals   the training medals per drill (Milestone 14, account-wide) and the Drive Stint records
 // Each record shows this team's value and the best on this device. Nothing here tells how many secrets exist or are
@@ -97,6 +97,8 @@ export function recordsMenu({ team, open = () => {}, menuRow = () => {} }) {
   const famKeys = keyed('familyWins');
   const carsTab = [
     { lines: [{ text: `Best car QUALITY — ${T.thisTeam}: ${q.team == null ? T.empty : `${q.team}${q.teamInfo?.car ? ` (${q.teamInfo.car})` : ''}`} · ${T.device}: ${q.device == null ? T.empty : `${q.device}${q.deviceInfo?.car ? ` (${q.deviceInfo.car})` : ''}`}`, color: q.team != null && q.team === q.device ? C.good : undefined }] },
+    // Milestone 30b: the project types on the career record (this team)
+    { lines: [`Cars built — ${num(team.careers.facts.carsBuilt)} · Research prototypes — ${num(team.careers.facts.prototypesBuilt)} · Upgrades — ${num(team.careers.facts.upgradesDone)}`] },
     { title: 'Wins by car family', lines: famKeys.length ? famKeys.map((f) => line(FAMILY_NAMES[f] ?? f, A.record('familyWins', f))) : ['No wins yet.'] },
   ];
 

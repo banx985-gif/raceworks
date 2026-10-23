@@ -7,6 +7,9 @@
 // With ?debug=1: "Debug: unlock all" opens every class, part and tier (secret parts too) so any legal car can be built,
 // and "Random legal car" picks one. Research (Milestone 11) will unlock things properly.
 // Tap a person in a team slot to take them off; tap someone under "Available" to put them on.
+// Milestone 30b: enter({ mode }) — 'newCar' (above), 'prototype' (a Research Prototype: the same choices, its price
+// × costMult, Rank B + the Prototype Bay) or 'upgrade' with carNumber (a Major Upgrade: the car's class is kept, one or two
+// slots may change — a third is refused —, its price and days are perSlot × slots of a new build of the new recipe).
 import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
@@ -15,9 +18,9 @@ import { text, para, panel as drawPanel, tabRects, drawTabs, listRow, listRowHei
 import { pressedLook } from '../ui/pressable.js';
 import { liveryKey, teamColourId } from '../ui/livery.js';
 import { structuralCombos } from '../systems/combos.js'; // Milestone 22
-import { CLASSES, CLASS_ORDER, PARTS, SLOTS, BUDGETS, BUDGET_ORDER, PHASES, PROJECT, CAR_STATS } from '../../data/cars.js';
+import { CLASSES, CLASS_ORDER, PARTS, SLOTS, BUDGETS, BUDGET_ORDER, PHASES, PROJECT, CAR_STATS, PROJECT_TYPES } from '../../data/cars.js';
 import { ROLES } from '../../data/staff.js';
-import { partsOf, leadRole, finalCar } from '../systems/carProject.js';
+import { partsOf, leadRole, finalCar, changedSlots } from '../systems/carProject.js';
 import { unlockContext, classState, partsForSlot, tierFor, tierState, carCost, partsCost, generateCar, checkCar } from '../systems/carCatalog.js';
 import { visualFamily } from '../systems/carVisual.js';
 import { COSTS } from '../../data/economy.js';
@@ -46,6 +49,10 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
   let hits = [];
   let openList = null; // 'class' | a slot id | null: which choice list is open
   let debugAll = false;
+  let mode = 'newCar'; // Milestone 30b: 'newCar' | 'prototype' | 'upgrade'
+  let carNumber = null; // the car an upgrade reworks
+  const upgradeCar = () => (mode === 'upgrade' ? team.cars.cars.get(carNumber) : null);
+  const nChanged = () => (upgradeCar() ? changedSlots(upgradeCar().result.parts, parts).length : 0);
   const rng = new Rng(`builder:${Date.now()}`);
   const ctxNow = () => unlockContext(team, { debugAll });
 
@@ -59,7 +66,7 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
       let score = 0;
       for (const id of teamIds) score += p.workerScore(job, ph, team.get(id));
       const per = p._progress(score) * (1 + team.facilities.phaseSpeedPct(ph.id) / 100); // Milestone 10: facility phase speed
-      days += per > 0 ? Math.ceil(tier.target / per) : Infinity;
+      days += per > 0 ? Math.ceil((mode === 'upgrade' ? Math.round(tier.target * team.cars.upgradeShare(nChanged())) : tier.target) / per) : Infinity; // (Milestone 30b: an upgrade's share)
     }
     return days;
   }
@@ -86,8 +93,14 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
       if (pressable && !r.locked) pressedLook(ctx, rect);
     };
 
-    if (ctx) text(ctx, 'New car', 8, y, { size: S.title, bold: true });
+    if (ctx) text(ctx, mode === 'upgrade' ? `Upgrade: ${upgradeCar()?.name ?? ''}` : mode === 'prototype' ? 'Research prototype' : 'New car', 8, y, { size: S.title, bold: true, maxWidth: w - 16 });
     y += 84;
+    // Milestone 30b: what this project type is
+    if (mode !== 'newCar') {
+      const P = PROJECT_TYPES[mode];
+      const say = mode === 'upgrade' ? `Rework one or ${P.maxSlots} part slots of this car (its class stays). Each slot costs and takes ${Math.round(P.perSlot * 100)}% of a new build. The car can't race while it is in the bay.` : `A research car: ×${P.costMult} price, ×${P.faultMult} fault risk, ×${P.rpMult} RP when it is finished, and each breakthrough has a ${P.researchPct}% chance to finish a research topic outright.`;
+      y += para(ctx, say, 8, y, w - 16, { size: S.small, color: C.actionDark }) + 24;
+    }
 
     // --- debug unlock-all ---
     if (debugEnabled) {
@@ -104,7 +117,7 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
     }
 
     // --- Milestone 28: Legacy Car Blueprints (New Game+): the exact car again, once its class and parts are open ---
-    const blueprints = team.ngPlus?.blueprints ?? [];
+    const blueprints = mode === 'upgrade' ? [] : team.ngPlus?.blueprints ?? [];
     if (blueprints.length) {
       heading('Legacy blueprints');
       for (const b of blueprints) {
@@ -135,14 +148,14 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
         { text: `Weights · ${CAR_STATS.map((k) => `${k} ${cls.weights[k]}`).join(' · ')}`, size: S.small, color: C.textMuted },
         { text: `${cls.baseCost ? `Class cost ${fmt(cls.baseCost)} Credits` : 'No class cost'} · looks like ${vis.id}`, size: S.small, color: C.textMuted },
       ],
-      right: openList === 'class' ? 'Close' : 'Change',
+      right: mode === 'upgrade' ? 'Kept' : openList === 'class' ? 'Close' : 'Change',
       rightColor: C.progress,
       state: 'selected',
       artSize: 150,
     };
     const crh = listRowHeight(w, chosen);
     row(chosen, { x: 0, y, w, h: crh });
-    hits.push({ rect: { x: 0, y, w, h: crh }, id: 'class', onTap: () => (openList = openList === 'class' ? null : 'class') });
+    if (mode !== 'upgrade') hits.push({ rect: { x: 0, y, w, h: crh }, id: 'class', onTap: () => (openList = openList === 'class' ? null : 'class') }); // (an upgrade keeps the class)
     y += crh + 12;
     if (openList === 'class') {
       for (const id of CLASS_ORDER) {
@@ -165,16 +178,19 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
     y += 18;
 
     // --- parts ---
-    heading(`Parts · complexity ${tier.cx}`);
+    heading(mode === 'upgrade' ? `Parts · ${nChanged()} of ${PROJECT_TYPES.upgrade.maxSlots} slots reworked` : `Parts · complexity ${tier.cx}`);
     SLOTS.forEach((sl, i) => {
       const part = PARTS[parts[i]];
-      const r = { art: part.art, title: `${sl.name}: ${part.name}`, lines: [{ text: modsText(part.mods), size: S.small, color: C.progress, bold: true }], right: `${fmt(part.cost)} Cr · Cx ${part.cx}`, artSize: 110, state: openList === sl.id ? 'selected' : undefined };
+      const was = upgradeCar() && upgradeCar().result.parts[i] !== parts[i] ? PARTS[upgradeCar().result.parts[i]] : null; // Milestone 30b
+      const r = { art: part.art, title: `${sl.name}: ${part.name}`, lines: [{ text: modsText(part.mods), size: S.small, color: C.progress, bold: true }, ...(was ? [{ text: `Rework (was ${was.name}: pick it again to keep it)`, size: S.small, color: C.actionDark }] : [])], right: `${fmt(part.cost)} Cr · Cx ${part.cx}`, artSize: 110, state: openList === sl.id || was ? 'selected' : undefined };
       const rh = listRowHeight(w, r);
       const rect = { x: 0, y, w, h: rh };
       row(r, rect);
       hits.push({ rect, id: `slot_${sl.id}`, onTap: () => (openList = openList === sl.id ? null : sl.id) });
       y += rh + 12;
       if (openList === sl.id) {
+        const orig = upgradeCar()?.result.parts[i];
+        const full = mode === 'upgrade' && orig === parts[i] && nChanged() >= PROJECT_TYPES.upgrade.maxSlots; // a third slot is refused
         for (const opt of partsForSlot(sl.id, uc)) {
           if (opt.id === parts[i]) continue;
           const p = PARTS[opt.id];
@@ -184,6 +200,7 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
           row(or, orect);
           if (opt.open)
             choose(or, orect, () => {
+              if (full && opt.id !== orig) return refuse(`An upgrade reworks at most ${PROJECT_TYPES.upgrade.maxSlots} part slots`);
               parts = parts.map((x, j) => (j === i ? opt.id : x));
               openList = null;
             }, `part_${opt.id}`);
@@ -259,10 +276,15 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
     // --- totals and start ---
     heading('Total');
     const days = teamIds.length ? estimateDays() : Infinity;
-    const price = team.carPrice({ classId, parts });
-    const lines = [
+    const up = mode === 'upgrade' ? team.upgradePrice(carNumber, parts) : null; // Milestone 30b
+    const price = team.carPrice({ classId, parts, projectType: mode });
+    const lines = up ? [
+      { t: `${up.slots} slot${up.slots === 1 ? '' : 's'} × ${Math.round(PROJECT_TYPES.upgrade.perSlot * 100)}% of a new build (${fmt(up.full)}) = ${fmt(up.total)} Credits, paid at Start (you have ${fmt(team.money.credits)})` },
+      { t: `Running cost: ${fmt(Math.round(COSTS.carDaily * (1 + BUDGETS[budget].costPct / 100)))} Credits a day while it is in the bay (${BUDGETS[budget].name})` },
+      { t: teamIds.length && up.slots ? `About ${days} game days with this team` : !up.slots ? 'Pick a part to rework' : 'Nobody on the team: the upgrade would never finish' },
+    ] : [
       // Milestone 10: the price after the facilities' material cost bonus (the Parts Rack's −3%).
-      { t: `${price.shell ? `Class ${fmt(price.shell)} + parts ${fmt(price.parts)} = ${fmt(price.total)}` : `Parts: ${fmt(price.parts)}`} Credits, paid at Start${price.total !== carCost({ classId, parts }) ? ` (${fmt(carCost({ classId, parts }))} before your facilities' discount)` : ''} (you have ${fmt(team.money.credits)})` },
+      { t: `${price.shell ? `Class ${fmt(price.shell)} + parts ${fmt(price.parts)} = ${fmt(price.total)}` : `Parts: ${fmt(price.parts)}`} Credits, paid at Start${mode === 'prototype' ? ` (a research prototype: ×${PROJECT_TYPES.prototype.costMult})` : price.total !== carCost({ classId, parts }) ? ` (${fmt(carCost({ classId, parts }))} before your facilities' discount)` : ''} (you have ${fmt(team.money.credits)})` },
       { t: `Running cost: ${fmt(Math.round(COSTS.carDaily * (1 + BUDGETS[budget].costPct / 100)))} Credits a day while it is built (${BUDGETS[budget].name})` },
       { t: `${tier.name} project · complexity ${tier.cx} · ${tier.target} work per phase`, color: tierOk.open ? C.text : C.bad },
       { t: teamIds.length ? `About ${days} game days with this team (${(days / 28).toFixed(1)} months)` : 'Nobody on the team: the car would never be built' },
@@ -270,10 +292,11 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
     for (const l of lines) y += para(ctx, l.t, 8, y, w - 16, { size: S.body, color: l.color ?? C.text }) + 12;
     y += 16;
     const start = { x: 0, y, w, h: 130 };
-    const can = team.canStartCar({ classId, parts }, { debugAll });
+    const upWhy = mode === 'upgrade' ? team.upgradeWhy(carNumber, parts, { debugAll }) : null;
+    const can = mode === 'upgrade' ? { ok: !upWhy, reason: upWhy } : team.canStartCar({ classId, parts, projectType: mode }, { debugAll });
     if (ctx) drawButton(ctx, start, 'Start', { disabled: !teamIds.length || !can.ok });
     // (Milestone 29: a tap on a greyed Start says why in one line)
-    hits.push({ rect: start, id: 'start', onTap: () => (!teamIds.length ? refuse('Pick at least one person for the crew') : !can.ok ? refuse(can.reason) : onStart({ classId, parts: [...parts], budget, staffIds: [...teamIds], debugAll })) });
+    hits.push({ rect: start, id: 'start', onTap: () => (!teamIds.length ? refuse('Pick at least one person for the crew') : !can.ok ? refuse(can.reason) : onStart({ mode, carNumber, projectType: mode, classId, parts: [...parts], budget, staffIds: [...teamIds], debugAll })) }); // (Milestone 30b: mode)
     y += 130 + 16;
     if (!can.ok) y += para(ctx, can.reason, 8, y, w - 16, { size: S.small, color: C.bad }) + 14;
     y += 14;
@@ -302,6 +325,9 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
     get debugAll() {
       return debugAll;
     },
+    get mode() {
+      return mode;
+    },
     // Tests: set the car directly (still only startable when legal).
     setCar(car) {
       classId = car.classId;
@@ -326,9 +352,13 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
       }
       return { x: r.x + h.rect.x, y: r.y + h.rect.y - panel.scrollY, w: h.rect.w, h: h.rect.h };
     },
-    enter() {
-      classId = 'clubHatch';
-      parts = partsOf('clubHatch');
+    enter(params = {}) {
+      mode = ['prototype', 'upgrade'].includes(params.mode) ? params.mode : 'newCar'; // Milestone 30b
+      carNumber = mode === 'upgrade' ? params.carNumber ?? null : null;
+      const rec = upgradeCar();
+      if (mode === 'upgrade' && !rec) mode = 'newCar';
+      classId = rec ? rec.result.classId : 'clubHatch';
+      parts = rec ? [...rec.result.parts] : partsOf('clubHatch');
       budget = 'balanced';
       openList = null;
       teamIds = team.roster.filter((s) => !team.training.trainingOf(s.id)).map((s) => s.id).slice(0, PROJECT.teamSlots); // everyone here (not on a course), ready to go

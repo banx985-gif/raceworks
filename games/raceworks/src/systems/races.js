@@ -153,12 +153,24 @@ export function createRaces({ bus, team }) {
     w.repair = { choice: w.setup.repair, from: q.condition, to: me.condition, cost: paid, energy: paid ? q.energy : 0, mechanicId: paid ? q.mechanic?.id ?? null : null, unrepaired };
   }
 
+  // Milestone 30b: the car to race — the one asked for (refused while it is in the bay being upgraded), else the newest
+  // car not in the bay.
+  function raceCar(carNumber) {
+    if (carNumber) {
+      const rec = team.cars.cars.get(carNumber);
+      return rec && team.cars.inBay(carNumber) ? { inBay: ` is in the bay being upgraded` } : rec;
+    }
+    const list = team.cars.raceable();
+    return list[list.length - 1] ?? (team.cars.cars.count ? { inBay: 'Your car is in the bay being upgraded' } : null);
+  }
+
   const api = {
     current: null,
     history: [],
     count: 0,
+    // (Milestone 30b: a car being upgraded is in the bay and can't race)
     get canRace() {
-      return team.cars.cars.list().length > 0;
+      return team.cars.raceable().length > 0;
     },
     // A seed nobody chooses: the team, the day and the race number. Fixed from here on and saved.
     seedFor(n) {
@@ -166,7 +178,8 @@ export function createRaces({ bus, team }) {
     },
     createTestRace({ carNumber = null, config = TEST_RACE } = {}) {
       if (api.current) return { ok: true, race: api.current, existing: true };
-      const rec = carNumber ? team.cars.cars.get(carNumber) : team.cars.cars.latest();
+      const rec = raceCar(carNumber);
+      if (rec?.inBay) return { ok: false, reason: rec.inBay };
       if (!rec) return { ok: false, reason: 'Build a car first (Build → Pit Bay → New car)' };
       api.current = newRace('test', rec, config, TRACKS[config.trackId].laps);
       bus.emit('race:created', { race: api.current });
@@ -176,7 +189,8 @@ export function createRaces({ bus, team }) {
     // --- the race weekend (Milestone 7, bible §22; completed in Milestone 15) -------------------------------------
     createWeekend({ carNumber = null, config = TEST_RACE } = {}) {
       if (api.current) return { ok: true, race: api.current, existing: true };
-      const rec = carNumber ? team.cars.cars.get(carNumber) : team.cars.cars.latest();
+      const rec = raceCar(carNumber);
+      if (rec?.inBay) return { ok: false, reason: rec.inBay };
       if (!rec) return { ok: false, reason: 'Build a car first (Build → Pit Bay → New car)' };
       const w = newRace('weekend', rec, config, TRACKS[config.trackId]?.weekendLaps ?? WEEKEND.laps); // Milestone 19: the track's own race distance
       w.grid = null; // set by qualifying

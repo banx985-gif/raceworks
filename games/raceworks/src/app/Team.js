@@ -67,9 +67,9 @@ import { createCarProjects } from '../systems/carProject.js';
 import { BUDGETS } from '../../data/cars.js';
 import { createTeamMoney } from '../systems/economy.js';
 import { createRaces } from '../systems/races.js';
-import { partsOf, partsCost } from '../systems/carProject.js';
+import { partsOf, partsCost, changedSlots } from '../systems/carProject.js';
 import { unlockContext, checkCar } from '../systems/carCatalog.js';
-import { CLASSES } from '../../data/cars.js';
+import { CLASSES, PROJECT_TYPES, RANK_ORDER } from '../../data/cars.js';
 import { createGarageFacilities } from '../systems/garageFacilities.js';
 import { createResearch } from '../systems/research.js';
 import { createRecruitment } from '../systems/recruitment.js';
@@ -224,6 +224,7 @@ export class Team {
       facilities: () => this.facilities,
       busyElsewhere: (id) => (this.training?.trainingOf(id) ? 'Away on a training course' : null),
       combosFor: (job, prelim) => this.combos?.forCar(job, prelim) ?? null, // Milestone 22
+      finishResearch: () => this.research?.finishOne() ?? null, // Milestone 30b: a Research Prototype's breakthrough
     });
     this.money = createTeamMoney({ bus, seed, clock: this.clock, staff: this.staff, cars: this.cars, revealBonus: () => this.facilities.bonus('revealReputation'), generateOffer: (rng, taken) => contractTerms(this, rng, taken), onPaid: (c) => this.contractPaid(c), noCredit: () => this.hasModifier('noEmergency') }); // (Milestone 28: + the No Emergency Credit challenge) // (Milestone 21: the §29 contracts)
     // (Milestone 21: the sponsors' perks join the research bonuses in the one effect query)
@@ -373,37 +374,90 @@ export class Team {
   // the class's Start parts; a bare class id still works). The car must be legal for this team (src/systems/carCatalog:
   // an open class, open parts, an allowed tier) — debugAll (?debug=1 unlock-all) opens every class and part.
   // → { ok, job } or { ok: false, reason }.
+  // Milestone 30b: car.projectType 'prototype' = a Research Prototype (Rank B+ and the Prototype Bay instead of the Pit
+  // Bay; its price × costMult).
   canStartCar(car = {}, { debugAll = false } = {}) {
     if (typeof car === 'string') car = { classId: car };
     const classId = car.classId ?? 'clubHatch';
     const parts = car.parts ?? partsOf(classId);
+    const proto = car.projectType === 'prototype';
     if (this.cars.active) return { ok: false, reason: 'A car is already being built' };
-    if (this.facilities.bonus('carBays') < 1) return { ok: false, reason: 'Build a Pit Bay first' };
+    if (proto) {
+      const why = this.prototypeWhy();
+      if (why) return { ok: false, reason: why };
+    } else if (this.facilities.bonus('carBays') < 1) return { ok: false, reason: 'Build a Pit Bay first' };
     const legal = checkCar({ classId, parts }, unlockContext(this, { debugAll }));
     if (!legal.ok) return { ok: false, reason: legal.reasons[0] };
-    return this.money.canStartCar(this.carPrice({ classId, parts }).total);
+    return this.money.canStartCar(this.carPrice({ classId, parts, projectType: car.projectType }).total);
   }
 
   // What a car costs at Start (Milestone 10: after the facilities' material cost bonus, e.g. the Parts Rack −3%).
-  carPrice({ classId = 'clubHatch', parts = partsOf(classId) } = {}) {
-    const shell = this.facilities.materialPrice(CLASSES[classId].baseCost);
-    const partsPrice = this.facilities.materialPrice(partsCost(parts));
+  // Milestone 30b: a Research Prototype × its costMult.
+  carPrice({ classId = 'clubHatch', parts = partsOf(classId), projectType = 'newCar' } = {}) {
+    const mult = projectType === 'prototype' ? PROJECT_TYPES.prototype.costMult : 1;
+    const shell = Math.round(this.facilities.materialPrice(CLASSES[classId].baseCost) * mult);
+    const partsPrice = Math.round(this.facilities.materialPrice(partsCost(parts)) * mult);
     return { shell, parts: partsPrice, total: shell + partsPrice };
   }
 
   startCar(opts) {
     const classId = opts.classId ?? 'clubHatch';
     const parts = opts.parts ?? partsOf(classId);
-    const can = this.canStartCar({ classId, parts }, { debugAll: !!opts.debugAll });
+    const projectType = opts.projectType === 'prototype' ? 'prototype' : 'newCar';
+    const can = this.canStartCar({ classId, parts, projectType }, { debugAll: !!opts.debugAll });
     if (!can.ok) return can;
     const away = (opts.staffIds ?? []).find((id) => this.training.trainingOf(id)); // Milestone 12
     if (away) return { ok: false, reason: `${this.get(away)?.name ?? 'Someone'} is away on a training course` };
-    const r = this.cars.start({ ...opts, classId, parts });
+    const r = this.cars.start({ ...opts, classId, parts, projectType });
     if (r.ok) {
-      const price = this.carPrice({ classId, parts: r.job.data.parts });
+      const price = this.carPrice({ classId, parts: r.job.data.parts, projectType });
       if (price.shell) this.money.chargeParts(`${r.job.name} (${CLASSES[classId].name} shell)`, price.shell);
       this.money.chargeParts(r.job.name, price.parts);
     }
+    return r;
+  }
+
+  // --- Milestone 30b: Research Prototype and Major Upgrade (bible §14.1) ------------------------------------------
+  // Why this team can't start a Research Prototype (null = it can): Rank B and the Prototype Bay standing.
+  prototypeWhy() {
+    const P = PROJECT_TYPES.prototype;
+    if (RANK_ORDER.indexOf(this.money.rank) < RANK_ORDER.indexOf(P.rank)) return `Research prototypes open at Rank ${P.rank}`;
+    if (!this.facilities.builtIds().includes(P.facility)) return 'Build the Prototype Bay first';
+    return null;
+  }
+  // A Major Upgrade's price: perSlot × slots of what a new build of the new recipe would cost today.
+  upgradePrice(carNumber, parts) {
+    const rec = this.cars.cars.get(carNumber);
+    if (!rec?.result) return null;
+    const n = changedSlots(rec.result.parts, parts).length;
+    const full = this.carPrice({ classId: rec.result.classId, parts }).total;
+    return { slots: n, full, total: Math.round(full * this.cars.upgradeShare(n)) };
+  }
+  // Why car `carNumber` can't be upgraded to `parts` now (null = it can).
+  upgradeWhy(carNumber, parts = null, { debugAll = false } = {}) {
+    const rec = this.cars.cars.get(carNumber);
+    if (!rec?.result) return 'Pick a finished car';
+    if (this.cars.active) return 'A car is already being built';
+    if (this.facilities.bonus('carBays') < 1) return 'Build a Pit Bay first';
+    if (this.races.current?.carNumber === carNumber) return 'This car is in a race weekend: finish it first';
+    if (!parts) return null;
+    const n = changedSlots(rec.result.parts, parts).length;
+    const max = PROJECT_TYPES.upgrade.maxSlots;
+    if (!n) return 'Change at least one part';
+    if (n > max) return `An upgrade reworks at most ${max} part slots`;
+    const legal = checkCar({ classId: rec.result.classId, parts }, unlockContext(this, { debugAll }));
+    if (!legal.ok) return legal.reasons[0];
+    const can = this.money.canStartCar(this.upgradePrice(carNumber, parts).total);
+    return can.ok ? null : can.reason;
+  }
+  startUpgrade({ carNumber, parts, budget = 'balanced', staffIds = [], debugAll = false }) {
+    const why = this.upgradeWhy(carNumber, parts, { debugAll });
+    if (why) return { ok: false, reason: why };
+    const away = staffIds.find((id) => this.training.trainingOf(id));
+    if (away) return { ok: false, reason: `${this.get(away)?.name ?? 'Someone'} is away on a training course` };
+    const price = this.upgradePrice(carNumber, parts);
+    const r = this.cars.startUpgrade({ carNumber, parts, budget, staffIds, cost: price.total });
+    if (r.ok) this.money.chargeParts(r.job.name, price.total);
     return r;
   }
 

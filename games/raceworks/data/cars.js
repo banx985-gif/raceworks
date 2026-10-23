@@ -203,6 +203,23 @@ export const PROJECT = {
   emergencyFix: { milestone: 5 }, // costs Credits (bible §14.8): enabled once money exists
 };
 
+// Milestone 30b: the four project types of bible §14.1. Every number is a PLACEHOLDER (DECISIONS.md, M30b).
+//   newCar      the M4 / M9 build (an older save's projects and cars are all this type)
+//   upgrade     Major Upgrade: an existing car, one or two part slots reworked, its class kept. Cost and work per slot
+//               are a share of a new build of the new recipe (perSlot × slots); the phases' development is scaled the
+//               same way (it reworks a car, it doesn't build one). Needs the Pit Bay.
+//   prototype   Research Prototype: Rank B+ and the Prototype Bay (F30). Price ×costMult, daily fault chance ×faultMult,
+//               the car-finished RP ×rpMult; each breakthrough has researchPct % to finish a research node outright (the
+//               one being researched, else the cheapest one open). Counts for "Research Prototype projects completed".
+//   contract    Development Contract (M21): the contracts on the Money sheet, delivered by a finished car (no bay work).
+export const PROJECT_TYPES = {
+  newCar: { name: 'New car', line: 'Choose a class and parts' },
+  upgrade: { name: 'Upgrade', line: 'Rework one or two parts of a car you have', perSlot: 0.35, maxSlots: 2 },
+  prototype: { name: 'Research prototype', line: 'Costly, riskier, big research payoff', rank: 'B', facility: 'F30', costMult: 1.5, faultMult: 1.8, rpMult: 3, researchPct: 35 },
+  contract: { name: 'Development contract', line: 'Build or deliver a car for Credits and RP' },
+};
+export const projectTypeOf = (x) => x?.projectType ?? 'newCar'; // a job's data or a car's result
+
 // Pit Bay spots for the project team (one each, in slot order), spread round the bay so nobody hides anyone:
 // left front, right side, right front, then the two in between. Milestone 10: counted from the bay's back corner
 // (dc, dr), so they move with it; one that is built over falls back to the bay's free standing places.

@@ -405,7 +405,7 @@ export function createSecrets({ bus, team, rules = [] }) {
       // Milestone 25
       spd: st.SPD ?? 0, acc: st.ACC ?? 0, cor: st.COR ?? 0, puTier: PARTS[pu]?.cx ?? 0,
       startPartsOnly: parts.length > 0 && parts.every((id) => PARTS[id]?.unlock?.start || (PARTS[id]?.cx ?? 99) <= 1),
-      researchPrototype: SR.researchPrototype.classes.includes(r.classId),
+      researchPrototype: (r.projectType ?? 'newCar') === SR.researchPrototype.projectType, // (Milestone 30b: the project type)
     });
     first('firstCar');
   }
@@ -604,6 +604,9 @@ export function createSecrets({ bus, team, rules = [] }) {
         log = { ...blankLog(), ...JSON.parse(JSON.stringify(data.log)) };
         log.races = log.races.map(upgradeRace);
         if (!data.log.starters) setStarters(starters());
+        // Milestone 30b: "Research Prototype" now means the project type — a car logged under M25's class stand-in is
+        // read again from its record (an older save's cars are all new builds)
+        for (const c of log.cars) c.researchPrototype = (carRecord(c.number)?.result?.projectType ?? 'newCar') === SR.researchPrototype.projectType;
         return true;
       }
       log = blankLog();

@@ -3,11 +3,13 @@
 //   and a short history: phases (days, budget), faults, breakthroughs, the team and the parts.
 // Milestone 5: its Condition (0–100), the monthly upkeep and Repair (Credits per point; races damage cars from M6).
 // enter({ number, fresh, from }) — number = the Car Garage record; fresh = it has just been built (a gold sparkle).
+// Milestone 30b: its project type, its upgrades (what each reworked, Quality before → after), and Upgrade (goUpgrade:
+// the builder in upgrade mode; greyed with the reason when it can't start). A car in the bay says so.
 import { THEME, textScale } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { text, para, panel as drawPanel } from '../../../../core/ui/Kit.js';
-import { CAR_STATS, CAR_STAT_NAMES, PARTS, PHASES, BUDGETS, BUILD_ART } from '../../data/cars.js';
+import { CAR_STATS, CAR_STAT_NAMES, PARTS, PHASES, BUDGETS, BUILD_ART, SLOTS, PROJECT_TYPES } from '../../data/cars.js';
 import { ROLES } from '../../data/staff.js';
 import { COSTS } from '../../data/economy.js';
 import { carArtKey } from '../ui/livery.js';
@@ -17,7 +19,7 @@ const S = THEME.size;
 const PHASE_NAME = Object.fromEntries(PHASES.map((p) => [p.id, p.name]));
 const STAT_BAR_FULL = 400; // bars fill at this value (a first-season car is ~150–250)
 
-export function createCarResultScreen({ layout, assets, team, topBar, goCarGarage, debugEnabled = false, toast = () => {} }) {
+export function createCarResultScreen({ layout, assets, team, topBar, goCarGarage, goUpgrade = () => {}, debugEnabled = false, toast = () => {} }) {
   const panel = new ScrollPanel({
     getRect: () => {
       const t = topBar.rect();
@@ -44,7 +46,7 @@ export function createCarResultScreen({ layout, assets, team, topBar, goCarGarag
     if (ctx) {
       drawPanel(ctx, { x: 0, y, w, h: headH }, { fill: fresh ? C.panelGold : C.panel, stroke: fresh ? C.gold : C.line, lineWidth: fresh ? 5 : 3, radius: THEME.panel.radius });
       text(ctx, rec.name, 32, y + 26, { size: S.title, bold: true, maxWidth: w - 64 });
-      text(ctx, `${r.className} · finished on day ${r.finishedDay + 1} · ${rec.days} game days to build`, 32, y + 96, { size: S.small, color: C.textMuted, maxWidth: w - 64 });
+      text(ctx, `${r.className}${r.projectType === 'prototype' ? ' · research prototype' : ''} · finished on day ${r.finishedDay + 1} · ${rec.days} game days to build${rec.upgrades?.length ? ` · upgraded ${rec.upgrades.length}×` : ''}${team.cars.inBay(rec.number) ? ' · in the bay now' : ''}`, 32, y + 96, { size: S.small, color: C.textMuted, maxWidth: w - 64 });
       const art = { x: 24, y: y + 140, w: w * 0.55, h: 300 };
       assets.drawContained(ctx, carArtKey(assets, team, rec), art); // Milestone 8: in the team colour (22: resolved family + sponsors)
       if (fresh && t < 2.5) {
@@ -118,8 +120,19 @@ export function createCarResultScreen({ layout, assets, team, topBar, goCarGarag
     lines.push({ text: `Parts: ${r.parts.map((id) => PARTS[id].name).join(', ')} · ${r.partsCost.toLocaleString('en-US')} Credits` });
     // Milestone 11: the RP this car earned for research (older cars have none).
     if (rec.rp) lines.push({ text: `Research: +${rec.rp} RP (${rec.rpLines.map((l) => `${l.reason} +${l.amount}`).join(' · ')})`, color: C.progress });
+    if (r.researchDone?.length) lines.push({ text: `Prototype breakthroughs finished research: ${r.researchDone.join(', ')}`, color: C.progress }); // Milestone 30b
+    // Milestone 30b: each Major Upgrade
+    const slotName = (id) => SLOTS.find((s) => s.id === id)?.name ?? id;
+    for (const u of rec.upgrades ?? []) lines.push({ text: `Upgrade (day ${u.day + 1}, ${u.days} days): ${u.slots.map((id, k) => `${slotName(id)} ${PARTS[u.from[k]]?.name ?? u.from[k]} → ${PARTS[u.to[k]]?.name ?? u.to[k]}`).join(' · ')} · Quality ${u.qualityBefore} → ${u.qualityAfter}`, color: C.actionDark });
     for (const l of lines) y += para(ctx, l.text, 8, y, w - 16, { size: S.body, color: l.color ?? C.text }) + 10;
     y += 24;
+
+    // Milestone 30b: Upgrade this car (a Major Upgrade, bible §14.1)
+    const upWhy = team.upgradeWhy(rec.number);
+    const ub = { x: 0, y, w, h: 124 };
+    if (ctx) drawButton(ctx, ub, upWhy ? `Upgrade · ${upWhy}` : `Upgrade · rework 1–${PROJECT_TYPES.upgrade.maxSlots} parts`, { disabled: !!upWhy, accent: C.action });
+    hits.push({ rect: ub, id: 'upgrade', onTap: () => (upWhy ? toast(upWhy) : goUpgrade(rec.number)) });
+    y += 124 + 20;
 
     const b = { x: 0, y, w, h: 124 };
     if (ctx) drawButton(ctx, b, 'Car Garage', { accent: C.progress });
