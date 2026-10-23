@@ -34,7 +34,7 @@ import { BottomSheet } from '../../../core/ui/BottomSheet.js';
 import { createTopBar, topBarRect } from '../../../core/ui/TopBar.js';
 import { drawToasts } from '../../../core/ui/Toast.js';
 import { createBottomBar } from '../../../core/ui/BottomBar.js';
-import { createStorageAdapter } from '../../../core/StorageAdapter.js';
+import { createStorageAdapter, askPersistentStorage } from '../../../core/StorageAdapter.js';
 import { Autosave } from '../../../core/Autosave.js';
 import { CampaignSlots } from '../../../core/CampaignSlots.js';
 import { Dialog } from '../../../core/ui/Modal.js';
@@ -52,7 +52,7 @@ import { createCarBuilderScreen } from './screens/CarBuilderScreen.js';
 import { createCarResultScreen } from './screens/CarResultScreen.js';
 import { createCarGarageScreen } from './screens/CarGarageScreen.js';
 import { loadStatusIcons } from './ui/statusIcons.js';
-import { Team, describeSave, DEFAULT_SETUP, SAVE_MIGRATIONS } from './app/Team.js';
+import { Team, describeSave, DEFAULT_SETUP, SAVE_MIGRATIONS, triggerLabel } from './app/Team.js';
 import { SAVE_VERSION } from '../data/balance.js';
 import { SLOT_COUNT, FOUNDERS } from '../data/setup.js';
 import { createMainMenuScreen } from './screens/MainMenuScreen.js';
@@ -110,6 +110,12 @@ import { HELP_TOPICS, HELP_FOR, HELP_TEXT } from '../data/help.js';
 import { STATIONS } from '../data/garage.js';
 import { createCreditsScreen } from './screens/CreditsScreen.js';
 import { STORE_TEXT, MAIN_MENU_TEXT, BACK_TEXT, SAVE_TEXT, EMPTY_TEXT } from '../data/screens.js';
+// Milestone 30: hardened saves — IndexedDB first (localStorage behind it), the §44 autosave triggers, the account / run
+// split with their own versions and checks, the fallback to the copy before a damaged one, a newer game's save refused,
+// the app's lifecycle (background / return / Back out), the Splash's migration line and the ?debug=1 save inspector.
+import { SAVE_STORAGE, SAVE_TRIGGERS, OTHER_SAVE_EVENTS, AUTOSAVE_MS, ACCOUNT_VERSION, SAVE_WORDS } from '../data/save.js';
+import { createRunCheck, validateAccount, ACCOUNT_MIGRATIONS, blankAccount } from './app/saveCheck.js';
+import { createSaveInspector } from './ui/saveInspector.js';
 const COL = THEME.color;
 
 const W = 1080;
@@ -241,19 +247,24 @@ const team = new Team({ bus, seed: 'raceworks', secretRules: debug.enabled && ne
 const clock = team.clock;
 let teamReady = false;
 bus.on('clock:speed', ({ speed }) => debug.log(speed ? `speed ${speed}×` : 'game paused'));
-// Autosave (core/Autosave): every game day and after any change, plus when the app goes to the background.
+// Autosave (core/Autosave): the bible §44 triggers (data/save.js SAVE_TRIGGERS) and what has always asked for a save,
+// every 14 game days, the 30-second rolling timer, and when the app goes to the background (Milestone 30: lifecycle below).
+// Each save keeps the copy before it (core/SaveStore: written to the next of 3 copies, read back and checked before it
+// counts — a write cut off half way is never used).
 const autosave = new Autosave({
   bus,
-  triggers: ['race:created', 'race:progress', 'race:finished', 'clock:day', 'team:changed', 'project:start', 'project:phase', 'project:complete', 'car:fault', 'car:fix', 'car:breakthrough', 'contract:accepted', 'contract:success', 'contract:failed', 'contract:progress', 'sponsor:signed', 'sponsor:met', 'sponsor:ended', 'sponsor:progress', 'car:repaired', 'economy:debt', 'facility:layout', 'research:start', 'research:stop', 'research:complete', 'staff:hired', 'staff:letGo', 'recruit:refresh', 'training:start', 'training:complete', 'event:fired', 'event:resolved'],
-  save: () => {
-    if (router.currentName === 'race') raceScreen.exit(); // the race's exact state goes in the save too
-    return team.save();
+  triggers: [...SAVE_TRIGGERS.flatMap((t) => t.events), ...OTHER_SAVE_EVENTS],
+  save: (reason) => {
+    if (router.currentName === 'race') raceScreen.keepNow(); // the race's exact state goes in the save too (never mid-stint)
+    return team.save(reason);
   },
   stamp: () => JSON.stringify(team.serialize()),
   running: () => !clock.paused,
+  intervalMs: AUTOSAVE_MS,
   enabled: () => teamReady,
 });
-autosave.installBackground();
+const EVERY_DAYS = SAVE_TRIGGERS.find((t) => t.id === 'days').every;
+bus.on('clock:day', () => teamReady && clock.totalDays % EVERY_DAYS === 0 && autosave.request('days'));
 bus.on('autosave:failed', ({ error }) => debug.log(`save failed: ${error?.message ?? error}`));
 
 // ---------------------------------------------------------------------------
@@ -454,11 +465,12 @@ settings.onChange((k) => {
 // Milestone 14: the driver drill records — the account's (they survive New Game+, slot deletes and reloads).
 // Milestone 22: account blocks are written one at a time (the drill and combo records share the account save).
 let accountChain = Promise.resolve();
+// (Milestone 30: always the account's own normalised shape, data/save.js ACCOUNT_BLOCKS)
 const saveAccountBlock = (name, block) =>
   (accountChain = accountChain.then(async () => {
     if (!slots) return;
     const acc = await slots.loadAccount();
-    await slots.saveAccount({ ...acc, [name]: block });
+    await slots.saveAccount({ ...blankAccount(), ...acc, [name]: block });
   }).catch((e) => debug.log(`account save failed: ${e?.message ?? e}`)));
 const drillRecords = createDrillRecords({
   bus,
@@ -488,7 +500,7 @@ function enterChamp(id) {
   const c = team.championships.list().find((x) => x.def.id === id).def;
   const n = team.championships.nextRound();
   toast(`Entered: ${c.name}`, `${c.rounds} rounds · round 1 at ${TRACKS[n.trackId].name} in ${n.daysAway} days`);
-  team.save();
+  team.save('championship');
   openMenu('compete');
 }
 function goChampRound() {
@@ -564,16 +576,17 @@ function goTestRace() {
 }
 function startRace() {
   router.go('race');
+  bus.emit('race:start', { race: team.races.current }); // Milestone 30: the §44 "before race" save (the race as it starts)
 }
 function leaveRace() {
   raceScreen.exit();
-  team.save();
+  team.save('leaveRace');
   router.go('garage');
 }
 function raceFinished(sim) {
   const entry = team.races.finish(sim);
   debug.log(entry ? `race finished: P${entry.result.rows.find((r) => r.isPlayer)?.pos}` : 'race finish failed');
-  team.save();
+  team.save('race:finished');
   router.go('raceResult');
 }
 // The garage calendar pauses while a race screen is open and carries on at its old speed afterwards.
@@ -773,9 +786,19 @@ function settingsMenu() {
     heading(d.group);
     sections.push(optionRow(d));
   }
+  // Milestone 30 (?debug=1): the save inspector
+  if (debug.enabled) sections.push({ title: 'DEBUG', columns: 1, buttons: [{ id: 'setSaveInspector', label: 'Debug: save inspector', sub: 'Every slot, the account, every copy', icon: 'race_ui_28', accent: COL.purple, onTap: () => openSaveInspector() }] });
   return { title: SETTINGS_TEXT.title, subtitle: SETTINGS_TEXT.subtitle, art: 'race_ui_menu', accent: COL.progress, sections };
 }
 menus.register('settings', () => settingsMenu());
+// Milestone 30: the save inspector (src/ui/saveInspector.js) — ?debug=1 only, from Settings (the main menu's too).
+const saveInspector = createSaveInspector({ slots: () => slots, storage: () => storage, activeSlot: () => (teamReady ? activeSlot : null), textPrompt, layout, triggerLabel, onChanged: () => refreshSlots() });
+menus.register('saveInspector', () => saveInspector.menu());
+function openSaveInspector() {
+  if (!debug.enabled) return;
+  openMenu('saveInspector');
+  saveInspector.refresh();
+}
 
 // ---------------------------------------------------------------------------
 // Toasts (core/ui/Toast): short money news under the top bar — salary day, a contract paid, Emergency Credit on / off,
@@ -984,7 +1007,11 @@ function back() {
   else if (router.currentName === 'boot' || router.currentName === 'splash') {
     /* starting up: nothing to go back to yet */
   }
-  else return false;
+  else {
+    // the press goes to the phone (Back out of the app, Android): Milestone 30 — anything unsaved goes now
+    autosave.background();
+    return false;
+  }
   return true;
 }
 function confirmLeaveGarage() {
@@ -1010,12 +1037,41 @@ function resumeRace() {
   raceHeld = false;
 }
 
+// Milestone 30: the app's lifecycle. Going to the background (the tab or app hidden, the page closing) pauses and saves
+// straight away: the calendar stops and stays stopped when the player comes back (never a time jump — a short note
+// says so; core FixedStepLoop throws the hidden time away too); a race holds where it is and carries on when the app
+// is back (a Drive Stint stays paused until its own Resume); the save holds the race exactly (never mid-stint: the
+// M18 rule). The write starts before the page lets go (core SaveStore issues it straight away when nothing is in
+// flight); a save already in flight finishes first and this one follows it, where the browser allows.
+let away = null; // { speed, race } while the app is in the background
+function appHidden(why = 'hidden') {
+  if (!away) {
+    away = { speed: teamReady && !clock.paused ? clock.speed : null, race: router.currentName === 'race' && !raceHeld && !raceScreen.paused };
+    if (away.speed) clock.pause();
+    if (away.race) raceScreen.setPaused(true);
+    debug.log(`app ${why}: paused and saving`);
+  }
+  return autosave.background();
+}
+function appShown() {
+  const a = away;
+  away = null;
+  if (!a) return;
+  if (a.race && router.currentName === 'race' && !raceHeld) raceScreen.setPaused(false);
+  if (a.speed && teamReady) toast(SAVE_WORDS.away, SAVE_WORDS.awayLine);
+}
+document.addEventListener('visibilitychange', () => (document.visibilityState === 'hidden' ? appHidden('hidden') : appShown()));
+window.addEventListener('pagehide', () => appHidden('pagehide'));
+window.addEventListener('pageshow', () => document.visibilityState !== 'hidden' && appShown());
+
 // ---------------------------------------------------------------------------
 // Boot screen: shows while the art loads, then hands over to the garage (or the test screen).
 const bootScreen = {
   progress: 0,
+  line: '', // Milestone 30: what the Splash is doing (the art, then each save slot's check and migration)
   enter() {
     this.progress = 0;
+    this.line = '';
     assets
       .loadImages(ASSETS, (done, total) => (this.progress = done / total))
       .then((r) => {
@@ -1050,6 +1106,11 @@ const bootScreen = {
     ctx.fillRect(W / 2 - 300, H / 2 + 20, 600, 24);
     ctx.fillStyle = COL.progress;
     ctx.fillRect(W / 2 - 300, H / 2 + 20, 600 * this.progress, 24);
+    if (this.line) {
+      ctx.fillStyle = COL.textMuted;
+      ctx.font = font(THEME.size.small);
+      ctx.fillText(this.line, W / 2, H / 2 + 100, W - 120);
+    }
   },
 };
 
@@ -1103,7 +1164,7 @@ const drillScreen = createDrillScreen({ renderer, layout, assets, team, bus, set
   // Milestone 15: the Qualifying Drive lap returns to the weekend with the grid set
   if (p.qualiLap && result?.quali) toast(`Qualified P${result.quali.rows.find((r) => r.isPlayer).pos}`, result.drive ? 'With your Drive lap' : 'Simulated after the hand back');
   if (result?.medal) toast(`${result.medal[0].toUpperCase()}${result.medal.slice(1)} medal!`, result.pct ? `+${result.pct}% on this course` : 'Saved in your medal history');
-  team.save();
+  team.save('drill');
 } });
 const medalsScreen = createMedalsScreen({ layout, assets, topBar: screenBar, records: drillRecords, settings, onSettings: () => openSettings(), debugEnabled: debug.enabled, goPractice: (drillId) => goSub('drill', { drillId, practice: true }), toast: (a, b) => toast(a, b) });
 // The car screens (Milestone 4): the builder, one finished car, the Car Garage.
@@ -1170,21 +1231,90 @@ let slots = null;
 let slotList = []; // the last slot listing, for the menu and slot screens
 let activeSlot = null; // the slot whose team is open (null on the menus)
 let setupFrom = 'menu'; // where the setup screen's Back returns to
+// Milestone 30: IndexedDB first with localStorage behind it (a failed write — private mode, quota — goes there and is
+// still found; ?storage=local switches IndexedDB off, a test of the fallback); every slot copy must pass the run check
+// (src/app/saveCheck.js: the shape, then a dry load) and the account its own; a newer game's save is refused.
+let storage = null;
+const validateRun = createRunCheck(() => new Team({ bus: { on() {}, emit() {} }, seed: 'check' }));
 async function startSlots() {
-  const adapter = await createStorageAdapter({ dbName: 'raceworks', prefix: 'raceworks:' });
-  slots = new CampaignSlots({ adapter, count: SLOT_COUNT, version: SAVE_VERSION, migrations: SAVE_MIGRATIONS, describe: describeSave, bus });
+  const adapter = await createStorageAdapter({ dbName: SAVE_STORAGE.dbName, prefix: SAVE_STORAGE.prefix, fallback: true, preferLocal: PARAMS.get('storage') === 'local' });
+  storage = adapter;
+  askPersistentStorage().then((kept) => debug.log(`storage kept by the browser: ${kept ? 'yes' : 'no'}`));
+  slots = new CampaignSlots({ adapter, count: SLOT_COUNT, version: SAVE_VERSION, migrations: SAVE_MIGRATIONS, describe: describeSave, bus, validate: validateRun, refuseNewer: true, accountVersion: ACCOUNT_VERSION, accountMigrations: ACCOUNT_MIGRATIONS, accountValidate: validateAccount, quarantineAccount: true });
   if (debug.enabled && PARAMS.get('reset') === '1') for (const n of slots.numbers()) await slots.remove(n);
   const moved = await slots.adoptLegacy({ key: 'team', into: 1 });
   debug.log(`slots ready (${adapter.kind})${moved.adopted ? ', the old team moved into slot 1' : ''}`);
-  await refreshSlots();
+  // bible §7 Splash: load, migration (each slot is read, checked and brought up to this version), entitlement check
+  await refreshSlots({ splash: true });
+  bootScreen.line = SAVE_WORDS.entitlements;
+  await checkEntitlements();
   await drillRecords.load(); // Milestone 14
   await comboRecords.load(); // Milestone 22
+  bootScreen.line = SAVE_WORDS.ready;
+  if (slots.accountProblem) showAccountProblem();
 }
-async function refreshSlots() {
-  slotList = await slots.list();
+// Milestone 30: the Splash's entitlement check is a stub until Milestone 31 (the store): nothing to check yet.
+async function checkEntitlements() {
+  return { checked: false, entitlements: [] };
+}
+async function refreshSlots({ splash = false } = {}) {
+  slotList = await slots.list({
+    onSlot: async (n) => {
+      if (!splash) return;
+      bootScreen.line = SAVE_WORDS.checking(n, SLOT_COUNT);
+      const v = (await slots.slot(n).current())?.saveVersion;
+      if (v != null && v < SAVE_VERSION) bootScreen.line = SAVE_WORDS.updating(n, v, SAVE_VERSION);
+    },
+  });
   return slotList;
 }
 const slotAt = (n) => slotList.find((s) => s.n === n);
+// The account store would not read (core CampaignSlots quarantineAccount): say so plainly, once.
+let accountProblemShown = false;
+function showAccountProblem() {
+  const p = slots?.accountProblem;
+  if (!p || accountProblemShown) return;
+  accountProblemShown = true;
+  debug.log(`account ${p.newer ? 'from a newer game' : `damaged, kept aside as ${p.quarantinedTo}`}: ${p.error}`);
+  dialog.show({ title: SAVE_WORDS.accountTitle, body: p.newer ? SAVE_WORDS.accountNewerBody : SAVE_WORDS.accountBody, buttons: [{ id: 'ok', label: 'OK', accent: COL.progress }] });
+}
+// A damaged slot: a new team goes over it only after its copies are kept aside (never lost); Restore pastes a save
+// exported from the save inspector (or a bug report) into it — it must migrate and pass the check first.
+function newTeamOverDamaged(n) {
+  dialog.confirm({
+    title: SAVE_WORDS.newTeamTitle(n),
+    body: SAVE_WORDS.newTeamBody,
+    yes: 'New team',
+    onYes: () => {
+      setupFrom = 'slots';
+      if (slotsScreen.mode === 'ngplus') return openNgSetup(n, `Slot ${n}`);
+      router.go('setup', { slot: n });
+    },
+  });
+}
+async function restoreSlot(n, textValue) {
+  try {
+    const raw = JSON.parse(textValue);
+    await slots.quarantine(n); // whatever was there is kept aside first
+    await slots.restore(n, raw.record ?? raw);
+    await refreshSlots();
+    debug.log(`slot ${n} restored`);
+    return { ok: true };
+  } catch (err) {
+    await refreshSlots();
+    return { ok: false, why: SAVE_WORDS.restoreFailed(err.message) };
+  }
+}
+function promptRestore(n) {
+  const sr = layout.safeRect;
+  textPrompt.open({
+    rect: { x: sr.x + 40, y: sr.y + sr.h / 2 - 60, w: sr.w - 80, h: 120 },
+    value: '',
+    maxLength: 20000000,
+    placeholder: SAVE_WORDS.restorePrompt,
+    onDone: (v) => v && restoreSlot(n, v).then((r) => (r.ok ? toast(SAVE_WORDS.restored(n)) : dialog.show({ title: SAVE_WORDS.restore, body: r.why, buttons: [{ id: 'ok', label: 'OK', accent: COL.progress }] }))),
+  });
+}
 
 // Close the open team (saving it first): the menus run with no team ticking.
 async function leaveTeam() {
@@ -1193,7 +1323,7 @@ async function leaveTeam() {
   pendingCar = null; // a finished car's screen belongs to this team: it is in its Car Garage for next time
   sheet.close();
   await autosave.saving;
-  await team.save();
+  await team.save('leaveTeam');
   activeSlot = null;
 }
 // Open a team in the garage (after team.load / team.newGame): the garage rebuilds its workers from the roster.
@@ -1206,8 +1336,10 @@ async function openTeam(n) {
   garage.loadTeam();
   teamReady = true;
   audio.playMusic('music_garage'); // Milestone 25b
-  const acc = await slots.loadAccount();
-  await slots.saveAccount({ ...acc, lastSlot: n });
+  await (accountChain = accountChain.then(async () => {
+    const acc = await slots.loadAccount();
+    await slots.saveAccount({ ...blankAccount(), ...acc, lastSlot: n });
+  }).catch((e) => debug.log(`account save failed: ${e?.message ?? e}`)));
   router.go('garage');
 }
 async function playSlot(n) {
@@ -1225,11 +1357,20 @@ async function playSlot(n) {
     team.ngplus.sync();
   } catch (err) {
     debug.log(`slot ${n} would not load: ${err.message}`);
-    dialog.show({ title: 'That save would not load', body: err.message, buttons: [{ id: 'ok', label: 'OK', accent: COL.progress }] });
+    // (Milestone 30: plain words — a newer game's save, or every copy damaged)
+    const body = err.newer ? SAVE_WORDS.newerBody : `${SAVE_WORDS.damagedLine}. ${SAVE_WORDS.damagedSub}`;
+    dialog.show({ title: 'That save would not load', body, buttons: [{ id: 'ok', label: 'OK', accent: COL.progress }] });
+    await refreshSlots();
     return false;
   }
   debug.log(`slot ${n} loaded: ${team.setup.teamName}, day ${clock.totalDays}`);
   await openTeam(n);
+  // Milestone 30: the newest copy didn't read and the one before it was loaded — say so, plainly
+  const ll = slots.slot(n).lastLoad;
+  if (ll?.fallback) {
+    debug.log(`slot ${n}: fell back past ${ll.damaged.map((d) => `${d.key} (${d.why})`).join(', ')}`);
+    dialog.show({ title: SAVE_WORDS.fallbackTitle, body: SAVE_WORDS.fallbackBody(team.boundary ? `${team.boundary.label}, ${clock.shortLabel(team.boundary.day)}` : null), buttons: [{ id: 'ok', label: 'OK', accent: COL.progress }] });
+  }
   return true;
 }
 // START TEAM: a fresh team in slot n (anything there was confirmed away already, so it is emptied first — never mixed).
@@ -1237,6 +1378,7 @@ async function playSlot(n) {
 async function startNewTeam(setup, n, carry = null) {
   if (carry && carry.parentSlot === n) throw new Error('New Game+ never writes over its parent run');
   await leaveTeam();
+  if (slotAt(n)?.error) await slots.quarantine(n); // Milestone 30: a damaged slot's copies are kept aside, never lost
   await slots.remove(n);
   team.useSlot(slots.slot(n));
   await accountChain;
@@ -1247,7 +1389,7 @@ async function startNewTeam(setup, n, carry = null) {
   team.newGame(setup, carry);
   await team.ngplus.started(carry);
   debug.log(`new team in slot ${n}: ${team.setup.teamName}, founder ${team.founder.id}${carry ? `, New Game+ ${carry.level} from slot ${carry.parentSlot}` : ''}`);
-  await team.save();
+  await team.save(carry ? 'ngplus' : 'newTeam');
   await refreshSlots();
   await openTeam(n);
 }
@@ -1449,11 +1591,13 @@ const slotsScreen = createSlotsScreen({
   onBack: () => back(), // (Milestone 29: the on-screen ‹ is the phone's Back)
   onHall: () => goHall(), // Milestone 27
   onNgPlus: (n) => startNgPlus(n), // Milestone 28
+  onNewOverDamaged: (n) => newTeamOverDamaged(n), // Milestone 30
+  onRestore: (n) => promptRestore(n),
 });
 // Milestone 27: the Year-16 ceremony, the Hall of Runs and the New Game+ stub.
 function endCeremony(then) {
   team.ending.finishCeremony();
-  team.save();
+  team.save('ending');
   then();
 }
 const ceremonyScreen = createCeremonyScreen({
@@ -1508,7 +1652,7 @@ const setupScreen = createTeamSetupScreen({
   onBack: () => router.go(setupFrom, setupFrom === 'slots' ? { mode: slotsScreen.mode } : {}),
 });
 
-if (debug.enabled) window.__rw = { menuHeader: header, helpScreen, openHelp, closeHelp, get helpOpen() { return helpOpen; }, get creditsOpen() { return creditsOpen; }, closeCredits, helpTopicFor, back, systemBack, get sheetNow() { return sheetNow; }, get sheetWay() { return sheetWay; }, sheetBack, pauseRace, resumeRace, creditsScreen, splashScreen, goCredits, menuRecords, menuNgPlus, refuse, get trail() { return trail; }, goSub, goStaff, goRoster, goBuilder, goCarGarage, goCar, goChampRound, enterChamp, ceremonyScreen, hallScreen, ngPlusScreen, startNgPlus, openNgSetup, get ngFlow() { return ngFlow; }, goHall, get hallList() { return hallList; }, hintLine, MENU_OPEN, openMenuRow, menuState, openSettings, syncMenuSlot, bottomItems, governor, lowFx, audio, haptics, openMenu, menus, comboRecords, slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, get events() { return team.events; }, eventCard, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, drillScreen, medalsScreen, drillRecords, taps: [] };
+if (debug.enabled) window.__rw = { saveInspector, openSaveInspector, appHidden, appShown, get away() { return away; }, get storage() { return storage; }, validateRun, bootScreen, newTeamOverDamaged, restoreSlot, promptRestore, checkEntitlements, showAccountProblem, bus, startRace, get accountChain() { return accountChain; }, menuHeader: header, helpScreen, openHelp, closeHelp, get helpOpen() { return helpOpen; }, get creditsOpen() { return creditsOpen; }, closeCredits, helpTopicFor, back, systemBack, get sheetNow() { return sheetNow; }, get sheetWay() { return sheetWay; }, sheetBack, pauseRace, resumeRace, creditsScreen, splashScreen, goCredits, menuRecords, menuNgPlus, refuse, get trail() { return trail; }, goSub, goStaff, goRoster, goBuilder, goCarGarage, goCar, goChampRound, enterChamp, ceremonyScreen, hallScreen, ngPlusScreen, startNgPlus, openNgSetup, get ngFlow() { return ngFlow; }, goHall, get hallList() { return hallList; }, hintLine, MENU_OPEN, openMenuRow, menuState, openSettings, syncMenuSlot, bottomItems, governor, lowFx, audio, haptics, openMenu, menus, comboRecords, slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, get events() { return team.events; }, eventCard, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, drillScreen, medalsScreen, drillRecords, taps: [] };
 
 router
   .register('splash', splashScreen) // Milestone 29

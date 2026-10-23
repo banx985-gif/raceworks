@@ -32,10 +32,21 @@
 //   await slots.lastUsed() → n or null         await slots.setLastUsed(n)   (its own small key, not in any slot)
 //   remove(n) also drops slot n's summary record and forgets it as last used.
 // accountKey (default 'account') names the account store; prefix 'campaign_' gives the keys campaign_1 … campaign_4.
+//
+// Hardened saves (RACEWORKS Milestone 30; all optional — leave them out and nothing changes):
+//   validate / refuseNewer        passed to every slot's SaveSlot (core/SaveStore: a copy failing the game's check falls
+//                                 back to the one before; a newer game's save is refused, never passed over or written over)
+//   accountVersion / accountMigrations / accountValidate   the account store's own version, migrations and check
+//   quarantineAccount: true       an account no copy of which reads is kept aside (core SaveSlot quarantine) and emptied
+//                                 instead of being written over bit by bit; slots.accountProblem says what happened
+//   list({ onSlot })              onSlot(n) before each slot is read (a progress line); a slot's entry also says
+//                                 fallback (an older copy was loaded), newer (refused) and damaged (why each copy failed)
+//   quarantine(n)                 keep slot n's copies aside (before a new team or a restore goes over a damaged slot)
+//   restore(n, raw)               a save record (an export) becomes slot n's newest copy — it must migrate and pass the check
 import { SaveSlot } from './SaveStore.js';
 
 export class CampaignSlots {
-  constructor({ adapter, count = 4, prefix = 'slot', version = 1, migrations = {}, describe = () => ({}), bus = null, accountKey = 'account' }) {
+  constructor({ adapter, count = 4, prefix = 'slot', version = 1, migrations = {}, describe = () => ({}), bus = null, accountKey = 'account', validate = null, refuseNewer = false, accountVersion = 1, accountMigrations = {}, accountValidate = null, quarantineAccount = false }) {
     this.adapter = adapter;
     this.count = count;
     this.prefix = prefix;
@@ -43,8 +54,12 @@ export class CampaignSlots {
     this.migrations = migrations;
     this.describe = describe;
     this.bus = bus;
+    this.validate = validate;
+    this.refuseNewer = refuseNewer;
+    this.quarantineAccount = quarantineAccount;
+    this.accountProblem = null; // { error, newer, quarantinedTo, at } when the account would not read
     this.slots = new Map();
-    this.account = new SaveSlot({ adapter, key: accountKey, version: 1, bus });
+    this.account = new SaveSlot({ adapter, key: accountKey, version: accountVersion, migrations: accountMigrations, validate: accountValidate, refuseNewer, bus });
     this.lastKey = `${prefix}last`;
   }
 
@@ -111,22 +126,33 @@ export class CampaignSlots {
 
   slot(n) {
     this._check(n);
-    if (!this.slots.has(n)) this.slots.set(n, new SaveSlot({ adapter: this.adapter, key: `${this.prefix}${n}`, version: this.version, migrations: this.migrations, bus: this.bus }));
+    if (!this.slots.has(n)) this.slots.set(n, new SaveSlot({ adapter: this.adapter, key: `${this.prefix}${n}`, version: this.version, migrations: this.migrations, bus: this.bus, validate: this.validate, refuseNewer: this.refuseNewer }));
     return this.slots.get(n);
   }
 
-  async list() {
+  async list({ onSlot = null } = {}) {
     const out = [];
     for (const n of this.numbers()) {
       const s = this.slot(n);
+      onSlot?.(n);
       try {
         const data = await s.load();
-        out.push(data ? { n, empty: false, summary: this.describe(data), savedAt: s.lastSavedAt, error: null } : { n, empty: true, summary: null, savedAt: null, error: null });
+        out.push(data ? { n, empty: false, summary: this.describe(data), savedAt: s.lastSavedAt, error: null, fallback: !!s.lastLoad?.fallback } : { n, empty: true, summary: null, savedAt: null, error: null });
       } catch (err) {
-        out.push({ n, empty: false, summary: null, savedAt: null, error: err.message });
+        out.push({ n, empty: false, summary: null, savedAt: null, error: err.message, newer: !!err.newer, damaged: s.lastLoad?.damaged ?? [] });
       }
     }
     return out;
+  }
+
+  quarantine(n) {
+    return this.slot(n).quarantine();
+  }
+
+  async restore(n, raw) {
+    const record = await this.slot(n).importRecord(raw);
+    this.bus?.emit('slots:restored', { n });
+    return record;
   }
 
   save(n, data) {
@@ -161,8 +187,19 @@ export class CampaignSlots {
   async loadAccount() {
     try {
       return (await this.account.load()) ?? {};
-    } catch {
-      return {}; // every copy damaged: start the account again rather than block the game
+    } catch (err) {
+      if (!this.quarantineAccount) return {}; // every copy damaged: start the account again rather than block the game
+      // (quarantineAccount) never written over bit by bit: a newer game's account is left alone (and not written);
+      // a damaged one is kept aside whole, then emptied, and the game is told (accountProblem)
+      if (err.newer) {
+        this.accountProblem ??= { error: err.message, newer: true, quarantinedTo: null, at: Date.now() };
+        return {};
+      }
+      const quarantinedTo = await this.account.quarantine();
+      await this.account.clear();
+      this.accountProblem = { error: err.message, newer: false, quarantinedTo, at: Date.now() };
+      this.bus?.emit('slots:accountDamaged', this.accountProblem);
+      return {};
     }
   }
 

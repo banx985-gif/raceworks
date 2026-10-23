@@ -1153,13 +1153,13 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     for (const c of sim.cars) {
       const add = m16Car(byId[c.id]);
       for (const k of Object.keys(add)) if (c[k] === undefined) c[k] = add[k];
-      if (c.segKey === null) c.segKey = `${c.seg}:${Math.floor(c.s / L)}`;
+      if (c.segKey === null && c.seg >= 0) c.segKey = `${c.seg}:${Math.floor(c.s / L)}`; // (Milestone 30: a car on the grid, or just handed back from a stint, keeps its null — a reload is then bit-for-bit the race kept)
       // Milestone 17: a race saved before it — the car's faults from its entry, tyres already warm
       const add17 = m17Car(byId[c.id]);
       if (c.faults === undefined) add17.coldTo = 0;
       for (const k of Object.keys(add17)) if (c[k] === undefined) c[k] = add17[k];
       for (const [k, v] of Object.entries(m25Car())) if (c[k] === undefined) c[k] = v; // Milestone 25: a race saved before it
-      delete c.manual; // Milestone 18: a stint never survives a reload (it counts as handed back — the save before it stands)
+      if (c.manual != null) c.manual = null; // Milestone 18: a stint never survives a reload (it counts as handed back — the save before it stands) (Milestone 30: null, as a hand back leaves it — the reload is bit-for-bit)
     }
     sim.events = s.events.slice();
     sim.commands = (s.commands ?? []).map((x) => ({ ...x }));

@@ -3,7 +3,9 @@
 //   items: [{ id, label, icon (image key), badge? }]   badge: text / number, or a function returning one
 //                                                        (null / 0 / '' = no badge; any value = red attention dot)
 //   open(id) — what a slot does (usually: open its bottom sheet)
-// createBottomBar({ layout, assets, items, open }) → { rect(), buttonRect(id), handleTap(p), contains(p), render(ctx) }
+// createBottomBar({ layout, assets, items, open, fitLabels }) → { rect(), buttonRect(id), handleTap(p), contains(p), render(ctx) }
+//   fitLabels (optional, BOTWORKS Milestone 26c): a label too wide for its button is drawn in a smaller font (down to
+//   70%) instead of squashed — six buttons on a phone keep their size and readable words. Off: drawn as before.
 // Pressed looks come from Button.js (setPressPoint / clearPress in the game's input wiring).
 import { THEME, font } from '../Theme.js';
 import { drawButton, hitRect } from './Button.js';
@@ -11,7 +13,7 @@ import { drawButton, hitRect } from './Button.js';
 const C = THEME.color;
 export const BOTTOM_BAR_H = 190;
 
-export function createBottomBar({ layout, assets, items, open }) {
+export function createBottomBar({ layout, assets, items, open, fitLabels = false }) {
   const badgeOf = (b) => (typeof b.badge === 'function' ? b.badge() : b.badge) || null;
 
   function rect() {
@@ -59,6 +61,11 @@ export function createBottomBar({ layout, assets, items, open }) {
         drawButton(ctx, br, '', { badge: badgeOf(b) });
         assets.drawContained(ctx, b.icon, { x: br.x + (br.w - 84) / 2, y: br.y + 6, w: 84, h: 84 });
         ctx.font = font(THEME.size.button, true);
+        if (fitLabels) {
+          const room = br.w - 12;
+          const wide = ctx.measureText(b.label).width;
+          if (wide > room) ctx.font = font(Math.max(THEME.size.button * 0.7, Math.floor((THEME.size.button * room) / wide)), true);
+        }
         ctx.fillStyle = C.textOnAction;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';

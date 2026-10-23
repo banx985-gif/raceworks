@@ -18,6 +18,27 @@
 //     One time only: saves kept before Milestone 22 (the old single key in this database, or in localStorage on a
 //     phone that fell back to it) are copied into the new layout, read back and compared, and only then is the move
 //     marked done. The old copies are left where they were.
+// RACEWORKS Milestone 30 (all optional — a game that passes none of these works exactly as before):
+//   new SaveSlot({ …, validate, refuseNewer })
+//     validate(data, record) → [] / null when fine, else the problems (an array or a string; throwing counts too). A
+//       copy whose checksum is fine but whose data fails the game's schema check is skipped like a damaged one, so the
+//       load falls back to the copy before it. importRecord() checks it too.
+//     refuseNewer: a copy saved by a newer version of the game is never passed over for an older one and never written
+//       over: load() throws a NewerSaveError (err.newer, err.saveVersion, err.gameVersion) and save() refuses.
+//   save(data, { trigger }) — the record remembers what asked for it (list() shows it: the save inspector).
+//   quarantine() → key   every copy, kept aside under `${key}:quarantine:<time>` (before a damaged slot is reused)
+//   current() → the newest stored copy that checks out (raw record) or null (export)
+//   dryRun(raw = current) → { ok, trace: [{ from, to }], problems, error } — the migrations and the check, nothing written
+//   migrateSave(raw, { version, migrations, trace }) — trace (an array) gets one { from, to } per step
+export class NewerSaveError extends Error {
+  constructor(saveVersion, gameVersion) {
+    super(`Save version ${saveVersion} is newer than this game (${gameVersion})`);
+    this.newer = true;
+    this.saveVersion = saveVersion;
+    this.gameVersion = gameVersion;
+  }
+}
+
 export function checksum(text) {
   let h = 0x811c9dc5;
   for (let i = 0; i < text.length; i++) {
@@ -27,18 +48,30 @@ export function checksum(text) {
   return h.toString(16).padStart(8, '0');
 }
 
-export function migrateSave(raw, { version, migrations = {} }) {
+export function migrateSave(raw, { version, migrations = {}, trace = null }) {
   if (!raw || typeof raw !== 'object' || typeof raw.data !== 'object' || raw.data === null) throw new Error('Not a save record');
   let record = raw;
   let v = record.saveVersion ?? 0;
-  if (v > version) throw new Error(`Save version ${v} is newer than this game (${version})`);
+  if (v > version) throw new NewerSaveError(v, version);
   while (v < version) {
     const step = migrations[v];
     if (!step) throw new Error(`No save migration from version ${v}`);
     record = { ...step(record), saveVersion: v + 1 };
+    trace?.push({ from: v, to: v + 1 });
     v++;
   }
   return record;
+}
+
+// The game's check (validate option) as a list of problems: [] when fine.
+function problemsOf(validate, data, record) {
+  if (!validate) return [];
+  try {
+    const p = validate(data, record);
+    return p == null || p === true ? [] : Array.isArray(p) ? p : [String(p)];
+  } catch (err) {
+    return [`check failed: ${err?.message ?? err}`];
+  }
 }
 
 // What a stored copy looks like to the loader: 'ok' (checksum matches), 'legacy' (from before checksums — trusted if
@@ -55,13 +88,15 @@ export function recordStatus(raw) {
 }
 
 export class SaveSlot {
-  constructor({ adapter, key, version = 1, migrations = {}, rolling = 3, bus = null }) {
+  constructor({ adapter, key, version = 1, migrations = {}, rolling = 3, bus = null, validate = null, refuseNewer = false }) {
     this.adapter = adapter;
     this.key = key;
     this.version = version;
     this.migrations = migrations;
     this.rolling = rolling;
     this.bus = bus;
+    this.validate = validate;
+    this.refuseNewer = refuseNewer;
     this.seq = null; // highest sequence number written or seen
     this.lastSavedAt = null;
     this.lastLoad = null;
@@ -94,13 +129,18 @@ export class SaveSlot {
     return out;
   }
 
-  save(data) {
-    const run = this._chain.then(() => this._save(data));
+  save(data, meta = {}) {
+    const run = this._chain.then(() => this._save(data, meta));
     this._chain = run.catch(() => {});
     return run;
   }
 
-  async _save(data) {
+  // (refuseNewer) a copy written by a newer game version, if there is one
+  _newerIn(copies) {
+    return copies.find((c) => ['ok', 'legacy'].includes(recordStatus(c.raw)) && (c.raw.saveVersion ?? 0) > this.version) ?? null;
+  }
+
+  async _save(data, meta = {}) {
     const t0 = globalThis.performance?.now() ?? Date.now();
     const json = JSON.stringify(data); // plain data only: never class instances or functions
     const sum = checksum(json);
@@ -109,9 +149,14 @@ export class SaveSlot {
       this.lastWrite = { ms: 0, bytes: json.length, seq: this.lastRecord.seq, skipped: true };
       return this.lastRecord;
     }
-    if (this.seq == null) this.seq = Math.max(-1, ...(await this._copies()).map((c) => c.seq));
+    if (this.seq == null) {
+      const copies = await this._copies();
+      const newer = this.refuseNewer ? this._newerIn(copies) : null;
+      if (newer) throw new NewerSaveError(newer.raw.saveVersion, this.version); // never write over a newer game's save
+      this.seq = Math.max(-1, ...copies.map((c) => c.seq));
+    }
     const seq = this.seq + 1;
-    const record = { saveVersion: this.version, savedAt: Date.now(), seq, checksum: sum, bytes: json.length, data: JSON.parse(json) };
+    const record = { saveVersion: this.version, savedAt: Date.now(), seq, checksum: sum, bytes: json.length, ...(meta?.trigger != null ? { trigger: meta.trigger } : {}), data: JSON.parse(json) };
     const k = this.slotKey(seq % this.rolling);
     await this.adapter.set(k, record);
     // Read it back: only a copy that checks out may become current (a bad one is never picked by load anyway).
@@ -134,6 +179,12 @@ export class SaveSlot {
     await this._chain;
     const copies = await this._copies();
     const damaged = [];
+    const newer = this.refuseNewer ? this._newerIn(copies) : null;
+    if (newer) {
+      const err = new NewerSaveError(newer.raw.saveVersion, this.version);
+      this.lastLoad = { record: null, from: null, fallback: false, damaged, error: err, newer: true };
+      throw err;
+    }
     for (const c of copies) {
       const st = recordStatus(c.raw);
       if (st === 'damaged') {
@@ -142,10 +193,20 @@ export class SaveSlot {
       }
       try {
         const record = migrateSave(c.raw, { version: this.version, migrations: this.migrations });
+        const problems = problemsOf(this.validate, record.data, record);
+        if (problems.length) {
+          damaged.push({ key: c.k, seq: c.seq, why: `failed the check: ${problems.slice(0, 3).join('; ')}`, problems });
+          continue;
+        }
         this.seq = Math.max(this.seq ?? -1, ...copies.map((x) => x.seq)); // new saves go above every copy, damaged ones too
         this.lastSavedAt = record.savedAt ?? null;
-        this.lastLoad = { record, from: c.k, fallback: damaged.length > 0, damaged, error: null };
-        this.bus?.emit('save:loaded', { key: this.key, saveVersion: c.raw.saveVersion, from: c.k, fallback: damaged.length > 0 });
+        // A copy too broken to read has no sequence number (it sorts last): it was the newer save when it sits where the
+        // next save after this one would have gone (a write cut off half way). Any newer copy lost = a fallback.
+        const lostNewer = copies.filter((x) => x !== c && recordStatus(x.raw) === 'damaged' && (x.seq > c.seq || (x.seq < 0 && x.slot === (c.seq + 1) % this.rolling)));
+        for (const x of copies) if (x !== c && recordStatus(x.raw) === 'damaged' && !damaged.some((d) => d.key === x.k)) damaged.push({ key: x.k, seq: x.seq, why: x.raw?.__unreadable ?? 'checksum' });
+        const fallback = lostNewer.length > 0 || damaged.some((d) => d.seq > c.seq);
+        this.lastLoad = { record, from: c.k, fallback, damaged, error: null, trigger: c.raw.trigger ?? null };
+        this.bus?.emit('save:loaded', { key: this.key, saveVersion: c.raw.saveVersion, from: c.k, fallback });
         return record.data;
       } catch (err) {
         damaged.push({ key: c.k, seq: c.seq, why: err.message });
@@ -173,7 +234,43 @@ export class SaveSlot {
       bytes: c.raw?.bytes ?? (c.raw?.data ? JSON.stringify(c.raw.data).length : 0),
       status: recordStatus(c.raw),
       current: c === firstGood,
+      trigger: c.raw?.trigger ?? null,
+      newer: (c.raw?.saveVersion ?? 0) > this.version,
     }));
+  }
+
+  // The newest stored copy that checks out (the raw record, as stored), or null.
+  async current() {
+    await this._chain;
+    return (await this._copies()).find((c) => ['ok', 'legacy'].includes(recordStatus(c.raw)))?.raw ?? null;
+  }
+
+  // Run a record (default: the current copy) through the migrations and the game's check without writing anything.
+  async dryRun(raw = undefined) {
+    const rec = raw === undefined ? await this.current() : raw;
+    const trace = [];
+    if (!rec) return { ok: false, trace, problems: [], error: 'No save to check', from: null, to: this.version };
+    try {
+      const out = migrateSave(rec, { version: this.version, migrations: this.migrations, trace });
+      const problems = problemsOf(this.validate, out.data, out);
+      return { ok: problems.length === 0, trace, problems, error: null, from: rec.saveVersion ?? 0, to: this.version };
+    } catch (err) {
+      return { ok: false, trace, problems: [], error: err.message, newer: !!err.newer, from: rec.saveVersion ?? 0, to: this.version };
+    }
+  }
+
+  // Every stored copy, kept aside under one new key (the slot itself is left as it was). → that key, or null if empty
+  async quarantine(now = Date.now()) {
+    await this._chain;
+    const copies = {};
+    for (const k of [this.key, ...Array.from({ length: this.rolling }, (_, i) => this.slotKey(i))]) {
+      const raw = await this._read(k);
+      if (raw != null) copies[k] = raw;
+    }
+    if (!Object.keys(copies).length) return null;
+    const qk = `${this.key}:quarantine:${now}`;
+    await this.adapter.set(qk, { key: this.key, at: now, copies });
+    return qk;
   }
 
   // Debug: spoil the current copy (its data changes, its checksum does not) — the next load must fall back.
@@ -189,7 +286,9 @@ export class SaveSlot {
 
   // Debug: a whole save record from a bug report (any older version) becomes the newest copy.
   async importRecord(raw) {
-    migrateSave(raw, { version: this.version, migrations: this.migrations }); // must migrate cleanly first
+    const migrated = migrateSave(raw, { version: this.version, migrations: this.migrations }); // must migrate cleanly first
+    const problems = problemsOf(this.validate, migrated.data, migrated); // … and pass the game's check (Milestone 30)
+    if (problems.length) throw new Error(`That save failed the check: ${problems.slice(0, 3).join('; ')}`);
     await this._chain;
     if (this.seq == null) this.seq = Math.max(-1, ...(await this._copies()).map((c) => c.seq));
     const json = JSON.stringify(raw.data);

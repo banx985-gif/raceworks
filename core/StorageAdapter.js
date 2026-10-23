@@ -160,6 +160,17 @@ export class FallbackAdapter {
   }
 }
 
+// RACEWORKS Milestone 30: ask the browser to keep this site's storage (no eviction when the phone runs low on space).
+// → true when it is (or now will be) kept; false when refused or not supported. Never throws.
+export async function askPersistentStorage(nav = globalThis.navigator) {
+  try {
+    if (await nav?.storage?.persisted?.()) return true;
+    return !!(await nav?.storage?.persist?.());
+  } catch {
+    return false;
+  }
+}
+
 // fallback: true → IndexedDB wrapped in a FallbackAdapter (localStorage behind it). preferLocal: true → skip IndexedDB
 // (a test switch: "IndexedDB off").
 export async function createStorageAdapter({ dbName = 'canvas-series', prefix = 'canvas-series:', fallback = false, preferLocal = false } = {}) {

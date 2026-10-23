@@ -88,6 +88,7 @@ import { createEnding } from '../systems/ending.js'; // Milestone 27
 import { StaffModel } from '../../../../core/StaffModel.js';
 import { createNgPlusRecords, ngBlockOf, legacyModel, modifierById } from '../systems/ngplus.js'; // Milestone 28
 import { START_MONEY } from '../../data/economy.js';
+import { RUN_KIND, RUN_BLOCKS, SAVE_TRIGGERS, SAVE_REASONS } from '../../data/save.js'; // Milestone 30
 
 // A new game's setup when none is given (tests, and saves from before Milestone 4b).
 export const DEFAULT_SETUP = { teamName: 'RACEWORKS', principal: 'Principal', colour: 'red', founderId: 'MEC01' };
@@ -173,7 +174,15 @@ export const SAVE_MIGRATIONS = {
   //   21 → 22 (Milestone 28): New Game+ (the run's ngPlus block; the achievements met in this run). Nothing to change here —
   //   a save without it is a first run (NG+ 0), and achievements.load() rebuilds its run list from the account history.
   21: (record) => record,
+  //   22 → 23 (Milestone 30): the normalised shape the save check reads (src/app/saveCheck.js) — every block key present
+  //   (null for a block the save was made before; its system starts from its "before" state, exactly as when the key was
+  //   missing), the kind, and the save's boundary (the §44 trigger that wrote it; unknown for an older save). Every key
+  //   the save had is carried over untouched.
+  22: (record) => ({ ...record, data: { ...Object.fromEntries(RUN_BLOCKS.map((k) => [k, null])), ...record.data, kind: RUN_KIND, boundary: record.data.boundary ?? null } }),
 };
+// The §44 trigger names, for the boundary a save carries (the save inspector, the fallback note).
+const TRIGGER_LABEL = { ...SAVE_REASONS, ...Object.fromEntries(SAVE_TRIGGERS.flatMap((t) => [[t.id, t.label], ...t.events.map((e) => [e, t.label])])) };
+export const triggerLabel = (id) => TRIGGER_LABEL[id] ?? id;
 
 const blankContractRecords = () => ({ partEvents: {}, facts: {} });
 // Milestone 24: a run's id (cross-run facts are kept per run, so a reload can never count one twice).
@@ -249,6 +258,7 @@ export class Team {
     this.founder = newFounder(DEFAULT_SETUP.founderId);
     this.noCandidates = [];
     this.playSeconds = 0;
+    this.boundary = null; // Milestone 30: the §44 trigger that wrote the last save { trigger, label, day }
     bus.on('clock:day', () => {
       this.staff.dailyTick();
       this.training.dailyTick(); // Milestone 12: after the staff day (a finished course's Energy stays)
@@ -290,6 +300,7 @@ export class Team {
     if (this.isLegacy(f.id)) this.founder.history.legacyStaff = true; // spec §4: the founder chosen as Legacy Staff
     this.noCandidates = (f.team ?? STARTERS).filter((id) => START_CANDIDATES.includes(id));
     this.playSeconds = 0;
+    this.boundary = null;
     this.cars.load(null);
     this.cars.assignments.refresh();
     this.ratings = createRatingsCache();
@@ -486,6 +497,8 @@ export class Team {
   // --- save / load ---------------------------------------------------------------------------------------------
   serialize() {
     return {
+      kind: RUN_KIND, // Milestone 30: what this is (the save check refuses anything else)
+      boundary: this.boundary ? { ...this.boundary } : null, // Milestone 30
       clock: this.clock.serialize(),
       rng: this.rng.getState(),
       staff: this.staff.serialize(),
@@ -528,6 +541,7 @@ export class Team {
     this.founder.history = { ...FOUNDER_HISTORY, ...this.founder.history };
     this.noCandidates = [...(data.noCandidates ?? [])];
     this.playSeconds = data.playSeconds ?? 0;
+    this.boundary = data.boundary ? { ...data.boundary } : null; // Milestone 30
     this.ratings = createRatingsCache();
     if (data.money) this.money.load(data.money);
     else this.adoptMoney(); // a save from before Milestone 5
@@ -578,8 +592,12 @@ export class Team {
     return false;
   }
 
-  save() {
-    return this.slot ? this.slot.save(this.serialize()) : Promise.resolve(null);
+  // Milestone 30: reason = what asked for the save (a §44 trigger id or a game event; data/save.js) — it travels in the
+  // save as its boundary and on the stored record (core SaveSlot trigger).
+  save(reason = 'save') {
+    if (!this.slot) return Promise.resolve(null);
+    this.boundary = { trigger: reason, label: triggerLabel(reason), day: this.clock.totalDays };
+    return this.slot.save(this.serialize(), { trigger: reason });
   }
 
   async clearSave() {

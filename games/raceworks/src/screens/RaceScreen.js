@@ -568,6 +568,12 @@ export function createRaceScreen({ renderer, layout, assets, team, bus, settings
       if (stintView.active) stintView.handBack('quit'); // Milestone 18: leaving mid-stint counts as Hand Back
       if (sim && team.races.current) team.races.keep(sim);
     },
+    // Milestone 30: an autosave while the race is on screen (the app going to the background, any trigger) keeps the race
+    // exactly where it is — but never mid-Drive-Stint: the race isn't kept while you drive (the M18 rule), so the save
+    // holds the race as it was when you took the wheel and the stint carries on untouched.
+    keepNow() {
+      if (sim && team.races.current === race && !stintView.active) team.races.keep(sim);
+    },
     // Milestone 18: System Back during a stint hands back (true = handled)
     onBack() {
       if (!stintView.active) return false;

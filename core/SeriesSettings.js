@@ -3,8 +3,10 @@
 // names in every game; a game passes its own lines where its words differ and adds its extras after the series list.
 // Values live in core/Settings (this device, never in a campaign slot). Content-free apart from the shared words.
 //
-//   seriesSettings({ lines = {}, extras = [] }) → the list: [{ id, label, group, options: [{ id, label }], line?, extra? }]
-//     lines: { id: 'game words' } replaces an entry's line · extras: the game's own entries (shown after Help / Credits)
+//   seriesSettings({ lines = {}, labels = {}, extras = [] }) → the list: [{ id, label, group, options: [{ id, label }], line?, extra? }]
+//     lines: { id: 'game words' } replaces an entry's line · labels: { id: 'Name' } renames an entry where the game's
+//     bible fixes a different name (RESORTWORKS M0: "Haptics", "Graphics / performance"); the ids, order and values
+//     never change · extras: the game's own entries (shown after Help / Credits)
 //   SERIES_SETTINGS_DEFAULTS — defaults for every series entry (spread them under the game's extras' defaults)
 //   TEXT_SCALE — textSize → core/Theme setTextScale factor
 const onOff = [{ id: false, label: 'Off' }, { id: true, label: 'On' }];
@@ -29,6 +31,7 @@ const SERIES = [
 export const SERIES_SETTINGS_DEFAULTS = { muted: false, music: 75, musicMuted: false, sfx: 100, sfxMuted: false, haptics: true, fpsMode: 'auto', textSize: 'normal', reducedFlashes: false, screenShake: 'normal', showMenu: true, showHints: true };
 export const TEXT_SCALE = { normal: 1, large: 1.15, larger: 1.3 };
 
-export function seriesSettings({ lines = {}, extras = [] } = {}) {
-  return [...SERIES.map((d) => (d.id in lines ? { ...d, line: lines[d.id] } : { ...d })), ...extras.map((d) => ({ ...d, extra: true }))];
+export function seriesSettings({ lines = {}, labels = {}, extras = [] } = {}) {
+  const own = (d) => ({ ...d, ...(d.id in lines ? { line: lines[d.id] } : {}), ...(d.id in labels ? { label: labels[d.id] } : {}) });
+  return [...SERIES.map(own), ...extras.map((d) => ({ ...d, extra: true }))];
 }

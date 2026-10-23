@@ -14,6 +14,7 @@ import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { text } from '../../../../core/ui/Kit.js';
 import { TEAM_COLOURS, PLAYER_TITLE, SLOT_COUNT } from '../../data/setup.js';
 import { drawSlotFrame, drawTeamBadge, initialsOf } from '../ui/setupArt.js';
+import { SAVE_WORDS } from '../../data/save.js'; // Milestone 30
 
 const C = THEME.color;
 const S = THEME.size;
@@ -24,7 +25,7 @@ export function playTimeText(sec = 0) {
   return h ? `${h} h ${String(m % 60).padStart(2, '0')} m` : `${m} min`;
 }
 
-export function createSlotsScreen({ layout, assets, header, slots, onPlay, onNewTeam, onReplace, onDelete, onBack, onHall = null, onNgPlus = null }) {
+export function createSlotsScreen({ layout, assets, header, slots, onPlay, onNewTeam, onReplace, onDelete, onBack, onHall = null, onNgPlus = null, onNewOverDamaged = null, onRestore = null }) {
   let mode = 'load';
   let parent = null;
   let hits = [];
@@ -73,14 +74,31 @@ export function createSlotsScreen({ layout, assets, header, slots, onPlay, onNew
       hits.push({ rect: b, id: `new_${s.n}`, onTap: () => onNewTeam(s.n) });
       return h;
     }
+    // Milestone 30: a slot no copy of which reads — damaged (start a new team over it: its copies are kept aside; or
+    // restore a saved team) — or saved by a newer RACEWORKS (refused, never touched: update the game; or delete it).
     if (s.error || !s.summary) {
-      const h = 250;
+      const damaged = !s.newer;
+      const h = damaged ? 450 : 340;
       if (ctx) {
         drawSlotFrame(ctx, { x, y, w, h }, null);
         text(ctx, `Slot ${s.n}`, x + pad, y + 26, { size: S.small, bold: true, color: C.textMuted });
-        text(ctx, 'This save will not read.', x + pad, y + 70, { size: S.body, bold: true, color: C.bad, maxWidth: w - 2 * pad });
+        text(ctx, damaged ? SAVE_WORDS.damagedLine : SAVE_WORDS.newerLine, x + pad, y + 70, { size: S.body, bold: true, color: C.bad, maxWidth: w - 2 * pad });
+        text(ctx, damaged ? SAVE_WORDS.damagedSub : SAVE_WORDS.newerSub, x + pad, y + 124, { size: S.small, color: C.text, maxWidth: w - 2 * pad });
       }
-      const b = { x: x + pad, y: y + 124, w: w - 2 * pad, h: 110 };
+      let by = y + 186;
+      if (damaged) {
+        const half = (w - 2 * pad - 24) / 2;
+        const nb = { x: x + pad, y: by, w: half, h: 110 };
+        const rb = { x: x + pad + half + 24, y: by, w: half, h: 110 };
+        if (ctx) {
+          drawButton(ctx, nb, 'New team');
+          drawButton(ctx, rb, SAVE_WORDS.restore, { accent: C.progress });
+        }
+        hits.push({ rect: nb, id: `newOver_${s.n}`, onTap: () => onNewOverDamaged?.(s.n, s) });
+        hits.push({ rect: rb, id: `restore_${s.n}`, onTap: () => onRestore?.(s.n, s) });
+        by += 134;
+      }
+      const b = { x: x + pad, y: by, w: w - 2 * pad, h: 110 };
       if (ctx) drawButton(ctx, b, 'Delete', { accent: C.bad });
       hits.push({ rect: b, id: `delete_${s.n}`, onTap: () => onDelete(s.n, s) });
       return h;
