@@ -19,6 +19,7 @@ export const PLAYER_NAMES = [
 
 // The six RACEWORKS team colours (bible §7 Team Setup: "one of six accent palettes"; no stat advantage).
 //   main = the livery, dark = its shadow / outline, light = the second stripe.
+import { TOKEN_PALETTES } from './monetisation.js';
 export const TEAM_COLOURS = [
   { id: 'red', name: 'Racing Red', main: '#D8352A', dark: '#8E1F18', light: '#F2B233' },
   { id: 'orange', name: 'Papaya', main: '#F2862B', dark: '#A8520F', light: '#2A241F' },
@@ -27,6 +28,8 @@ export const TEAM_COLOURS = [
   { id: 'blue', name: 'Circuit Blue', main: '#1F6FD1', dark: '#123F7A', light: '#F2B233' },
   { id: 'purple', name: 'Night Purple', main: '#7650C4', dark: '#43287E', light: '#35C2E0' },
 ];
+// Milestone 31: + the two livery palettes Racing Tokens can buy (data/monetisation.js TOKEN_PALETTES; never at New Game).
+export const ALL_COLOURS = [...TEAM_COLOURS, ...TOKEN_PALETTES];
 
 // The five founder choices (spec §2), one from each role, and the starting team each one brings (spec §3).
 //   perk.stat: the work stat their "+6% contribution" boosts in car projects (core/ProjectSystem statModifier).

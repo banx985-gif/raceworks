@@ -240,6 +240,7 @@ export function createRaces({ bus, team }) {
         facilities: team.facilities?.bonus('setupKnowledge') ?? 0,
         technical: technical ? team.facilities?.bonus('setupKnowledge.technical') ?? 0 : 0,
         traits: w.crewKnowledge ?? 0,
+        ad: w.adBoost ?? 0, // Milestone 31: the optional "Practice data" rewarded ad (this weekend only)
       };
     },
     // Setup Knowledge after this many practice runs (0 = skipped). Fixed by the weekend seed: a reload can't reroll it.
@@ -247,7 +248,7 @@ export function createRaces({ bus, team }) {
       const w = cur();
       const p = WEEKEND.practice;
       const src = api.knowledgeSources(w);
-      const extra = src.facilities + src.technical + src.traits;
+      const extra = src.facilities + src.technical + src.traits + src.ad;
       const skipped = Math.round(clamp(src.staff * p.skipShare + extra, 0, 100));
       if (!runs) return skipped;
       const u = new Rng(`practice:${w.seed}`).range(-1, 1) * p.variance;
@@ -282,6 +283,19 @@ export function createRaces({ bus, team }) {
       return w.practice;
     },
     knowledge: () => cur()?.practice?.knowledge ?? 0,
+    // Milestone 31: the "Practice data" rewarded ad — +n Setup Knowledge on this weekend, once, before qualifying. The
+    // race it helps is marked (w.adBoost) and left out of the secret / achievement race facts (src/systems/secrets.js).
+    applyAdBoost(n) {
+      const w = cur();
+      if (!w || w.kind !== 'weekend' || w.adBoost || w.quali || w.driveLap) return false;
+      w.adBoost = n;
+      if (w.practice) {
+        w.practice = { ...w.practice, knowledge: api.knowledgeAfter(w.practice.skipped ? 0 : w.practice.runs) };
+        if (w.setup.auto) api.autoSetup(true);
+      }
+      bus.emit('race:progress', {});
+      return true;
+    },
     // The crew's idea of the ideal setup: the truth plus a fixed error that shrinks with knowledge (§22.2).
     estimate() {
       const w = cur();
@@ -538,7 +552,7 @@ export function createRaces({ bus, team }) {
       const rating = (car) => (car ? Math.round((RATING_STATS.reduce((t, k) => t + (car[k] ?? 0), 0) / RATING_STATS.length) * 10) / 10 : 0);
       const others = race.entries.filter((e) => !e.isPlayer).map((e) => rating(e.car));
       const ratings = { car: rating(playerE?.car), field: others.length ? Math.round((others.reduce((t, v) => t + v, 0) / others.length) * 10) / 10 : 0 };
-      const entry = { raceType: race.raceType ?? 'standard', driver: playerE?.driverId ?? null, ratings, champ: race.champ ?? null, swingWin, wet: !!result.weather?.wet, n: race.n, kind: race.kind, trackId: race.trackId, laps: race.laps, day: team.clock.totalDays, carNumber: race.carNumber, seed: race.seed, result, wear, prize, reputation, grid: race.grid, quali: race.quali ?? null, setupScore: race.quali?.setupScore ?? null, crew: race.crew ?? [], sponsors: race.sponsors ?? [], telemetry: !!race.telemetry, eff: race.entries.find((e) => e.isPlayer)?.car?.EFF ?? null, fuelStart: race.entries.find((e) => e.isPlayer)?.fuel ?? null, modes, stints: (race.stints ?? []).length, blessings: [...(race.blessings ?? [])], chaos: race.chaos ?? null }; // (Milestone 30d: the gods in this race) // (Milestone 21: sponsor / contract facts)
+      const entry = { raceType: race.raceType ?? 'standard', driver: playerE?.driverId ?? null, ratings, champ: race.champ ?? null, swingWin, wet: !!result.weather?.wet, n: race.n, kind: race.kind, trackId: race.trackId, laps: race.laps, day: team.clock.totalDays, carNumber: race.carNumber, seed: race.seed, result, wear, prize, reputation, grid: race.grid, quali: race.quali ?? null, setupScore: race.quali?.setupScore ?? null, crew: race.crew ?? [], sponsors: race.sponsors ?? [], telemetry: !!race.telemetry, eff: race.entries.find((e) => e.isPlayer)?.car?.EFF ?? null, fuelStart: race.entries.find((e) => e.isPlayer)?.fuel ?? null, modes, stints: (race.stints ?? []).length, blessings: [...(race.blessings ?? [])], chaos: race.chaos ?? null, ...(race.adBoost ? { adBoost: race.adBoost } : {}) }; // (Milestone 31: an ad-helped weekend says so) // (Milestone 30d: the gods in this race) // (Milestone 21: sponsor / contract facts)
       api.history.push(entry);
       if (api.history.length > HISTORY_KEEP) api.history.shift();
       api.current = null;

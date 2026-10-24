@@ -1,6 +1,6 @@
 // The Research tree (Milestone 11, bible §20): opened from the Research sheet (bottom-bar Research, the Strategy Desk
 // and the research stations). At the top: RP (the Research Token), the node being researched with its progress, days
-// left and Stop, and the two queues (the second locked until a facility or VIP opens it). Then six branch tabs; each
+// left and Stop, and the two queues (the second opens at Rank B — Milestone 31; earned, never bought). Then six branch tabs; each
 // branch lists its six nodes in order as cards: the part's picture, name, tier and RP cost, its state (Done / Researching
 // / Open / Locked with what it needs), a progress bar, and what it opens — part, facility and tyre pictures with their
 // names, bonuses and later-milestone flags as lines — and Start (paid in RP) or why not.
@@ -82,7 +82,7 @@ export function createResearchScreen({ layout, assets, team, topBar, toast = () 
   function header(ctx, y, w) {
     const active = research.active;
     const q2 = research.secondQueue;
-    const h = active ? 380 : 320;
+    const h = (active ? 380 : 320) + (q2.open && q2.nodeId ? 150 : 0); // (Milestone 31: + the second queue's topic)
     const box = { x: 0, y, w, h };
     if (ctx) {
       card(ctx, box, active ? 'info' : 'normal');
@@ -107,10 +107,22 @@ export function createResearchScreen({ layout, assets, team, topBar, toast = () 
       if (ctx) para(ctx, 'Queue 1 is free: pick an Open topic below and tap Start. It runs on the calendar.', PAD, yy, w - PAD * 2, { size: S.body, color: C.actionDark });
       yy += 90;
     }
-    // The second queue: shown, locked.
+    // The second queue: locked until Rank B (Milestone 31); open, it shows its own topic and Stop.
+    if (q2.open && q2.nodeId) {
+      const n2 = NODE[q2.nodeId];
+      if (ctx) {
+        text(ctx, `Queue 2: ${n2.name} (${nodeLabel(q2.nodeId)})`, PAD, yy, { size: S.button, bold: true, color: C.actionDark, maxWidth: w - PAD * 2 - 260 });
+        text(ctx, `${Math.floor(research.fraction(q2.nodeId) * 100)}% · about ${q2.daysLeft === Infinity ? '—' : q2.daysLeft} days left · ${q2.perDay.toFixed(1)} a day`, PAD, yy + 54, { size: S.small, color: C.textMuted, maxWidth: w - PAD * 2 - 260 });
+      }
+      bar(ctx, { x: PAD, y: yy + 100, w: w - PAD * 2 - 260, h: 30 }, research.fraction(q2.nodeId));
+      const stop2 = { x: w - PAD - 236, y: yy + 16, w: 236, h: 114 };
+      if (ctx) drawButton(ctx, stop2, 'Stop', { accent: C.progress });
+      hits.push({ rect: stop2, id: 'stop2', onTap: () => research.stop(1) && toast(`Stopped: ${n2.name}`, 'Its progress is kept — start it again for free') });
+      yy += 150;
+    }
     if (ctx) {
       drawPadlock(ctx, PAD + 16, yy + 30, 34, q2.open ? C.good : C.textFaint);
-      text(ctx, q2.open ? 'Second queue: open' : `Second queue: locked · ${q2.why}`, PAD + 52, yy + 12, { size: S.small, bold: true, color: C.textMuted, maxWidth: w - PAD * 2 - 52 });
+      text(ctx, q2.open ? (q2.nodeId ? 'Second queue: running' : 'Second queue: open — Start a second topic below') : `Second queue: locked · ${q2.why}`, PAD + 52, yy + 12, { size: S.small, bold: true, color: C.textMuted, maxWidth: w - PAD * 2 - 52 });
     }
     return h;
   }
@@ -181,7 +193,7 @@ export function createResearchScreen({ layout, assets, team, topBar, toast = () 
       const b = { x: PAD, y: yy + 10, w: inner, h: 114 };
       if (st === 'active') {
         if (ctx) drawButton(ctx, b, 'Stop (keeps its progress)', { accent: C.progress });
-        hits.push({ rect: b, id: `stop_${n.id}`, onTap: () => research.stop() });
+        hits.push({ rect: b, id: `stop_${n.id}`, onTap: () => research.stop(n.id) }); // (Milestone 31: whichever queue has it)
       } else {
         const ok = !why;
         const label = ok ? (research.paid(n.id) ? 'Start again (paid)' : `Start · ${fmt(research.costOf(n.id))} RP`) : st === 'locked' ? 'Locked' : why;

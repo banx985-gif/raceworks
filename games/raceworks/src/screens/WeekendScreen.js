@@ -21,6 +21,7 @@ import { SETUP_AXES, TYRES, FUEL, FUEL_ORDER, REPAIR, REPAIR_ORDER, RACE_ICONS, 
 import { raceClock } from './RaceScreen.js';
 import { GODS, GOD_RACE_TEXT } from '../../data/staff.js'; // Milestone 30d
 import { drawGodGlow } from '../ui/godGlow.js';
+import { REWARDED_BY_ID } from '../../data/monetisation.js'; // Milestone 31
 
 const C = THEME.color;
 const S = THEME.size;
@@ -29,6 +30,15 @@ const AXIS_H = 214;
 const CHOICE_H = 226; // a label, a row of buttons and its cost line
 
 export function createWeekendScreen({ layout, assets, team, topBar, onStartRace, onDriveLap = () => {}, toast = () => {} }) {
+  // Milestone 31: the optional "Practice data" rewarded ad (+Setup Knowledge this weekend; shown only with an ad provider)
+  let adBusy = false;
+  async function practiceAd() {
+    if (adBusy) return;
+    adBusy = true;
+    const r = await team.monetisation.watch('practiceBoost');
+    adBusy = false;
+    toast(r.message, r.ok ? 'This race won’t count for achievements' : '');
+  }
   const panel = new ScrollPanel({
     getRect: () => {
       const t = topBar.rect();
@@ -128,7 +138,10 @@ export function createWeekendScreen({ layout, assets, team, topBar, onStartRace,
     const maxRuns = WEEKEND.practice.maxRuns;
     {
       const more = !!pr && !pr.skipped && R.canPractice();
-      const h = pr ? 240 + (more ? 140 : 0) : 300;
+      const M = team.monetisation;
+      const ad = M.providerId !== 'none' ? M.placement('practiceBoost') : { show: false }; // Milestone 31
+      const adShow = ad.show;
+      const h = (pr ? 240 + (more ? 140 : 0) : 300) + (adShow ? 190 : 0);
       card(h, pr ? (more ? 'now' : 'done') : 'now');
       const sub = pr ? (pr.skipped ? 'Skipped: the crew guessed from the Engineer alone' : `${pr.runs} of ${maxRuns} runs · each run teaches the crew a little less than the one before`) : `Up to ${maxRuns} runs to learn the car on this circuit (you can skip it)`;
       heading(RACE_ICONS.practice, 'Practice', sub, y);
@@ -143,6 +156,7 @@ export function createWeekendScreen({ layout, assets, team, topBar, onStartRace,
         if (src.facilities) parts.push(`facilities +${src.facilities}`);
         if (src.technical) parts.push(`Wind Tunnel +${src.technical}`);
         if (src.traits) parts.push(`crew traits ${src.traits > 0 ? '+' : ''}${src.traits}`);
+        if (src.ad) parts.push(`ad data +${src.ad}`); // Milestone 31
         if (pr.log?.length > 1) parts.push(`runs ${pr.log.join(' → ')}`);
         note(parts.join(' · '), y + 180);
         if (more) btn('practice', { x: 24, y: y + 240, w: w - 48, h: 120 }, `Run practice (${pr.runs + 1} of ${maxRuns})`, {}, () => practiceRun(false));
@@ -150,6 +164,11 @@ export function createWeekendScreen({ layout, assets, team, topBar, onStartRace,
         const bw = (w - 64) / 2;
         btn('practice', { x: 24, y: y + 150, w: bw, h: 120 }, `Run practice (1 of ${maxRuns})`, {}, () => practiceRun(false));
         btn('skipPractice', { x: 40 + bw, y: y + 150, w: bw, h: 120 }, 'Skip practice', { accent: C.progress }, () => practiceRun(true));
+      }
+      if (adShow) {
+        const ay = y + h - 180;
+        btn('practiceAd', { x: 24, y: ay, w: w - 48, h: 110 }, adBusy ? 'Ad playing…' : ad.ok ? `${ad.label} (+${REWARDED_BY_ID.practiceBoost.effect.knowledge} Setup Knowledge)` : `Ad: ${ad.sub}`, { accent: C.gold, disabled: !ad.ok || adBusy }, () => practiceAd());
+        note(wk.adBoost ? 'Practice data added: this race won’t count for achievements' : 'Optional · a race helped by an ad won’t count for achievements', ay + 128, wk.adBoost ? C.good : C.textMuted);
       }
       y += h + 20;
     }

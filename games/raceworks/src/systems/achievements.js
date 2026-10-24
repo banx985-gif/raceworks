@@ -55,6 +55,8 @@ export function createAchievements({ bus, team, rules = [...ACHIEVEMENTS, ...HID
 
   // --- the Milestone 26 facts (data/secrets.js FACTS lists them for the validator) --------------------------------
   const races = () => team.secrets.log.races;
+  // Milestone 31: Credits on hand less every Credit from an ad or a purchase (debug money still counts here, as before)
+  const earnedCredits = () => team.money.credits - (team.secrets?.adCredits ?? 0);
   facts
     .define('run.champsOpen', () => {
       const CH = team.championships;
@@ -166,7 +168,7 @@ export function createAchievements({ bus, team, rules = [...ACHIEVEMENTS, ...HID
       podiums: cf.podiums ?? 0,
       poles: races().filter((r) => r.pole).length,
       fastestLaps: races().filter((r) => r.fastestLap).length,
-      peakCredits: Math.max(log.peakCredits, team.money.credits),
+      peakCredits: Math.max(log.peakCredits, earnedCredits()),
       bestFinish: perTrack((r) => (r.retired ? null : r.pos), 'min'),
       topSpeed: perTrack((r) => r.topSpeed, 'max'),
       lapRecord: perTrack((r) => r.bestLap, 'min'),
@@ -265,8 +267,8 @@ export function createAchievements({ bus, team, rules = [...ACHIEVEMENTS, ...HID
   // peak Credits every day.
   bus.on('clock:day', () => {
     const c = team.clock;
-    log.peakCredits = Math.max(log.peakCredits, team.money.credits);
-    if (c.month === 1 && c.day === 1 && c.totalDays > 0 && !log.yearEnds.some((y) => y.year === c.year - 1)) log.yearEnds.push({ year: c.year - 1, credits: team.money.credits });
+    log.peakCredits = Math.max(log.peakCredits, earnedCredits());
+    if (c.month === 1 && c.day === 1 && c.totalDays > 0 && !log.yearEnds.some((y) => y.year === c.year - 1)) log.yearEnds.push({ year: c.year - 1, credits: earnedCredits() });
   });
 
   // --- the Records screen's reading ---------------------------------------------------------------------------------

@@ -142,7 +142,10 @@ export const HELP_TOPICS = [
     'A message with a question waits for your answer. Tap any message to see it again.',
   ]),
   page('store', 'Store', 'race_reward_02', null, [
-    'The Store will offer Remove Ads, Racing Tokens and VIP, and a way to restore what you bought. It is coming later.',
+    'The Store sells two things, both optional: Remove Ads (once, kept for good — it turns off the full-screen ads between screens) and fixed packs of Racing Tokens (always exactly the amount shown, never a lucky dip). Restore Purchases brings Remove Ads back on another phone.',
+    'Racing Tokens buy convenience and looks only: an extra recruitment refresh, new sponsor offers, two extra team colours. They never speed anything up and never buy wins, secrets, gods, items or achievements.',
+    'Watching an ad is always your choice: a refresh of a Hire board, +20% on a contract just paid, a little practice data for one race weekend (that race then doesn’t count for achievements), or a few tokens — once a day each. A closed or failed ad changes nothing.',
+    'Full-screen ads are rare: only when you leave a race result or the ending ceremony, never before your first race result, never in the garage, a race or a drill, and never with Remove Ads. Nothing reaches the shops yet: the real store and ads arrive with the phone app.',
     'Nothing in the Store will ever buy wins, prestige, secrets or achievements.',
   ]),
   page('ending', 'The Year-16 ending', 'race_reward_07', 'race_event_07', [

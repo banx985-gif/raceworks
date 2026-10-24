@@ -5,7 +5,7 @@
 import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { text, para } from '../../../../core/ui/Kit.js';
-import { TEAM_COLOURS } from '../../data/setup.js';
+import { ALL_COLOURS, TEAM_COLOURS } from '../../data/setup.js';
 import { ENDING_TEXT as T } from '../../data/ending.js';
 import { drawSlotFrame, drawTeamBadge, initialsOf } from '../ui/setupArt.js';
 import { playTimeText } from './SlotsScreen.js';
@@ -25,7 +25,7 @@ export function createHallOfRunsScreen({ layout, header, archive, onBack }) {
 
   function runCard(ctx, e, x, y, w) {
     const pad = 40;
-    const colour = TEAM_COLOURS.find((c) => c.id === e.colour) ?? TEAM_COLOURS[0];
+    const colour = ALL_COLOURS.find((c) => c.id === e.colour) ?? TEAM_COLOURS[0];
     const lines = [
       { t: `Grade ${e.grade.band} · ${e.grade.total} / 1000${e.worldCrown ? ' · World Champions' : ''}`, bold: true, color: e.worldCrown ? C.gold : C.text },
       { t: `Founder ${e.founderName || '—'} · ended Year ${e.endedYear} · played ${playTimeText(e.playSeconds)}` },

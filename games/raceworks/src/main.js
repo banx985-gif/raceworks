@@ -117,6 +117,13 @@ import { SAVE_STORAGE, SAVE_TRIGGERS, OTHER_SAVE_EVENTS, AUTOSAVE_MS, ACCOUNT_VE
 import { createRunCheck, validateAccount, ACCOUNT_MIGRATIONS, blankAccount } from './app/saveCheck.js';
 import { createSaveInspector } from './ui/saveInspector.js';
 import { GODS } from '../data/staff.js'; // Milestone 30d
+// Milestone 31: monetisation (src/systems/monetisation.js on the shared core services) — the Store sheet, the pretend
+// provider with ?debug=1 only (core/FakeStoreProvider: no real ads or money until Milestones 37 / 38), the ad consent
+// stub, the Splash's store check, interstitials only when leaving a fresh race result or the ending ceremony.
+import { FakeStoreProvider } from '../../../core/FakeStoreProvider.js';
+import { AdConsent } from '../../../core/AdConsent.js';
+import { createStoreMenu } from './ui/storeMenu.js';
+import { PRODUCTS, DEBUG_STORE_CATALOGUE, DEBUG_STORE_KEY, AD_CONSENT_KEY, AD_TEXT, SPLASH_WORDS, STORE_TEXT as SHOP_TEXT, MONETISATION_ART } from '../data/monetisation.js';
 const COL = THEME.color;
 
 const W = 1080;
@@ -464,6 +471,21 @@ function applyVolumes() {
 }
 applyVolumes();
 const sfx = (id) => audio.play(id);
+// Milestone 31 (?debug=1 only): the pretend ad network and store. Its records live on this device only.
+let testStore = null;
+function presentAd(kind, placementId, outcome) {
+  if (outcome === 'fail') return Promise.resolve('fail');
+  return new Promise((resolve) => {
+    if (kind === 'interstitial') return dialog.show({ title: AD_TEXT.interstitialTitle, body: AD_TEXT.interstitialBody, art: MONETISATION_ART.ad, onCancel: () => resolve(outcome), buttons: [{ id: 'adClose', label: AD_TEXT.interstitialClose, accent: COL.progress, onTap: () => resolve(outcome) }] });
+    dialog.show({ title: AD_TEXT.playing, body: AD_TEXT.playingBody, art: MONETISATION_ART.ad, onCancel: () => resolve('cancel'), buttons: [{ id: 'adWatch', label: AD_TEXT.watch, accent: COL.good, onTap: () => resolve(outcome) }, { id: 'adCancel', label: AD_TEXT.close, accent: COL.progress, onTap: () => resolve('cancel') }] });
+  });
+}
+if (debug.enabled) {
+  const products = Object.fromEntries(Object.entries(PRODUCTS).map(([k, p]) => [k, { ...DEBUG_STORE_CATALOGUE[k], kind: p.kind, entitlement: p.entitlement }]));
+  const persist = { load: () => JSON.parse(localStorage.getItem(DEBUG_STORE_KEY) ?? 'null'), save: (s) => localStorage.setItem(DEBUG_STORE_KEY, JSON.stringify(s)) };
+  testStore = new FakeStoreProvider({ products, persist, present: (kind, id, o) => presentAd(kind, id, o) });
+  team.monetisation.setProvider(testStore);
+}
 const haptics = new Haptics({ enabled: () => settings.get('haptics') !== false });
 const haptic = (level) => haptics[level]?.();
 settings.onChange((k) => {
@@ -501,6 +523,12 @@ team.ending.setAccount({ load: async () => (slots ? ((await slots.loadAccount())
 // Milestone 28: the New Game+ lineage and the staff identities met — account-wide too
 team.ngplus.setAccount({ load: async () => (slots ? ((await slots.loadAccount()).ngplus ?? null) : null), save: (block) => saveAccountBlock('ngplus', block) });
 team.training.setDrillRecords(drillRecords);
+// Milestone 31: the store's account half (Remove Ads, processed purchase / ad ids, ad timing and limits, held tokens)
+team.monetisation.setAccount({ load: async () => (slots ? ((await slots.loadAccount()).store ?? null) : null), save: (block) => saveAccountBlock('store', block) });
+team.monetisation.runOpen = () => teamReady;
+const adConsent = new AdConsent({ key: AD_CONSENT_KEY });
+team.monetisation.consent = adConsent;
+bus.on('unlock:earned', ({ unlock }) => teamReady && toast(`${unlock.name} open!`, `${unlock.line} — earned at Rank ${unlock.rank}`));
 bus.on('stint:done', ({ record }) => drillRecords.recordStint(record)); // Milestone 18: Drive Stints on the account records
 // Milestone 20: the championship ladder — enter one (the fee on the ledger), race its next round (its race weekend).
 function enterChamp(id) {
@@ -596,7 +624,20 @@ function raceFinished(sim) {
   const entry = team.races.finish(sim);
   debug.log(entry ? `race finished: P${entry.result.rows.find((r) => r.isPlayer)?.pos}` : 'race finish failed');
   team.save('race:finished');
+  freshResult = !!entry && entry.kind === 'weekend';
   router.go('raceResult');
+}
+// Milestone 31: leaving the result of a race just run (not an old one opened from the Menu) is a natural break point —
+// core/AdService and src/systems/monetisation.js decide whether an interstitial shows (caps, Remove Ads, consent).
+let freshResult = false;
+function leaveResult() {
+  const fresh = freshResult;
+  freshResult = false;
+  router.go('garage');
+  if (fresh) showBreakPoint('raceResult');
+}
+function showBreakPoint(bp) {
+  return team.monetisation.breakPoint(bp, { decisionPending: eventCard.active || dialog.active }).then((r) => (debug.log(`interstitial at ${bp}: ${r.shown ? r.status : r.reason}`), r));
 }
 // The garage calendar pauses while a race screen is open and carries on at its old speed afterwards.
 let speedBeforeRace = null;
@@ -618,7 +659,9 @@ carDebug.nextMonth = () => {
   const m = clock.month;
   while (clock.month === m) clock.advanceDay();
 };
-const menus = createGarageMenus({ garage: () => garage, team, assets, open: openMenu, close: () => sheet.close(), goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t, b) => toast(t, b), goWeekend: () => goWeekend(), goTestRace: debug.enabled ? () => goTestRace() : null, goRaceResult: (index) => goSub('raceResult', { index }), goResearch: () => goResearch(), goRecruit: () => goRecruit(), goTrain: (id) => goTrain(id), debugTracks: debug.enabled ? debugTracks : null, goChampRound: () => goChampRound(), enterChamp: (id) => enterChamp(id), menuRow: (id) => openMenuRow(id), menuState: (id) => menuState(id), openSettings: () => openSettings(), showHelp: () => openHelp(null), sfx, haptic, sheetBack: () => sheetBack(), sheetBackLabel: () => sheetBackLabel(), openHelp: (t) => openHelp(t), refuse: (r) => refuse(r) });
+// Milestone 31: the Store and (?debug=1) its test controls (src/ui/storeMenu.js; registered by the garage menus).
+const storeMenu = createStoreMenu({ team, dialog, toast: (a, b) => toast(a, b), open: (k) => openMenu(k), debug: debug.enabled, consent: adConsent, provider: () => testStore, onBreakPoint: (bp) => showBreakPoint(bp) });
+const menus = createGarageMenus({ storeMenu, garage: () => garage, team, assets, open: openMenu, close: () => sheet.close(), goRoster, goStaff, goBuilder, goCarGarage, goMainMenu: () => goMainMenu(), debug: debug.enabled ? carDebug : null, toast: (t, b) => toast(t, b), goWeekend: () => goWeekend(), goTestRace: debug.enabled ? () => goTestRace() : null, goRaceResult: (index) => goSub('raceResult', { index }), goResearch: () => goResearch(), goRecruit: () => goRecruit(), goTrain: (id) => goTrain(id), debugTracks: debug.enabled ? debugTracks : null, goChampRound: () => goChampRound(), enterChamp: (id) => enterChamp(id), menuRow: (id) => openMenuRow(id), menuState: (id) => menuState(id), openSettings: () => openSettings(), showHelp: () => openHelp(null), sfx, haptic, sheetBack: () => sheetBack(), sheetBackLabel: () => sheetBackLabel(), openHelp: (t) => openHelp(t), refuse: (r) => refuse(r) });
 
 // ---------------------------------------------------------------------------
 // Milestone 25b: the Menu (core/ui/MenuSheet, rows in data/menu.js). A row runs the very code the art and the bars run.
@@ -1007,7 +1050,7 @@ function back() {
   else if (router.currentName === 'race') {
     if (!raceScreen.onBack()) pauseRace(); // Milestone 18: during a Drive Stint, Back hands back first; Milestone 29: then the pause sheet
   }
-  else if (router.currentName === 'raceResult') router.go('garage');
+  else if (router.currentName === 'raceResult') leaveResult(); // (Milestone 31: a break point)
   else if (router.currentName === 'drill' && drillScreen.onBack()) {
     /* the drill handles it (hand back / done) */
   }
@@ -1236,7 +1279,7 @@ const resultLines = (e) => {
   return out;
 };
 const C_GOOD = COL.good;
-const raceResultScreen = createRaceResultScreen({ layout, assets, team, topBar: screenBar, goGarage: () => router.go('garage'), goCar: (n) => goSub('car', { number: n }), extraLines: resultLines });
+const raceResultScreen = createRaceResultScreen({ layout, assets, team, topBar: screenBar, goGarage: () => leaveResult(), goCar: (n) => goSub('car', { number: n }), extraLines: resultLines });
 // The garage tells the daily tick what each person is doing, and its workers' places travel in the save.
 team.activityOf = (s) => garage.activityOf(s.id);
 team.garageSnapshot = () => garage.snapshot();
@@ -1270,9 +1313,19 @@ async function startSlots() {
   bootScreen.line = SAVE_WORDS.ready;
   if (slots.accountProblem) showAccountProblem();
 }
-// Milestone 30: the Splash's entitlement check is a stub until Milestone 31 (the store): nothing to check yet.
+// Milestone 31: the Splash's entitlement check — the account's store block, then purchases the store re-delivers (each
+// granted at most once) and a quiet check of Remove Ads (online only; offline, the cached answer stands).
 async function checkEntitlements() {
-  return { checked: false, entitlements: [] };
+  const M = team.monetisation;
+  await M.loadAccount();
+  if (M.providerId === 'none') {
+    bootScreen.line = SPLASH_WORDS.none;
+    return { checked: false, removeAds: M.removeAds, entitlements: M.removeAds ? ['removeAds'] : [] };
+  }
+  const r = await M.startup();
+  bootScreen.line = SPLASH_WORDS.done(r.removeAds);
+  debug.log(`store check: ${r.check.ok ? 'ok' : r.check.status} · re-delivered ${r.pending.delivered} · Remove Ads ${r.removeAds ? 'yes' : 'no'}`);
+  return { checked: !!r.check.ok, removeAds: r.removeAds, entitlements: r.removeAds ? ['removeAds'] : [], pending: r.pending };
 }
 async function refreshSlots({ splash = false } = {}) {
   slotList = await slots.list({
@@ -1353,6 +1406,8 @@ async function openTeam(n) {
   garage.loadTeam();
   teamReady = true;
   audio.playMusic('music_garage'); // Milestone 25b
+  const held = team.monetisation.payHeld(); // Milestone 31: Racing Tokens bought with no team open
+  if (held) toast(SHOP_TEXT.heldTokens(held));
   await (accountChain = accountChain.then(async () => {
     const acc = await slots.loadAccount();
     await slots.saveAccount({ ...blankAccount(), ...acc, lastSlot: n });
@@ -1621,7 +1676,7 @@ const ceremonyScreen = createCeremonyScreen({
   layout,
   assets,
   team,
-  onContinue: () => endCeremony(() => router.go('garage')),
+  onContinue: () => endCeremony(() => (router.go('garage'), showBreakPoint('ceremony'))), // (Milestone 31: a break point)
   onNgPlus: () => endCeremony(() => startNgPlus(activeSlot)), // Milestone 28
   onHelp: () => openHelp('ending'), // Milestone 29
   sfx,
@@ -1669,7 +1724,7 @@ const setupScreen = createTeamSetupScreen({
   onBack: () => router.go(setupFrom, setupFrom === 'slots' ? { mode: slotsScreen.mode } : {}),
 });
 
-if (debug.enabled) window.__rw = { saveInspector, openSaveInspector, appHidden, appShown, get away() { return away; }, get storage() { return storage; }, validateRun, bootScreen, newTeamOverDamaged, restoreSlot, promptRestore, checkEntitlements, showAccountProblem, bus, startRace, get accountChain() { return accountChain; }, menuHeader: header, helpScreen, openHelp, closeHelp, get helpOpen() { return helpOpen; }, get creditsOpen() { return creditsOpen; }, closeCredits, helpTopicFor, back, systemBack, get sheetNow() { return sheetNow; }, get sheetWay() { return sheetWay; }, sheetBack, pauseRace, resumeRace, creditsScreen, splashScreen, goCredits, menuRecords, menuNgPlus, refuse, get trail() { return trail; }, goSub, goStaff, goRoster, goBuilder, goCarGarage, goCar, goChampRound, enterChamp, ceremonyScreen, hallScreen, ngPlusScreen, startNgPlus, openNgSetup, get ngFlow() { return ngFlow; }, goHall, get hallList() { return hallList; }, hintLine, MENU_OPEN, openMenuRow, menuState, openSettings, syncMenuSlot, bottomItems, governor, lowFx, audio, haptics, openMenu, menus, comboRecords, slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, get events() { return team.events; }, eventCard, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, drillScreen, medalsScreen, drillRecords, taps: [] };
+if (debug.enabled) window.__rw = { storeMenu, get testStore() { return testStore; }, adConsent, showBreakPoint, leaveResult, get freshResult() { return freshResult; }, presentAd, saveInspector, openSaveInspector, appHidden, appShown, get away() { return away; }, get storage() { return storage; }, validateRun, bootScreen, newTeamOverDamaged, restoreSlot, promptRestore, checkEntitlements, showAccountProblem, bus, startRace, get accountChain() { return accountChain; }, menuHeader: header, helpScreen, openHelp, closeHelp, get helpOpen() { return helpOpen; }, get creditsOpen() { return creditsOpen; }, closeCredits, helpTopicFor, back, systemBack, get sheetNow() { return sheetNow; }, get sheetWay() { return sheetWay; }, sheetBack, pauseRace, resumeRace, creditsScreen, splashScreen, goCredits, menuRecords, menuNgPlus, refuse, get trail() { return trail; }, goSub, goStaff, goRoster, goBuilder, goCarGarage, goCar, goChampRound, enterChamp, ceremonyScreen, hallScreen, ngPlusScreen, startNgPlus, openNgSetup, get ngFlow() { return ngFlow; }, goHall, get hallList() { return hallList; }, hintLine, MENU_OPEN, openMenuRow, menuState, openSettings, syncMenuSlot, bottomItems, governor, lowFx, audio, haptics, openMenu, menus, comboRecords, slots: () => slots, get slotList() { return slotList; }, get activeSlot() { return activeSlot; }, dialog, textPrompt, menuScreen, slotsScreen, setupScreen, playSlot, startNewTeam, goMainMenu, refreshSlots, newGame, chooseNewGamePlusSlot, renderer, layout, input, loop, router, assets, sheet, garage, clock, team, autosave, rosterScreen, staffScreen, carBuilderScreen, carResultScreen, carGarageScreen, carDebug, toasts, raceIntroScreen, raceScreen, raceResultScreen, weekendScreen, goTestRace, goWeekend, leaveRace, settings, screenBar, badges, cycleDebugBadge, researchScreen, get events() { return team.events; }, eventCard, goResearch, recruitScreen, trainScreen, goRecruit, goTrain, checkStaffData, drillScreen, medalsScreen, drillRecords, taps: [] };
 
 router
   .register('splash', splashScreen) // Milestone 29

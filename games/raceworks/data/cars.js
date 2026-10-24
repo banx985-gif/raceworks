@@ -174,6 +174,7 @@ export const BUDGET_ORDER = ['lean', 'balanced', 'push'];
 // Project numbers (bible §14.6–14.10). Percent modifiers on a chance are relative (+5% of 2.2%, not +5 points).
 export const PROJECT = {
   teamSlots: 5, // bible §10.7
+  supportCrew: { pct: 35 }, // Milestone 31 (bible §10.7): the sixth slot's worker gives 35% of their work; opens at Rank A (data/monetisation.js EARNED_UNLOCKS)
   roleMatchPct: 8, // bible §10.7: a role that matches the phase
   // bible §14.6: progress per day = (base + teamScore / divisor) × scale. scale is the PACING KNOB (not the bible's
   // formula shape). Measured with the 3 starters on Balanced (resting when tired): scale 1 → the first Club Hatch took

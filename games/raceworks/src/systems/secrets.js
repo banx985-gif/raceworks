@@ -179,8 +179,8 @@ export function createSecrets({ bus, team, rules = [] }) {
     .define('run.rank', () => rankIndex())
     .define('run.year', () => team.clock.year)
     .define('run.titles', () => team.championships.titles())
-    .define('run.wins', () => team.careers.facts.wins ?? 0)
-    .define('run.podiums', () => team.careers.facts.podiums ?? 0)
+    .define('run.wins', () => Math.max(0, (team.careers.facts.wins ?? 0) - (log.adWins ?? 0))) // (Milestone 31: never an ad-helped race)
+    .define('run.podiums', () => Math.max(0, (team.careers.facts.podiums ?? 0) - (log.adPodiums ?? 0)))
     .define('run.facilities', () => team.facilities.builtIds())
     .define('run.facilityLevels', () => team.facilities.levels()) // Milestone 25b: facilityLevel(id) for rules
     .define('run.maxFacilityLevel', () => Math.max(0, ...team.facilities.levels().map((x) => x.level)))
@@ -355,6 +355,14 @@ export function createSecrets({ bus, team, rules = [] }) {
     const rows = entry.result?.rows ?? [];
     const me = rows.find((r) => r.isPlayer);
     if (!me) return;
+    // Milestone 31: a weekend helped by a rewarded ad (its "Practice data" boost) gives the secrets and achievements no
+    // fact at all — not its race record, records, wins or podiums (run.wins / run.podiums leave it out too).
+    if (entry.adBoost) {
+      const fin = me.status !== 'retired' && me.status !== 'running';
+      log.adWins = (log.adWins ?? 0) + (fin && me.pos === 1 ? 1 : 0);
+      log.adPodiums = (log.adPodiums ?? 0) + (fin && me.pos <= 3 ? 1 : 0);
+      return;
+    }
     const car = carRecord(entry.carNumber);
     const modes = entry.modes ?? {};
     const finished = me.status !== 'retired' && me.status !== 'running';
@@ -457,7 +465,7 @@ export function createSecrets({ bus, team, rules = [] }) {
     first('firstCar');
   }
   function onMonth() {
-    const cr = team.money.credits;
+    const cr = team.money.credits - (log.adCredits ?? 0); // (Milestone 31: an ad's Credits never make a month positive)
     if (log.monthStartCredits != null) {
       const net = cr - log.monthStartCredits;
       log.months.push({ month: log.months.length + 1, net, positive: net > 0 });
@@ -501,6 +509,8 @@ export function createSecrets({ bus, team, rules = [] }) {
   // Milestone 30d: breakthroughs this run, and every Credit that came from a paid source (or debug): never counted
   bus.on('car:breakthrough', () => (log.breakthroughs = (log.breakthroughs ?? 0) + 1));
   bus.on('economy:change', (line) => line?.currency === 'credits' && line.amount > 0 && PAID.has(line.category) && (log.paidCredits = (log.paidCredits ?? 0) + line.amount));
+  // Milestone 31: the same, without debug money — what an ad or a purchase brought (achievements, the monthly net)
+  bus.on('economy:change', (line) => line?.currency === 'credits' && line.amount > 0 && PAID.has(line.category) && line.category !== 'debug' && (log.adCredits = (log.adCredits ?? 0) + line.amount));
   bus.on('event:fired', ({ def }) => def?.id === 'EV_TECH_DEMO' && (log.techDemoSeen = true));
   bus.on('event:resolved', ({ def, choice }) => def?.id === 'EV_TECH_DEMO' && def.choices?.[choice]?.id === 'host' && (log.techDemoDone = true));
   // This run's part of the cross-run facts (set, never added: a reload can't count it twice); saved to the account
@@ -572,6 +582,7 @@ export function createSecrets({ bus, team, rules = [] }) {
     log.breakthroughs = cars.reduce((t, c) => t + (c.result.breakthroughs?.length ?? 0), 0) + (team.cars.builds ?? []).reduce((t, j) => t + (j.data?.breakthroughs?.length ?? 0), 0);
     log.cleanBuilds = cars.filter((c) => (c.result.faultsTotal ?? 1) === 0).length;
     log.paidCredits = (team.money.economy.ledger ?? []).filter((l) => l.currency === 'credits' && l.amount > 0 && PAID.has(l.category)).reduce((t, l) => t + l.amount, 0);
+    log.adCredits ??= (team.money.economy.ledger ?? []).filter((l) => l.currency === 'credits' && l.amount > 0 && PAID.has(l.category) && l.category !== 'debug').reduce((t, l) => t + l.amount, 0); // Milestone 31
   }
 
   const api = {
@@ -610,6 +621,10 @@ export function createSecrets({ bus, team, rules = [] }) {
     accolades: () => Object.keys(ACCOUNT_FLAGS).filter((k) => accountFlags()[k] != null).map((k) => ({ id: k, text: ACCOUNT_FLAGS[k], day: accountFlags()[k] })),
     get prestigeTokens() {
       return accountFlags().prestigeTokens ?? 0;
+    },
+    // Milestone 31: the Credits this run got from an ad or a purchase (debug money not counted) — the achievements leave them out
+    get adCredits() {
+      return log.adCredits ?? 0;
     },
     get finalPage() {
       return accountFlags().finalRumourPage != null ? FINAL_RUMOUR_PAGE : null;
@@ -655,7 +670,7 @@ export function createSecrets({ bus, team, rules = [] }) {
       engine.resetRun();
       runner.reset();
       log = blankLog();
-      log.monthStartCredits = team.money.credits;
+      log.monthStartCredits = team.money.credits - (log.adCredits ?? 0); // (Milestone 31)
       setStarters(team.roster.map((s) => s.id));
       flags = [];
       rumourLog = [];
@@ -693,7 +708,7 @@ export function createSecrets({ bus, team, rules = [] }) {
       rebuildM30d();
       for (const e of team.races.history) onRace(e, { rebuilding: true });
       if (team.championships.titles().length) first('firstTitle');
-      log.monthStartCredits = team.money.credits;
+      log.monthStartCredits = team.money.credits - (log.adCredits ?? 0); // (Milestone 31)
       setStarters(starters());
       return false;
     },

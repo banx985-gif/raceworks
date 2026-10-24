@@ -11,8 +11,8 @@
 //
 // The queue: core research needs a worker on a queue. Until hiring brings researchers, the crew researches together:
 // the queue's worker is the built-in 'crew' researcher whose stat for a node is the team's best stat for that branch
-// (data/research.js BRANCHES.stat). The second queue exists but stays closed until a facility or the VIP entitlement
-// opens it (none does yet; no store wiring).
+// (data/research.js BRANCHES.stat). The second queue opens with a facility or (Milestone 31) at Rank B — earned in play,
+// never bought (it was VIP-only in the old plan).
 //
 // RP income (RP_BALANCE, PLACEHOLDER): finished car projects (+ firsts: a new class, a new class + parts combo),
 // breakthroughs, race weekends (+ first race / podium / win), the first contract (contracts pay their own RP, M5).
@@ -29,8 +29,11 @@ import { RESEARCH, BRANCHES, RP_BALANCE, QUEUES } from '../../data/research.js';
 import { PARTS, PROJECT_TYPES } from '../../data/cars.js';
 import { FACILITIES } from '../../data/facilities.js';
 import { TYRES, TYRE_ORDER } from '../../data/race.js';
+import { rankIndexOf } from '../../../../core/CompanyRank.js'; // Milestone 31
+import { RANKS } from '../../data/economy.js';
 
 export const CREW_RESEARCHER = 'crew';
+export const CREW_SECOND = 'crew2'; // Milestone 31: the crew on the second queue (a worker is on one queue only)
 export const BRANCH = Object.fromEntries(BRANCHES.map((b) => [b.id, b]));
 export const NODE = Object.fromEntries(RESEARCH.map((n) => [n.id, n]));
 // "Aerodynamics 4" — how the game names a node when something waits on it.
@@ -78,14 +81,15 @@ export function createResearch({ bus, team, R = RP_BALANCE }) {
     if (!rule) return true;
     if (rule.any) return rule.any.some(conditionMet);
     if (rule.effect) return (team.facilities?.bonus(rule.effect) ?? 0) > 0;
-    return false; // an entitlement (VIP): the store isn't wired yet
+    if (rule.rank) return (team.money?.reputation?.highestRankIndex ?? 0) >= rankIndexOf(RANKS, rule.rank); // Milestone 31: earned in play
+    return false;
   };
   const system = new ResearchSystem({
     bus,
     nodes: RESEARCH.map((n) => ({ id: n.id, name: n.name, cost: n.rp, requires: [...n.requires], actions: unlocksOf(n.id), branch: n.branch, tier: n.tier })),
     queues: QUEUES,
     runner,
-    staff: { get: (id) => (id === CREW_RESEARCHER ? crew : team.staff.get(id)) },
+    staff: { get: (id) => (id === CREW_RESEARCHER || id === CREW_SECOND ? crew : team.staff.get(id)) },
     rules: { basePerDay: R.basePerDay, statDivisor: R.statDivisor },
     hooks: {
       conditionMet,
@@ -145,9 +149,14 @@ export function createResearch({ bus, team, R = RP_BALANCE }) {
     get active() {
       return system.queues[0].nodeId;
     },
-    // The second queue: open only when a facility or entitlement allows it (never yet).
+    // The second queue (Milestone 31: opens at Rank B — earned in play, never bought; data/research.js QUEUES).
     get secondQueue() {
-      return { open: system.queueOpen(1), why: 'Opens with a later facility or VIP' };
+      const q = system.queues[1];
+      return { open: system.queueOpen(1), why: 'Opens at Rank B', nodeId: q?.nodeId ?? null, perDay: system.perDay(1), daysLeft: system.daysLeft(1) };
+    },
+    // The queue a node would start on now: the first open one that is free (0, then 1), else 0 (busy).
+    freeQueue() {
+      return system.queues.findIndex((q, i) => system.queueOpen(i) && !q.nodeId) === 1 ? 1 : 0;
     },
     status: (id) => system.status(id),
     fraction: (id) => system.fraction(id),
@@ -166,21 +175,24 @@ export function createResearch({ bus, team, R = RP_BALANCE }) {
       if (st === 'active') return 'Researching now';
       if (st === 'locked') return `Needs ${system.missing(id).nodes.map((x) => `${NODE[x].name} (${nodeLabel(x)})`).join(' and ')}`;
       system.rp = team.money.rp;
-      const c = system.canStart(0, id);
+      const c = system.canStart(api.freeQueue(), id);
       if (c.ok) return null;
       if (c.reason === 'This queue is busy') return `Researching ${NODE[system.queues[0].nodeId].name} — stop it first`;
       if (c.reason === 'Not enough RP') return `Needs ${system.costOf(id)} RP (you have ${team.money.rp})`;
       return c.reason;
     },
-    // Start a node on the one queue: pays its RP through the ledger the first time (a stopped node restarts free).
+    // Start a node on the first free queue (Milestone 31: the second once it is open and the first is busy): pays its
+    // RP through the ledger the first time (a stopped node restarts free).
     start(id) {
       system.rp = team.money.rp;
       const wasPaid = !!system.paid[id];
-      const r = system.start(0, id, CREW_RESEARCHER);
+      const q = api.freeQueue();
+      const r = system.start(q, id, q === 1 ? CREW_SECOND : CREW_RESEARCHER);
       if (r.ok && !wasPaid) economy().add('rp', -system.paid[id], `Research: ${NODE[id].name}`, 'research');
       return r;
     },
-    stop: () => system.stop(0),
+    // Stop a queue (0 / 1) or the queue holding a node id.
+    stop: (which = 0) => system.stop(typeof which === 'string' ? Math.max(0, system.queueOf(which)) : which),
 
     // --- what research has opened ----------------------------------------------------------------------------------
     // A research bonus's sum for an effect key (a bonus may need a facility standing, e.g. the Engine Bench's +5%).

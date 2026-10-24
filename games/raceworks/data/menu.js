@@ -50,7 +50,7 @@ export const MENU_GROUPS = [
   { title: 'More', rows: [
     row('settings', 'Settings', 'Sound, graphics, text size, the Menu button and hints', 'race_ui_menu'),
     row('help', 'Help', 'One page for every screen', 'race_ui_13'), // Milestone 29
-    row('shopStore', 'Store', 'Optional extras · coming later', 'race_reward_02'),
+    row('shopStore', 'Store', 'Remove Ads, Racing Tokens, team colours · optional', 'race_reward_02'),
     row('credits', 'Credits / Legal', 'Who made RACEWORKS, privacy and legal', 'race_brand_02'),
     row('mainMenu', 'Save & main menu', 'Saves your team, then back to the title screen', 'race_brand_02'),
   ] },

@@ -7,6 +7,7 @@ import { THEME } from '../../../../core/Theme.js';
 import { sponsorById, SPONSOR_SLOTS, DEAL_DAYS, DEAL_MONTH_DAYS } from '../../data/sponsors.js';
 import { fmt, signed } from './moneyMenu.js';
 import { ITEM_SOURCES, ITEM_RULES } from '../../data/items.js'; // Milestone 25b: a met obligation also brings an item
+import { TOKEN_SINKS } from '../../data/monetisation.js'; // Milestone 31
 
 const ITEM_WORD = ITEM_SOURCES.sponsor.onMet ? ` + ${ITEM_SOURCES.sponsor.onMet === 1 ? 'an item' : `${ITEM_SOURCES.sponsor.onMet} items`} for the ${ITEM_RULES.storeName}` : '';
 
@@ -93,6 +94,11 @@ export function sponsorSections(team, toast = () => {}) {
       buttons,
     });
   } else secs.push({ lines: ['No sponsor offers right now — new ones arrive on day 1 of next month.'] });
+  // Milestone 31: extra offers for Racing Tokens (convenience only — the same sponsors who could offer anyway)
+  if (team.monetisation) {
+    const why = team.monetisation.sponsorRefreshBlock();
+    secs.push({ columns: 1, buttons: [{ id: 'sponsorTokens', label: `New offers · ${TOKEN_SINKS.sponsorRefresh.cost} Racing Tokens`, sub: why ?? 'Draw this month’s offers again (renewals stay)', icon: 'race_reward_02', accent: C.progress, disabled: !!why, onTap: () => { const r = team.monetisation.sponsorRefresh(); toast(r.ok ? 'New sponsor offers' : r.reason, r.ok ? `−${TOKEN_SINKS.sponsorRefresh.cost} Racing Tokens` : ''); } }] });
+  }
 
   const past = sp.history.slice(-4).reverse();
   if (past.length) {

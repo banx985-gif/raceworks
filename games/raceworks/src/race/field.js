@@ -11,7 +11,7 @@ import { CHAMP_BANDS, bandIndex, champById } from '../../data/championships.js';
 import { RACE } from '../../data/race.js';
 import { CLASSES } from '../../data/cars.js';
 import { familyOfCar } from '../systems/carVisual.js'; // Milestone 22
-import { TEAM_COLOURS } from '../../data/setup.js';
+import { ALL_COLOURS, TEAM_COLOURS } from '../../data/setup.js';
 
 const SIX = ['qualifying', 'racecraft', 'wet', 'tyreCare', 'consistency', 'feedback'];
 const clampRating = (v) => Math.max(1, Math.min(999, Math.round(v)));
@@ -33,7 +33,7 @@ export function raceDriver(team) {
 export function playerEntry(team, rec) {
   const d = raceDriver(team);
   const r = team.ratingsOf(d);
-  const colour = TEAM_COLOURS.find((c) => c.id === team.setup.colour) ?? TEAM_COLOURS[0];
+  const colour = ALL_COLOURS.find((c) => c.id === team.setup.colour) ?? TEAM_COLOURS[0];
   return {
     id: 'PLAYER',
     name: d.name,

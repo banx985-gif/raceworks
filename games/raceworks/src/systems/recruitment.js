@@ -13,7 +13,8 @@
 //   board · the founder never (spec §9: they start employed; if they ever leave they do not come back as a candidate).
 // Refreshes: every open board is redrawn for free every 56 game days; a Credits refresh costs the channel's price ×2 for
 // each paid refresh already bought this game month; Racing Tokens (core/StoreStub, from the ledger) and a rewarded ad
-// (core/AdService on core/FakeStoreProvider — a pretend provider, no real ads; one a real day) are service stubs.
+// (one a real day) go through the team's monetisation (Milestone 31: src/systems/monetisation.js — the one Racing Token
+// ledger and the shared core/AdService; the pretend provider only with ?debug=1).
 // Hiring: a fee (PLACEHOLDER: one month's salary) through the ledger; their salary is paid with everyone's on day 1;
 // the staff cap by rank (bible §12: E 6, D 9, C 12, B 16, A 20, S 24). The hire walks into the garage and joins the
 // staff loops, the roster and car-team picks. Letting go frees the slot (not while on the car's team or on a course);
@@ -27,9 +28,6 @@
 // named people can be found (RECRUIT.namedChance…). ?debug=1: debugSpawn(id) puts any of the 50 (Legendary / Secret
 // too, never the founder or someone employed) on the Special tab as a hireable card — for testing only.
 import { RecruitmentSystem } from '../../../../core/RecruitmentSystem.js';
-import { AdService } from '../../../../core/AdService.js';
-import { FakeStoreProvider } from '../../../../core/FakeStoreProvider.js';
-import { StoreStub } from '../../../../core/StoreStub.js';
 import { Rng } from '../../../../core/Rng.js';
 import { rankIndexOf } from '../../../../core/CompanyRank.js';
 import { RANKS } from '../../data/economy.js';
@@ -214,11 +212,10 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
     draw(id, 'paid');
     return { ok: true, cost };
   }
-  // Service stubs (bible §12): Racing Tokens through a store stand-in on the ledger; a rewarded "ad" from the pretend
-  // provider, one per real day. Neither can make anyone eligible: they only redraw the same pools.
-  const store = new StoreStub({ economy: money.economy, bus, items: { recruitRefresh: { currency: 'tokens', cost: REFRESH_SERVICES.tokens.cost, name: 'Recruitment refresh' } } });
-  const provider = new FakeStoreProvider({ products: {}, now });
-  const ads = new AdService({ provider, now, bus, placements: [{ id: REFRESH_SERVICES.ad.placement, limit: { per: 'realHours', hours: REFRESH_SERVICES.ad.perRealHours, count: REFRESH_SERVICES.ad.count } }] });
+  // Racing Tokens and a rewarded ad (bible §12; Milestone 31: through team.monetisation — the one token ledger, the shared
+  // ad service, one ad a real day). Neither can make anyone eligible: they only redraw the same pools.
+  const M = () => team.monetisation;
+  const store = { block: () => M().tokenBlock('recruitRefresh'), purchase: (_item, reason) => M().spendTokens('recruitRefresh', reason) }; // (the Milestone 12 shape)
   const tokenWhy = (id) => channelWhy(id) ?? store.block('recruitRefresh');
   function refreshWithTokens(id) {
     const why = tokenWhy(id);
@@ -230,15 +227,17 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
   const adWhy = (id) => {
     const block = channelWhy(id);
     if (block) return block;
-    const r = ads.rewardBlock(REFRESH_SERVICES.ad.placement, null);
-    return r === 'limit reached' ? 'One ad refresh a day: used' : r;
+    if (M().ads.limitBlock(REFRESH_SERVICES.ad.placement, null)) return 'One ad refresh a day: used';
+    return M().placementBlock(REFRESH_SERVICES.ad.placement, { channel: id });
   };
   async function refreshWithAd(id) {
     const why = adWhy(id);
     if (why) return { ok: false, reason: why };
-    const r = await ads.rewarded(REFRESH_SERVICES.ad.placement, null, () => draw(id, 'ad'));
-    return r.ok ? { ok: true } : { ok: false, reason: r.reason ?? `The ad ${r.status ?? 'failed'}: no refresh` };
+    const r = await M().watch(REFRESH_SERVICES.ad.placement, { channel: id });
+    return r.ok ? { ok: true } : { ok: false, reason: r.message };
   }
+  // The rewarded ad's redraw (team.monetisation calls it once the ad was watched to the end).
+  const adRedraw = (id) => draw(id, 'ad');
 
   // --- hiring and letting go ------------------------------------------------------------------------------------------
   const staffCap = () => RECRUIT.staffCaps[RANKS[rankIndex()].id];
@@ -350,9 +349,14 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
     boards,
     channels: CHANNELS,
     state,
-    ads,
-    provider, // the pretend ad provider (tests / debug: provider.setNext('ad', 'cancel'))
+    get ads() {
+      return M().ads;
+    },
+    get provider() {
+      return M().provider; // (tests / debug: the pretend provider's setNext('ad', 'cancel'))
+    },
     store,
+    adRedraw,
     channelWhy,
     isOpen: (id) => chOpen(channelById(id)),
     cardsOf: (id) => (id === 'special' ? state.debugCards : (boards[id]?.cards ?? [])),
@@ -386,12 +390,11 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
       Object.assign(state, { lastFreeDay: today(), paid: { month: -1, count: 0 }, nextGeneric: 1, debugCards: [] });
       openBoards('start');
     },
-    serialize: () => JSON.parse(JSON.stringify({ boards: Object.fromEntries(Object.entries(boards).map(([k, b]) => [k, b.serialize()])), state, ads: ads.serializeAccount() })),
+    serialize: () => JSON.parse(JSON.stringify({ boards: Object.fromEntries(Object.entries(boards).map(([k, b]) => [k, b.serialize()])), state })), // (Milestone 31: the ad's real-day limit lives with the account now)
     // A save from before Milestone 12: fresh boards for the open channels, the free-refresh clock from today.
     load(data) {
       for (const [k, b] of Object.entries(boards)) b.load(data?.boards?.[k] ?? null);
       Object.assign(state, { lastFreeDay: today(), paid: { month: -1, count: 0 }, nextGeneric: 1, debugCards: [] }, data?.state ?? {});
-      ads.loadAccount(data?.ads ?? null);
       openBoards(data ? 'open' : 'start');
     },
   };

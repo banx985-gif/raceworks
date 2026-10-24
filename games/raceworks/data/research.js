@@ -118,9 +118,9 @@ export const RP_BALANCE = {
   },
 };
 
-// The queues (bible §20): one to start; the second opens later through facility progression (none gives it yet) or
-// the VIP entitlement (the store, later) — never wired to a store now.
+// The queues (bible §20): one to start; the second opens through facility progression (none gives it yet) or — since
+// Milestone 31, earned in play for everyone — at Rank B (it was VIP-only in the old plan; nothing can buy it).
 export const QUEUES = [
   { id: 'main', name: 'Research' },
-  { id: 'second', name: 'Second queue', rule: { any: [{ effect: 'researchQueue' }, { entitlement: 'vip' }] } },
+  { id: 'second', name: 'Second queue', rule: { any: [{ effect: 'researchQueue' }, { rank: 'B' }] } },
 ];

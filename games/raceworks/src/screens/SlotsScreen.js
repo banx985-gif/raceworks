@@ -12,7 +12,7 @@ import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { text } from '../../../../core/ui/Kit.js';
-import { TEAM_COLOURS, PLAYER_TITLE, SLOT_COUNT } from '../../data/setup.js';
+import { ALL_COLOURS, TEAM_COLOURS, PLAYER_TITLE, SLOT_COUNT } from '../../data/setup.js';
 import { drawSlotFrame, drawTeamBadge, initialsOf } from '../ui/setupArt.js';
 import { SAVE_WORDS } from '../../data/save.js'; // Milestone 30
 
@@ -104,7 +104,7 @@ export function createSlotsScreen({ layout, assets, header, slots, onPlay, onNew
       return h;
     }
     const d = s.summary;
-    const colour = TEAM_COLOURS.find((c) => c.id === d.colour) ?? TEAM_COLOURS[0];
+    const colour = ALL_COLOURS.find((c) => c.id === d.colour) ?? TEAM_COLOURS[0];
     const ngRow = mode === 'load' && d.ended && onNgPlus; // Milestone 27: a finished run can start New Game+
     const h = ngRow ? 610 : 470;
     const locked = mode === 'ngplus' && parent === s.n;

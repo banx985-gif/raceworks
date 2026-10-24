@@ -12,7 +12,7 @@
 // Inside each anchor polygon (CAR_FAMILIES[...].liveryAnchors) only the red body paint changes: its hue becomes the team
 // colour and its light and shade stay, so outlines, windows, lights, tyres and the white / yellow stripes are untouched.
 import { familyOfArt } from '../../data/cars.js';
-import { TEAM_COLOURS } from '../../data/setup.js';
+import { ALL_COLOURS, TEAM_COLOURS } from '../../data/setup.js';
 import { sponsorById } from '../../data/sponsors.js';
 import { familyOfCar } from '../systems/carVisual.js';
 
@@ -46,7 +46,7 @@ function tinted(assets, artKey, fam, view, colourId) {
   const key = `${artKey}~${colourId}`;
   if (assets.images.has(key)) return key;
   const img = assets.get(artKey);
-  const colour = TEAM_COLOURS.find((c) => c.id === colourId);
+  const colour = ALL_COLOURS.find((c) => c.id === colourId);
   if (!img || !colour || typeof document === 'undefined') return null;
   const canvas = paint(img, fam.liveryAnchors[view] ?? [], colour.main, PAINT_HUE[fam.paint] ?? 4);
   if (!canvas) return null;

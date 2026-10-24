@@ -16,18 +16,10 @@ export const MAIN_MENU_TEXT = {
   credits: 'Credits / Legal',
 };
 
-// The Store (bible §7): a placeholder sheet until Milestone 31 brings the real one. Never wired to anything.
+// The Store (bible §7): Milestone 31's real sheet (src/ui/storeMenu.js, its words in data/monetisation.js); the Menu row's line.
 export const STORE_TEXT = {
   title: 'Store',
-  line: 'Optional extras · coming later',
-  later: 'coming later',
-  never: 'Nothing here will ever buy wins, prestige, secrets or achievements.',
-  rows: [
-    { id: 'removeAds', label: 'Remove Ads', line: 'Play with no adverts', icon: 'race_ui_13' },
-    { id: 'tokens', label: 'Racing Tokens', line: 'Speed-ups and shortcuts', icon: 'race_reward_02' },
-    { id: 'vip', label: 'VIP', line: 'A monthly bundle of small extras', icon: 'race_reward_08' },
-    { id: 'restore', label: 'Restore Purchases', line: 'Bring back what you bought on another phone', icon: 'race_ui_01' },
-  ],
+  line: 'Remove Ads, Racing Tokens, team colours · optional',
 };
 
 // Back (Milestone 29): leaving the garage asks first; the race pause sheet; a refused action's toast title.

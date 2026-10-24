@@ -106,7 +106,7 @@ export function devFromCar(rec) {
 // The slots a new recipe changes on a car.
 export const changedSlots = (oldParts, parts) => SLOTS.filter((sl, i) => oldParts[i] !== parts[i]).map((sl) => sl.id);
 
-export function createCarProjects({ bus, rng, staff, isResting = () => false, today = () => 0, stationIds = () => [], perkOf = () => null, facilities = () => null, busyElsewhere = () => null, combosFor = null, finishResearch = () => null }) {
+export function createCarProjects({ bus, rng, staff, isResting = () => false, today = () => 0, stationIds = () => [], perkOf = () => null, facilities = () => null, busyElsewhere = () => null, combosFor = null, finishResearch = () => null, supportSlots = () => 0 }) {
   let projects = null;
   // busyElsewhere(id) → reason | null (Milestone 12: someone away on a training course can't join the car's team).
   const assignments = new AssignmentSystem({ staff, getJobs: () => projects.jobs, bus, otherBusyIds: stationIds, busyElsewhere });
@@ -139,7 +139,8 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
     workerModifier(job, phase, s) {
       if (isResting(s.id)) return 0; // away recovering at the rest spot
       const match = ROLES[s.role]?.primaryStat === leadStat(phase) ? 1 + PROJECT.roleMatchPct / 100 : 1;
-      return match * (1 + (facilities()?.workPct(s.role) ?? 0) / 100) * phaseMult(s, phase.id);
+      const support = job.slots.indexOf(s.id) >= PROJECT.teamSlots ? PROJECT.supportCrew.pct / 100 : 1; // Milestone 31: the Support Crew slot
+      return match * (1 + (facilities()?.workPct(s.role) ?? 0) / 100) * phaseMult(s, phase.id) * support;
     },
     progressModifier(job, phase) {
       return (1 + (facilities()?.phaseSpeedPct(phase.id) ?? 0) / 100) * (1 + effectSum(working(job), 'buildSpeedPct') / 100); // (Milestone 30d: Zip)
@@ -335,13 +336,16 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
         // (Milestone 30c: the cars still in the bays count too, so two builds never share a name)
         name: `${CLASSES[classId].name}${proto ? ' Prototype' : ''} #${cars.count + projects.jobs.filter((j) => j.type !== 'upgrade').length + 1}`,
         phaseTarget: tier.target,
-        slots: PROJECT.teamSlots,
+        slots: api.crewSlots(),
         data: { bay: where, projectType: proto ? 'prototype' : 'newCar', classId, parts, tier: tier.id, cost: Math.round(carCost({ classId, parts }) * (proto ? PROJECT_TYPES.prototype.costMult : 1)), budget, nextBudget: null, budgets: [], faults: [], dev: {}, innovation: 0, breakthroughs: [], startedDay: today() },
       });
-      for (const id of staffIds.slice(0, PROJECT.teamSlots)) assignments.assign(job, id);
+      for (const id of staffIds.slice(0, api.crewSlots())) assignments.assign(job, id);
       projects.start(job);
       return { ok: true, job };
     },
+    // Milestone 31: a build's crew slots — the 5 core slots, + the Support Crew slot (35% of that worker's work) once
+    // the team has reached Rank A (bible §10.7, earned in play; was VIP's). The sixth person listed takes it.
+    crewSlots: () => PROJECT.teamSlots + Math.max(0, Math.min(1, supportSlots() | 0)),
     // Milestone 30b: the work and development share of a Major Upgrade that reworks n slots.
     upgradeShare: (n) => PROJECT_TYPES.upgrade.perSlot * n,
     // A Major Upgrade (bible §14.1) of finished car `carNumber` to `parts` (the same class; one or two slots changed).
@@ -364,10 +368,10 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
         type: 'upgrade',
         name: `Upgrade: ${rec.name}`,
         phaseTarget: Math.round(tier.target * share),
-        slots: PROJECT.teamSlots,
+        slots: api.crewSlots(),
         data: { bay, projectType: 'upgrade', carNumber, classId, parts: [...parts], oldParts: [...r.parts], slots, devScale: share, tier: tier.id, cost: cost ?? Math.round(carCost({ classId, parts }) * share), budget, nextBudget: null, budgets: [], faults: carried, dev: devFromCar(rec), innovation: r.innovation ?? 0, breakthroughs: [], startedDay: today() },
       });
-      for (const id of staffIds.slice(0, PROJECT.teamSlots)) assignments.assign(job, id);
+      for (const id of staffIds.slice(0, api.crewSlots())) assignments.assign(job, id);
       projects.start(job);
       return { ok: true, job };
     },

@@ -68,7 +68,8 @@ import { sponsorById } from '../../data/sponsors.js';
 import { recordsMenu } from './recordsMenu.js'; // Milestone 26
 import { stationSheet } from '../../../../core/ui/StationSheet.js'; // Milestone 29
 import { CHAMP_BANDS } from '../../data/championships.js';
-import { EMPTY_TEXT, SECRET_TEXT as SECRET_WORD, STORE_TEXT } from '../../data/screens.js';
+import { EMPTY_TEXT, SECRET_TEXT as SECRET_WORD } from '../../data/screens.js';
+import { createStoreMenu } from './storeMenu.js'; // Milestone 31
 import { BUILD_SHEET } from '../../data/menu.js';
 
 const C = THEME.color;
@@ -79,7 +80,7 @@ export function staffLine(s) {
   return [ROLES[s.role].name, `Level ${s.level}`, TIERS[s.tier].name, ...status].join(' · ');
 }
 
-export function createGarageMenus({ garage, team, assets = null, open, close = () => {}, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null, goResearch = () => {}, goRecruit = () => {}, goTrain = () => {}, debugTracks = null, goChampRound = () => {}, enterChamp = () => {}, menuRow = () => {}, menuState = () => ({}), openSettings = () => {}, showHelp = () => {}, sfx = () => {}, haptic = () => {}, sheetBack = null, sheetBackLabel = () => null, refuse = null }) {
+export function createGarageMenus({ storeMenu = null, garage, team, assets = null, open, close = () => {}, goRoster, goStaff, goBuilder, goCarGarage, goMainMenu = null, debug = null, toast = () => {}, goTestRace = null, goRaceResult = null, goWeekend = null, goResearch = () => {}, goRecruit = () => {}, goTrain = () => {}, debugTracks = null, goChampRound = () => {}, enterChamp = () => {}, menuRow = () => {}, menuState = () => ({}), openSettings = () => {}, showHelp = () => {}, sfx = () => {}, haptic = () => {}, sheetBack = null, sheetBackLabel = () => null, refuse = null }) {
   const menus = new MenuRegistry();
   const fac = team.facilities;
   // What a facility does, for its sheets (bible §19): its effect, its role and what it cost.
@@ -273,10 +274,11 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
       bars.push({ label: 'Progress', value: Math.floor(research.fraction(act) * 100), max: 100, text: `${Math.floor(research.fraction(act) * 100)}%` });
       buttons.push({ id: 'researchStop', label: 'Stop', sub: 'Keeps its progress', accent: C.progress, onTap: () => research.stop() });
     } else lines.push({ text: 'Nothing being researched: open the tree and start a topic.', color: C.bad });
+    if (q2.nodeId) lines.push(`Queue 2: ${NODE[q2.nodeId].name} (${nodeLabel(q2.nodeId)}) · ${Math.floor(research.fraction(q2.nodeId) * 100)}%`); // Milestone 31
     return [
       { lines, bars },
       { columns: 1, buttons },
-      { columns: 1, buttons: [{ id: 'queue2', label: 'Second queue', sub: q2.open ? 'Open' : q2.why, icon: RESEARCH_ICONS.tree, locked: !q2.open, onTap: () => {} }] },
+      { columns: 1, buttons: [{ id: 'queue2', label: 'Second queue', sub: q2.open ? (q2.nodeId ? 'Running · open the tree to change it' : 'Open · start a second topic in the tree') : q2.why, icon: RESEARCH_ICONS.tree, locked: !q2.open, onTap: q2.open ? goResearch : () => {} }] },
       // Milestone 22: the archives
       { columns: 1, buttons: [{ id: 'partsArchive', label: 'Parts Archive', sub: `Parts and combos · ${COMBOS.filter((c) => team.combos.discovered(c.id)).length} of 20 combos found`, icon: 'race_ui_03', accent: C.progress, onTap: () => open('partsArchive') }] },
     ];
@@ -297,17 +299,11 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
     return { id: 'sponsors', label: 'Sponsors', sub: `${sp.deals.length} of ${sp.slots()} slots · ${sp.offers.length} offer${sp.offers.length === 1 ? '' : 's'}`, icon: 'race_ui_02', accent: C.progress, onTap: () => open('sponsors') };
   };
   const extraFor = { F12: () => [trainButton()], F13: () => [storeButton()], F15: () => [sponsorsButton(), hireButton()], F30: () => (team.cars.byBay('proto') ? [jobButton(team.cars.byBay('proto'), 'protoBuild')] : []) }; // (Milestone 30c: the prototype being built)
-  // Milestone 29: the Store (bible §7) — a placeholder sheet only: the four rows, each "coming later". No billing (M31).
-  menus.register('shopStore', () => ({
-    title: STORE_TEXT.title,
-    subtitle: STORE_TEXT.line,
-    art: 'race_reward_02',
-    accent: C.progress,
-    sections: [
-      { columns: 1, buttons: STORE_TEXT.rows.map((r) => ({ id: `store_${r.id}`, label: r.label, sub: `${r.line} · ${STORE_TEXT.later}`, icon: r.icon, locked: true, onTap: () => {} })) },
-      { lines: [{ text: STORE_TEXT.never, color: C.textMuted }] },
-    ],
-  }));
+  // Milestone 31: the real Store ('shopStore', replacing Milestone 29's placeholder) and its ?debug=1 controls — src/ui/storeMenu.js
+  // (main.js gives one with the dialog; without it, a plain one whose messages are toasts).
+  const store = storeMenu ?? createStoreMenu({ team, dialog: { show: ({ title, body }) => toast(title, body) }, toast, open });
+  menus.register('shopStore', () => store.menu());
+  menus.register('storeDebug', () => store.debugMenu());
   menus.register('sponsors', () => ({ title: 'Sponsors', subtitle: `${team.sponsors.deals.length} of ${team.sponsors.slots()} slots · Rank ${team.money.rank}`, art: 'race_ui_02', accent: C.progress, sections: sponsorSections(team, toast) }));
 
   // Milestone 29: a station's live "Now" — what is happening there, in plain words.
@@ -513,7 +509,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
           { text: job.type === 'upgrade' ? `Upgrade: reworking ${job.data.slots.map((id) => SLOTS.find((s) => s.id === id)?.name ?? id).join(' and ')} · the car can't race until it is done` : `${PROJECT_TYPES[team.cars.typeOf(job)].name}${team.cars.typeOf(job) === 'prototype' ? ` · ×${PROJECT_TYPES.prototype.faultMult} fault risk, ×${PROJECT_TYPES.prototype.rpMult} RP at the end` : ''}`, color: C.actionDark },
           `In the bay: ${phase.stage}`,
           { text: `Faults: ${open} open (${job.data.faults.length} so far) · Breakthroughs: ${job.data.breakthroughs.length}`, color: open ? C.bad : C.text },
-          `Team (${teamList.length} of ${PROJECT.teamSlots}): ${teamList.map((s) => s.name.split(' ')[0]).join(', ')}${lead ? ` · ${lead.name.split(' ')[0]} leads this phase (+${PROJECT.roleMatchPct}%)` : ''}`,
+          `Team (${teamList.length} of ${job.slots.length}): ${teamList.map((s) => `${s.name.split(' ')[0]}${job.slots.indexOf(s.id) >= PROJECT.teamSlots ? ` (Support ${PROJECT.supportCrew.pct}%)` : ''}`).join(', ')}${lead ? ` · ${lead.name.split(' ')[0]} leads this phase (+${PROJECT.roleMatchPct}%)` : ''}`,
           `Budget focus (changes between phases): ${BUDGETS[job.data.budget].name}${job.data.nextBudget ? ` → ${BUDGETS[job.data.nextBudget].name} next phase` : ''}`,
           { text: `Running cost: ${fmt(team.money.carDailyCost(job))} Credits a day`, right: `−${fmt(team.money.carDailyCost(job))}` },
         ],

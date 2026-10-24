@@ -12,7 +12,7 @@ import { THEME } from '../../../../core/Theme.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { text, para, panel as drawPanel } from '../../../../core/ui/Kit.js';
 import { ENDING, ENDING_TEXT as T } from '../../data/ending.js';
-import { TEAM_COLOURS } from '../../data/setup.js';
+import { ALL_COLOURS, TEAM_COLOURS } from '../../data/setup.js';
 
 const C = THEME.color;
 const S = THEME.size;
@@ -73,7 +73,7 @@ export function createCeremonyScreen({ layout, assets, team, onContinue, onNgPlu
   // --- drawing --------------------------------------------------------------------------------------------------------
   function header(ctx, r) {
     const sr = layout.safeRect;
-    const colour = TEAM_COLOURS.find((c) => c.id === team.setup.colour) ?? TEAM_COLOURS[0];
+    const colour = ALL_COLOURS.find((c) => c.id === team.setup.colour) ?? TEAM_COLOURS[0];
     text(ctx, 'YEAR-16 CEREMONY', sr.x + 40, sr.y + 30, { size: S.small, bold: true, color: C.textMuted });
     text(ctx, team.setup.teamName, sr.x + 40, sr.y + 70, { size: S.heading, bold: true, color: colour.dark ?? C.text, maxWidth: (onHelp ? helpRect().x : skipRect().x) - 24 - sr.x - 40 });
     if (!isLast()) drawButton(ctx, skipRect(), 'Skip ›', { accent: C.progress });

@@ -6,7 +6,7 @@
 import { THEME } from '../../../../core/Theme.js';
 import { drawButton, hitRect } from '../../../../core/ui/Button.js';
 import { text } from '../../../../core/ui/Kit.js';
-import { TEAM_COLOURS } from '../../data/setup.js';
+import { ALL_COLOURS, TEAM_COLOURS } from '../../data/setup.js';
 import { drawTeamBadge, initialsOf } from '../ui/setupArt.js';
 import { liveryKey } from '../ui/livery.js';
 import { CLASSES } from '../../data/cars.js';
@@ -101,7 +101,7 @@ export function createMainMenuScreen({ renderer, layout, assets, slots, onContin
       text(ctx, 'Build the cars. Run the team. Win the title.', cx, titleY + 170, { size: S.body, bold: true, color: C.textMuted, align: 'center', maxWidth: sr.w - 80 });
       // Aaron's key art in a frame, and the latest team's car (Racing Red with no team yet) gently bobbing in front.
       const last = latest();
-      const colour = TEAM_COLOURS.find((c) => c.id === last?.summary.colour) ?? TEAM_COLOURS[0];
+      const colour = ALL_COLOURS.find((c) => c.id === last?.summary.colour) ?? TEAM_COLOURS[0];
       const top = titleY + 230;
       const room = buttons()[0].r.y - 30 - top;
       if (room > 220) {

@@ -9,15 +9,16 @@ export const SAVE_STORAGE = { dbName: 'raceworks', prefix: 'raceworks:', rolling
 // The run's version is SAVE_VERSION (data/balance.js); the account's is here.
 export const RUN_KIND = 'raceworks-run';
 export const ACCOUNT_KIND = 'raceworks-account';
-export const ACCOUNT_VERSION = 2; // 1 → 2 (Milestone 30): the normalised shape below
+export const ACCOUNT_VERSION = 3; // 1 → 2 (Milestone 30): the normalised shape below · 2 → 3 (Milestone 31): + 'store'
 
 // Every block of a run save (Team.serialize). From v23 every key is present — null when the save was made before
 // the milestone that added it (that system then starts from its "before" state, as it always has).
-export const RUN_BLOCKS = ['clock', 'rng', 'staff', 'cars', 'garage', 'setup', 'founder', 'noCandidates', 'playSeconds', 'money', 'races', 'facilities', 'research', 'recruitment', 'training', 'careers', 'championships', 'sponsors', 'contractRecords', 'events', 'runId', 'secrets', 'items', 'achievements', 'ending', 'ngPlus'];
+export const RUN_BLOCKS = ['clock', 'rng', 'staff', 'cars', 'garage', 'setup', 'founder', 'noCandidates', 'playSeconds', 'money', 'races', 'facilities', 'research', 'recruitment', 'training', 'careers', 'championships', 'sponsors', 'contractRecords', 'events', 'runId', 'secrets', 'items', 'achievements', 'ending', 'ngPlus', 'monetisation'];
 // …and of the account save (bible §44 "Account Save"): drill medals and Drive Stint records, combos, secret recipes
 // and cross-run facts, achievements and records, the Hall of Runs and Prestige Tokens, the New Game+ lineage and every
-// person met. Settings stay on the device (core/Settings); entitlements arrive with Milestone 31.
-export const ACCOUNT_BLOCKS = ['drills', 'combos', 'secrets', 'achievements', 'ending', 'ngplus'];
+// person met. Settings stay on the device (core/Settings). Milestone 31: 'store' — Remove Ads, the processed purchase /
+// ad ids, the pending ad request ids, the interstitial timing and the real-day ad limits, tokens bought with no team open.
+export const ACCOUNT_BLOCKS = ['drills', 'combos', 'secrets', 'achievements', 'ending', 'ngplus', 'store'];
 
 // The autosave triggers (bible §44), each with the game events that ask for it. A save remembers the one that
 // wrote it (the save inspector and the "an older save was loaded" note show it).
@@ -56,7 +57,7 @@ export const SAVE_REASONS = {
 export const SAVE_WORDS = {
   checking: (n, of) => `Checking your saves… slot ${n} of ${of}`,
   updating: (n, from, to) => `Updating slot ${n} (save v${from} → v${to})`,
-  entitlements: 'Purchases: nothing to check yet', // Milestone 31 checks the store here
+  entitlements: 'Checking purchases…', // Milestone 31: the store check (re-delivered purchases, Remove Ads)
   ready: 'Ready',
   fallbackTitle: 'An older save was loaded',
   fallbackBody: (from) => `The newest save of this team couldn’t be read (the phone may have closed the game while it was saving), so the one before it was loaded${from ? ` — from ${from}` : ''}. The damaged copy is kept.`,

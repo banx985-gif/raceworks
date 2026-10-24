@@ -42,8 +42,8 @@ export function moneyMenu({ slot, team, goMainMenu = null, debug = null, toast =
         ...(team.cars.builds.length ? [`Every day while building: ${team.cars.builds.map((j) => `${j.name} ${fmt(m.carDailyCost(j))}`).join(' · ')} = ${fmt(team.cars.builds.reduce((t, j) => t + m.carDailyCost(j), 0))} Credits`] : []),
         ...debtLines,
       ],
-      // Milestone 29: the Store (Racing Tokens, Remove Ads, VIP — a placeholder until Milestone 31)
-      ...(openStore ? { columns: 1, buttons: [{ id: 'openStore', label: 'Store', sub: 'Racing Tokens, Remove Ads, VIP · coming later', icon: 'race_reward_02', accent: C.progress, onTap: openStore }] } : {}),
+      // Milestone 31: the Store (Remove Ads, Racing Token packs, Restore; what tokens buy)
+      ...(openStore ? { columns: 1, buttons: [{ id: 'openStore', label: 'Store', sub: 'Remove Ads, Racing Tokens, team colours · optional', icon: 'race_reward_02', accent: C.progress, onTap: openStore }] } : {}),
     },
   ];
   if (goMainMenu) {
@@ -140,9 +140,14 @@ function contractSections(team, toast) {
   if (!cs.active.length && !cs.offers.length) secs.push({ lines: ['No offers right now — a new one arrives on day 1 of next month.'] });
   const done = cs.done.slice(-4).reverse();
   if (done.length) {
+    // Milestone 31: an optional ad for +20% on one ordinary contract just paid (only with an ad provider)
+    const M = team.monetisation;
+    const adFor = (c) => (M && M.providerId !== 'none' ? M.placement('contractBonus', { contractId: c.id }) : { show: false });
+    const adButtons = done.map((c) => ({ c, pl: adFor(c) })).filter((x) => x.pl.show).map(({ c, pl }) => ({ id: `adBonus_${c.id}`, label: pl.label, sub: pl.sub, icon: 'race_reward_08', accent: C.gold, disabled: !pl.ok, onTap: () => M.watch('contractBonus', { contractId: c.id }).then((r) => toast(r.message)) }));
     secs.push({
       title: 'Past contracts',
-      lines: done.map((c) => ({ text: `${c.title} (${c.client}): ${c.status === 'success' ? `paid ${fmt(c.credits)} Credits` : c.result?.reason === 'cancelled' ? 'given up' : 'deadline missed'}`, color: c.status === 'success' ? C.good : C.textMuted })),
+      lines: done.map((c) => ({ text: `${c.title} (${c.client}): ${c.status === 'success' ? `paid ${fmt(c.credits)} Credits${c.result?.adBonus ? ` + ${fmt(c.result.adBonus)} ad bonus` : ''}` : c.result?.reason === 'cancelled' ? 'given up' : 'deadline missed'}`, color: c.status === 'success' ? C.good : C.textMuted })),
+      ...(adButtons.length ? { columns: 1, buttons: adButtons } : {}),
     });
   }
   return secs;

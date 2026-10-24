@@ -89,6 +89,7 @@ import { StaffModel } from '../../../../core/StaffModel.js';
 import { createNgPlusRecords, ngBlockOf, legacyModel, modifierById } from '../systems/ngplus.js'; // Milestone 28
 import { START_MONEY } from '../../data/economy.js';
 import { RUN_KIND, RUN_BLOCKS, SAVE_TRIGGERS, SAVE_REASONS } from '../../data/save.js'; // Milestone 30
+import { createMonetisation } from '../systems/monetisation.js'; // Milestone 31
 
 // A new game's setup when none is given (tests, and saves from before Milestone 4b).
 export const DEFAULT_SETUP = { teamName: 'RACEWORKS', principal: 'Principal', colour: 'red', founderId: 'MEC01' };
@@ -183,6 +184,10 @@ export const SAVE_MIGRATIONS = {
   //   (clean builds, breakthroughs, Credits from paid sources) and A31 Pantheon. Nothing to change here — an older save has
   //   no gods, no SEC-GOD facts and no Pantheon; secrets.load() rebuilds the new run records from what the save holds.
   23: (record) => record,
+  //   24 → 25 (Milestone 31): monetisation — the run's 'monetisation' block (purchase / ad ids granted in it, results since
+  //   the last interstitial, token palettes, the Rank A / B unlocks noted). The key is added as null — monetisation.load()
+  //   gives such a save nothing bought, counts its race results so far, and notes the unlocks its rank already allows.
+  24: (record) => ({ ...record, data: { monetisation: null, ...record.data } }),
 };
 // The §44 trigger names, for the boundary a save carries (the save inspector, the fallback note).
 const TRIGGER_LABEL = { ...SAVE_REASONS, ...Object.fromEntries(SAVE_TRIGGERS.flatMap((t) => [[t.id, t.label], ...t.events.map((e) => [e, t.label])])) };
@@ -229,10 +234,12 @@ export class Team {
       busyElsewhere: (id) => (this.training?.trainingOf(id) ? 'Away on a training course' : null),
       combosFor: (job, prelim) => this.combos?.forCar(job, prelim) ?? null, // Milestone 22
       finishResearch: () => this.research?.finishOne() ?? null, // Milestone 30b: a Research Prototype's breakthrough
+      supportSlots: () => (this.monetisation?.supportCrewOpen() ? 1 : 0), // Milestone 31: the Support Crew slot from Rank A
     });
     this.money = createTeamMoney({ bus, seed, clock: this.clock, staff: this.staff, cars: this.cars, revealBonus: () => this.facilities.bonus('revealReputation'), generateOffer: (rng, taken) => contractTerms(this, rng, taken), onPaid: (c) => this.contractPaid(c), noCredit: () => this.hasModifier('noEmergency') }); // (Milestone 28: + the No Emergency Credit challenge) // (Milestone 21: the §29 contracts)
     // (Milestone 21: the sponsors' perks join the research bonuses in the one effect query)
     this.facilities = createGarageFacilities({ bus, today: () => this.clock.totalDays, progress: () => ({ year: this.clock.year, trophies: this.championships?.trophyList().length ?? 0 }), money: this.money, research: () => new Set(this.unlocks.research), secrets: () => new Set(this.secrets?.unlockedIds() ?? []), extraBonus: (key) => this.research.bonus(key) + (this.sponsors?.bonus(key) ?? 0) + (this.events?.bonus(key) ?? 0), extraKeys: () => [...this.research.bonusKeys(), ...(this.sponsors?.bonusKeys() ?? []), ...(this.events?.bonusKeys() ?? [])], discount: () => (this.ngPlus?.facility && !this.ngPlus.facility.used ? this.ngPlus.facility : null), onDiscountUsed: () => this.ngPlus?.facility && (this.ngPlus.facility.used = true) }); // (Milestone 28: + the New Game+ facility blueprint) // Milestone 10 (Milestone 23: + the events' timed modifiers)
+    this.monetisation = createMonetisation({ bus, team: this }); // Milestone 31 (before research and recruitment: they ask it)
     this.research = createResearch({ bus, team: this }); // Milestone 11
     this.combos = createCombos({ bus, team: this }); // Milestone 22 (after research: a discovery pays RP)
     this.races = createRaces({ bus, team: this }); // Milestone 6: the race being run (fixed seed) and the results
@@ -320,6 +327,7 @@ export class Team {
     this.championships.newGame(); // Milestone 20
     this.recruitment.newGame(); // Milestone 12: a board for Local Contacts (after the team and rank are set)
     this.sponsors.newGame(); // Milestone 21: empty slots and the first Sponsor board
+    this.monetisation.newGame(); // Milestone 31: nothing granted in this run yet
     this.contractRecords = blankContractRecords();
     this.money.firstOffers(); // Milestone 21: three contract offers the team can meet (the garage and research are set now)
     this.events.newGame(); // Milestone 23: an empty Inbox, then Opening the First Garage
@@ -634,6 +642,7 @@ export class Team {
       achievements: this.achievements.serialize(), // Milestone 26
       ending: this.ending.serialize(), // Milestone 27
       ngPlus: this.ngPlus ? JSON.parse(JSON.stringify(this.ngPlus)) : null, // Milestone 28
+      monetisation: this.monetisation.serialize(), // Milestone 31
     };
   }
 
@@ -671,6 +680,7 @@ export class Team {
     this.achievements.load(data.achievements ?? null); // none before Milestone 26: the run log rebuilt from the save
     if (this.achievements.attached) this.achievements.sync(); // records, completion and achievements from what it holds
     this.ending.load(data.ending ?? null); // none before Milestone 27: no ending yet
+    this.monetisation.load(data.monetisation ?? null); // none before Milestone 31 (after the races: it counts their results)
   }
 
   // A team saved before Milestone 5 had no money: it gets the §30.2 starting state today, and each car it already

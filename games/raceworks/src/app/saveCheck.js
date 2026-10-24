@@ -31,7 +31,7 @@ export function runShapeProblems(data) {
   }
   if (v.check(isObj(data.setup), 'the team setup is missing')) v.check(typeof data.setup.teamName === 'string', 'the team has no name');
   v.check(isNum(data.playSeconds) && data.playSeconds >= 0, 'the play time is not a number');
-  for (const k of ['cars', 'money', 'facilities', 'research', 'recruitment', 'training', 'careers', 'championships', 'sponsors', 'events', 'secrets', 'items', 'achievements', 'ending', 'ngPlus']) v.check(objOrNull(data[k]), `block "${k}" is not an object`);
+  for (const k of ['cars', 'money', 'facilities', 'research', 'recruitment', 'training', 'careers', 'championships', 'sponsors', 'events', 'secrets', 'items', 'achievements', 'ending', 'ngPlus', 'monetisation']) v.check(objOrNull(data[k]), `block "${k}" is not an object`);
   const r = data.races;
   if (v.check(objOrNull(r), 'block "races" is not an object') && r) {
     v.check(Array.isArray(r.history ?? []), 'the race history is not a list');
@@ -77,6 +77,8 @@ export function validateAccount(data) {
 // The account store's own migrations (core/SaveStore migrateSave; pure: each returns a new record).
 //   1 → 2 (Milestone 30): the normalised shape — every block key present (null when never written), the kind; every
 //   other key (the last slot played, the pre-4b move marker) carried over untouched.
+//   2 → 3 (Milestone 31): the 'store' block (null: nothing bought on this device yet).
 export const ACCOUNT_MIGRATIONS = {
   1: (record) => ({ ...record, data: { ...blankAccount(), ...record.data, kind: ACCOUNT_KIND } }),
+  2: (record) => ({ ...record, data: { store: null, ...record.data } }),
 };

@@ -45,7 +45,7 @@ import { REST } from '../../data/balance.js';
 import { statusIconsOf } from '../ui/statusIcons.js';
 import { createBuildShow } from '../ui/carBuildShow.js';
 import { PARTS, PROJECT_SPOTS, PHASES } from '../../data/cars.js';
-import { TEAM_COLOURS } from '../../data/setup.js';
+import { ALL_COLOURS, TEAM_COLOURS } from '../../data/setup.js';
 import { liveryKey, teamColourId, carArtKey } from '../ui/livery.js';
 import { structuralCombos } from '../systems/combos.js'; // Milestone 22
 import { visualFamily } from '../systems/carVisual.js';
@@ -998,7 +998,7 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
   // Floor and the two back walls (with the team stripes) over the whole building, the door, and the wings not open yet
   // as greyed floor with their name — drawn once into the cached layer (world units), again only when a wing opens.
   function drawRoom(g) {
-    const colour = TEAM_COLOURS.find((c) => c.id === team.setup?.colour);
+    const colour = ALL_COLOURS.find((c) => c.id === team.setup?.colour);
     drawIsoRoom(g, iso, {
       cols: mainCols,
       rows: mainRows,

@@ -240,22 +240,25 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
     y += para(ctx, BUDGETS[budget].text + '. Changes only between phases once the car is started.', 8, y, w - 16, { size: S.small, color: C.textMuted }) + 24;
 
     // --- team ---
-    heading(`Team · ${teamIds.length} of ${PROJECT.teamSlots} slots filled`);
+    const crewSlots = team.cars.crewSlots(); // Milestone 31: + the Support Crew slot from Rank A
+    heading(`Team · ${teamIds.length} of ${crewSlots} slots filled`);
     const note = `Any role can fill any slot. The role that leads a phase works ${PROJECT.roleMatchPct}% faster in it: ${PHASES.map((p) => `${p.name} → ${ROLES[leadRole(p)]?.name ?? '—'}`).join(' · ')}.`;
     y += para(ctx, note, 8, y, w - 16, { size: S.small, color: C.textMuted }) + 14; // (ctx null: measures only)
     const slotH = 150;
-    for (let i = 0; i < PROJECT.teamSlots; i++) {
+    if (crewSlots > PROJECT.teamSlots) y += para(ctx, `Slot ${crewSlots} is the Support Crew slot: whoever fills it gives ${PROJECT.supportCrew.pct}% of their work (opened at Rank A).`, 8, y, w - 16, { size: S.small, color: C.textMuted }) + 14;
+    for (let i = 0; i < crewSlots; i++) {
+      const support = i >= PROJECT.teamSlots;
       const r = { x: 0, y, w, h: slotH };
       const id = teamIds[i];
       const s = id ? team.get(id) : null;
       if (s) {
-        const sr = { art: s.art, title: s.name, lines: [{ text: `${ROLES[s.role].name} · Energy ${Math.round(s.energy)} · tap to take off`, size: S.small, color: C.textMuted }], right: `Slot ${i + 1}`, artSize: 110 };
+        const sr = { art: s.art, title: s.name, lines: [{ text: `${ROLES[s.role].name} · Energy ${Math.round(s.energy)} · tap to take off`, size: S.small, color: C.textMuted }], right: support ? `Support ${PROJECT.supportCrew.pct}%` : `Slot ${i + 1}`, artSize: 110 };
         row(sr, { ...r, h: slotH });
         hits.push({ rect: r, id: `slot_${s.id}`, onTap: () => (teamIds = teamIds.filter((x) => x !== s.id)) });
       } else if (ctx) {
         drawPanel(ctx, r, { fill: C.panelDim, stroke: C.line, radius: THEME.panel.radius });
-        text(ctx, `Slot ${i + 1} · empty`, 32, y + 40, { size: S.body, bold: true, color: C.textFaint });
-        text(ctx, 'Hire more staff to fill it (Staff → Hire)', 32, y + 90, { size: S.small, color: C.textFaint });
+        text(ctx, support ? `Support Crew · empty (${PROJECT.supportCrew.pct}% of their work)` : `Slot ${i + 1} · empty`, 32, y + 40, { size: S.body, bold: true, color: C.textFaint });
+        text(ctx, support ? 'Optional: a sixth person helps a little' : 'Hire more staff to fill it (Staff → Hire)', 32, y + 90, { size: S.small, color: C.textFaint });
       }
       y += slotH + 12;
     }
@@ -269,7 +272,7 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
       free.forEach((s, i) => {
         const r = { x: (i % 2) * (bw + 24), y: y + Math.floor(i / 2) * 134, w: bw, h: 120 };
         if (ctx) drawButton(ctx, r, `+ ${s.name.split(' ')[0]}`, { accent: C.progress });
-        hits.push({ rect: r, id: `add_${s.id}`, onTap: () => teamIds.length < PROJECT.teamSlots && teamIds.push(s.id) });
+        hits.push({ rect: r, id: `add_${s.id}`, onTap: () => teamIds.length < crewSlots && teamIds.push(s.id) });
       });
       y += Math.ceil(free.length / 2) * 134;
     }
