@@ -40,8 +40,20 @@ export const TRAIT_EFFECTS = {
   xpGainPct: { scope: 'self', words: (v) => [`XP ${pct(v)}`] },
   energyLossPct: { scope: 'self', words: (v) => [`Energy use ${pct(v)}`] },
   moraleFloor: { scope: 'self', words: (v) => [`Morale never below ${v}`] },
+  // Milestone 30d: the Works Gods' blessings (data/staff.js godBolt … godHavoc)
+  faultMult: { scope: 'carTeam', words: (v) => [`Car faults ×${v}`] },
+  breakthroughMult: { scope: 'carTeam', words: (v) => [`Breakthrough chance ×${v}`] },
+  buildSpeedPct: { scope: 'carTeam', words: (v) => [`Build phases ${pct(v)} faster`] },
+  chaosBuild: { scope: 'carTeam', words: (v) => [`Each build phase: ${v}% a free breakthrough, ${100 - v}% a fault`] },
+  retireMult: { scope: 'raceCrew', words: (v) => [`Mechanical retirements ×${v}`] },
+  weatherCalls: { scope: 'raceCrew', words: () => ['Weather calls always right'] },
+  cautionLuckPct: { scope: 'raceCrew', words: (v) => [`Cautions near your stop ${pct(v)}`] },
+  extraStints: { scope: 'raceCrew', words: (v) => [`+${v} Drive Stint a race (never tires)`] },
+  prizePct: { scope: 'team', words: (v) => [`Race prize money ${pct(v)}`] },
+  sponsorPct: { scope: 'team', words: (v) => [`Sponsor payouts ${pct(v)}`] },
+  chaosRace: { scope: 'team', words: (v) => [`One swing a race: ${v}% a pace boost, ${100 - v}% a spin`] },
 };
-export const SCOPE_WORDS = { self: '', carTeam: 'on the car’s team', raceCrew: 'in the race crew' };
+export const SCOPE_WORDS = { self: '', carTeam: 'on the car’s team', raceCrew: 'in the race crew', team: 'while on the team' };
 
 // Sum of a number effect over people (each person's traits; a trait counts once per person).
 export function effectSum(people, key, traits = TRAITS) {
@@ -49,6 +61,15 @@ export function effectSum(people, key, traits = TRAITS) {
   for (const s of people) for (const id of s?.traits ?? []) t += traits[id]?.effects?.[key] ?? 0;
   return t;
 }
+
+// Milestone 30d: a multiplier effect (faultMult …) over people — each person's value multiplied in (1 = none).
+export function effectProduct(people, key, traits = TRAITS) {
+  let t = 1;
+  for (const s of people) for (const id of s?.traits ?? []) if (traits[id]?.effects?.[key] != null) t *= traits[id].effects[key];
+  return t;
+}
+// Milestone 30d: a 'team' scope effect (Kaching's prize / sponsor money, Havoc's race swing) — everyone employed.
+export const teamEffect = (team, key) => effectSum(team.roster ?? [], key);
 
 // A person's own work in a car-project phase: +phasePct % (1 = no change).
 export function phaseMult(s, phaseId, traits = TRAITS) {

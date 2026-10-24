@@ -220,6 +220,19 @@ export const PROJECT_TYPES = {
 };
 export const projectTypeOf = (x) => x?.projectType ?? 'newCar'; // a job's data or a car's result
 
+// Milestone 30c: the build bays — how many projects run at once (Aaron, 23 Oct). New cars and upgrades use car bays;
+// a Research Prototype uses the Prototype Bay's own one.
+//   pitByLevel   car bays from the Pit Bay at level 1 / 2 / 3 (index = level; 0 = no Pit Bay)
+//   extension    + car bays once the Bay Extension wing is open (zone id), with a Pit Bay standing
+//   prototype    the Prototype Bay (F30): bays for Research Prototypes only
+// Bay ids: pit1 … pit3 on the Pit Bay, pit4 in the Bay Extension, proto on the Prototype Bay.
+export const BAYS = {
+  pitBay: 'F02', // the facility whose level sets the car bays
+  pitByLevel: [0, 1, 2, 3],
+  extension: { zone: 'bay', bays: 1 },
+  prototype: { facility: 'F30', bays: 1 },
+};
+
 // Pit Bay spots for the project team (one each, in slot order), spread round the bay so nobody hides anyone:
 // left front, right side, right front, then the two in between. Milestone 10: counted from the bay's back corner
 // (dc, dr), so they move with it; one that is built over falls back to the bay's free standing places.

@@ -313,8 +313,8 @@ export function createRecruitment({ bus, team, seed = 'raceworks', now = () => D
     const s = team.get(id);
     if (!s) return 'Not on the team';
     if (team.roster.length <= 1) return 'The team needs someone';
-    const job = team.cars.active;
-    if (job && job.slots.includes(id)) return `On the ${job.name} team: finish the car first`;
+    const job = team.cars.jobOf(id); // (Milestone 30c: any build)
+    if (job) return `On the ${job.name} team: finish the car first`;
     return extraBusy(id);
   }
   function letGo(id) {

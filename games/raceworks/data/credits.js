@@ -13,6 +13,9 @@ export const CREDITS = [
   { gap: 30 },
   { line: 'Canvas Management Series' },
   { gap: 30 },
+  { heading: 'The Works Gods' }, // Milestone 30d
+  { line: 'Bolt · Jinx · Zip · Kaching · Havoc' },
+  { gap: 30 },
   { heading: 'Thank you' },
   { line: 'for playing!' },
   { gap: 120 },

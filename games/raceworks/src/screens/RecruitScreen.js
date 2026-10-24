@@ -11,7 +11,7 @@ import { THEME } from '../../../../core/Theme.js';
 import { ScrollPanel } from '../../../../core/ui/ScrollPanel.js';
 import { drawButton, drawPadlock, hitRect } from '../../../../core/ui/Button.js';
 import { text, para, card } from '../../../../core/ui/Kit.js';
-import { STAT_KEYS, ROLES, TIERS, TRAITS, ALL_STAFF } from '../../data/staff.js';
+import { STAT_KEYS, ROLES, TIERS, TRAITS, ALL_STAFF, GODS } from '../../data/staff.js';
 import { CHANNELS, REFRESH_SERVICES, RECRUIT } from '../../data/recruitment.js';
 import { TOP_BAR } from '../../data/home.js';
 import { driverRatings } from '../systems/driverRatings.js';
@@ -22,7 +22,7 @@ const C = THEME.color;
 const S = THEME.size;
 const PAD = 24;
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
-const TIER_COLOR = { standard: C.textMuted, rare: C.progress, elite: C.purple, legendary: C.gold, secret: C.bad };
+const TIER_COLOR = { standard: C.textMuted, rare: C.progress, elite: C.purple, legendary: C.gold, secret: C.bad, divine: C.gold }; // (Milestone 30d: + Divine)
 
 export function createRecruitScreen({ layout, assets, team, topBar, toast = () => {}, goStaff = () => {}, debugEnabled = false }) {
   const rec = team.recruitment;
@@ -77,7 +77,7 @@ export function createRecruitScreen({ layout, assets, team, topBar, toast = () =
     const h = 560 + (driver ? 50 : 0);
     const box = { x: 0, y, w, h };
     if (ctx) {
-      card(ctx, box, ['elite', 'legendary', 'secret'].includes(c.tier) ? 'secret' : c.tier === 'rare' ? 'info' : 'normal');
+      card(ctx, box, ['elite', 'legendary', 'secret', 'divine'].includes(c.tier) ? 'secret' : c.tier === 'rare' ? 'info' : 'normal');
       const pr = { x: PAD, y: y + PAD, w: 250, h: h - PAD * 3 - 120 };
       ctx.fillStyle = C.panelAlt;
       ctx.beginPath();
@@ -126,7 +126,7 @@ export function createRecruitScreen({ layout, assets, team, topBar, toast = () =
     y += 70;
     const rowH = 124;
     const bw = 240;
-    for (const d of ALL_STAFF) {
+    for (const d of [...ALL_STAFF, ...GODS]) { // (Milestone 30d: + the gods, debug only)
       const busy = team.get(d.id) ? 'On the team' : d.id === team.founder?.id ? 'Founder' : rec.cardsOf('special').some((c) => c.personId === d.id) ? 'Spawned' : rec.cards.some((c) => c.personId === d.id) ? 'On a board' : null;
       const b = { x: w - bw, y: y + 6, w: bw, h: rowH - 12 };
       if (ctx) {

@@ -40,11 +40,17 @@ import { JobHistory } from '../../../../core/JobHistory.js';
 //                   checked again, an entry in rec.upgrades) — no new car — and 'car:upgraded' { job, record } follows
 //                   'project:complete' (which carries no record for an upgrade). inBay(number): that car can't race.
 //   prototype       the daily fault chance × faultMult; each breakthrough may finish a research node (finishResearch()).
+// Milestone 30c: several builds at once, one per bay (job.data.bay: 'pit1' … 'pit4', 'proto'; Team decides which bays
+//   exist and picks a free one). builds · byBay(bay) · jobOf(staffId) — core AssignmentSystem keeps a person on one
+//   build. `active` is still the first build (older code and tests); an older save's one build is in 'pit1'.
+// Milestone 30d: the Works Gods on a build's team — faultMult (Bolt) and breakthroughMult (Jinx) multiply the daily fault
+//   and the checkpoint breakthrough chance; buildSpeedPct (Zip) speeds the phases while he works; chaosBuild (Havoc) rolls
+//   once at each phase start: a free breakthrough (how: 'chaos') or one fault ('car:chaos' { job, phase, boost }).
 import { CAR_STATS, CAR_STAT_MAX, PARTS, SLOTS, CLASSES, PHASES, BUDGETS, PROJECT, PROJECT_TYPES, projectTypeOf } from '../../data/cars.js';
 import { partsCost, tierFor, checkCar, carCost } from './carCatalog.js';
 import { resolveFamily } from './carVisual.js';
 import { ROLES, TRAITS } from '../../data/staff.js';
-import { phaseMult } from './staffTraits.js';
+import { phaseMult, effectProduct, effectSum } from './staffTraits.js';
 
 // The stat that leads a phase (its biggest weight) → the role that gets the match bonus.
 export const leadStat = (phase) => Object.entries(phase.weights).sort((a, b) => b[1] - a[1])[0][0];
@@ -124,6 +130,10 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
   const founderFaultPct = (job, def) =>
     projects.teamOf(job).reduce((t, s) => t + (perkOf(s)?.extras ?? []).filter((e) => e.live && e.phase === def.id && /FaultPct$/.test(e.key)).reduce((u, e) => u + e.value, 0), 0);
   const traitPct = (job, key) => projects.teamOf(job).reduce((t, s) => t + s.traits.reduce((u, id) => u + (TRAITS[id]?.effects?.[key] ?? 0), 0), 0);
+  // Milestone 30d: the Works Gods' build blessings — a multiplier over the car's team (Bolt's faults, Jinx's
+  // breakthroughs), and Zip's speed / Havoc's chaos from whoever is working on it now (nobody resting).
+  const traitMult = (job, key) => effectProduct(projects.teamOf(job), key);
+  const working = (job) => projects.teamOf(job).filter((s) => !isResting(s.id));
 
   const hooks = {
     workerModifier(job, phase, s) {
@@ -132,7 +142,7 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
       return match * (1 + (facilities()?.workPct(s.role) ?? 0) / 100) * phaseMult(s, phase.id);
     },
     progressModifier(job, phase) {
-      return 1 + (facilities()?.phaseSpeedPct(phase.id) ?? 0) / 100;
+      return (1 + (facilities()?.phaseSpeedPct(phase.id) ?? 0) / 100) * (1 + effectSum(working(job), 'buildSpeedPct') / 100); // (Milestone 30d: Zip)
     },
     // Founder perk: "+6% <stat> contribution" — their perk stat counts 6% more in their share of the work.
     statModifier(job, phase, s, statKey) {
@@ -146,6 +156,15 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
       }
       job.data.budgets.push(job.data.budget);
       bus.emit('car:phase', { job, phase });
+      // Milestone 30d: Havoc's chaos — at each build phase he works on, one roll: a free breakthrough, else one fault
+      const chaos = effectSum(working(job), 'chaosBuild');
+      if (chaos > 0) {
+        const def = phaseDef(phase);
+        const boost = rng.chance(Math.min(100, chaos) / 100);
+        if (boost) breakthrough(job, def, 'chaos');
+        else addFault(job, def);
+        bus.emit('car:chaos', { job, phase, boost });
+      }
     },
     onDay(job, phase, { score }) {
       const def = phaseDef(phase);
@@ -158,6 +177,7 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
         pct *= 1 + traitPct(job, 'faultPct') / 100;
         pct *= 1 + founderFaultPct(job, def) / 100;
         if (projectTypeOf(job.data) === 'prototype') pct *= PROJECT_TYPES.prototype.faultMult; // Milestone 30b
+        pct *= traitMult(job, 'faultMult'); // Milestone 30d: Bolt
         if (rng.chance(pct / 100)) addFault(job, def);
       }
       if (def.fixes) {
@@ -171,7 +191,7 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
     },
     onCheckpoint(job, phase) {
       const b = PROJECT.breakthrough;
-      const pct = b.basePct + traitPct(job, 'breakthroughPct') + (job.data.pastInnovation ?? 0);
+      const pct = (b.basePct + traitPct(job, 'breakthroughPct') + (job.data.pastInnovation ?? 0)) * traitMult(job, 'breakthroughMult'); // (Milestone 30d: × Jinx)
       if (rng.chance(pct / 100)) breakthrough(job, phaseDef(phase));
     },
     onPhaseComplete(job, phase, summary) {
@@ -254,7 +274,7 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
   }
 
   // A breakthrough: remove an open fault if there is one, otherwise extra development for the phase's stats.
-  function breakthrough(job, def) {
+  function breakthrough(job, def, how = null) {
     const open = job.data.faults.find((x) => !x.fixed);
     let kind;
     if (open) {
@@ -266,7 +286,7 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
       kind = 'extra development';
     }
     job.data.innovation += PROJECT.breakthrough.innovation;
-    const b = { phase: def.id, day: today(), kind };
+    const b = { phase: def.id, day: today(), kind, ...(how ? { how } : {}) }; // (Milestone 30d: how 'chaos' — Havoc's)
     // Milestone 30b: a Research Prototype's breakthrough may finish a research node outright
     if (projectTypeOf(job.data) === 'prototype' && rng.chance(PROJECT_TYPES.prototype.researchPct / 100)) {
       const node = finishResearch(job);
@@ -300,8 +320,11 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
     // Start a car: class, its six parts (default: the Start parts), budget focus, the team (staff ids, up to 5).
     // Only the car's shape is checked here; whether the team may build it is Team.canStartCar (carCatalog).
     // Milestone 30b: projectType 'newCar' or 'prototype' (a Research Prototype: its name says so).
-    start({ classId = 'clubHatch', parts = null, budget = 'balanced', staffIds = [], projectType = 'newCar' }) {
-      if (api.active) return { ok: false, reason: 'A car is already being built' };
+    // Milestone 30c: bay = where it is built ('pit1' … 'pit4', 'proto'; Team picks a free one). Without one: 'pit1'
+    // ('proto' for a prototype).
+    start({ classId = 'clubHatch', parts = null, budget = 'balanced', staffIds = [], projectType = 'newCar', bay = null }) {
+      const where = bay ?? (projectType === 'prototype' ? 'proto' : 'pit1');
+      if (api.byBay(where)) return { ok: false, reason: 'A car is already being built' };
       parts = parts ? [...parts] : partsOf(classId);
       const shape = checkCar({ classId, parts });
       if (!shape.ok) return { ok: false, reason: shape.reasons[0] };
@@ -309,10 +332,11 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
       const proto = projectType === 'prototype';
       const job = projects.createJob({
         type: 'car',
-        name: `${CLASSES[classId].name}${proto ? ' Prototype' : ''} #${cars.count + 1}`,
+        // (Milestone 30c: the cars still in the bays count too, so two builds never share a name)
+        name: `${CLASSES[classId].name}${proto ? ' Prototype' : ''} #${cars.count + projects.jobs.filter((j) => j.type !== 'upgrade').length + 1}`,
         phaseTarget: tier.target,
         slots: PROJECT.teamSlots,
-        data: { projectType: proto ? 'prototype' : 'newCar', classId, parts, tier: tier.id, cost: Math.round(carCost({ classId, parts }) * (proto ? PROJECT_TYPES.prototype.costMult : 1)), budget, nextBudget: null, budgets: [], faults: [], dev: {}, innovation: 0, breakthroughs: [], startedDay: today() },
+        data: { bay: where, projectType: proto ? 'prototype' : 'newCar', classId, parts, tier: tier.id, cost: Math.round(carCost({ classId, parts }) * (proto ? PROJECT_TYPES.prototype.costMult : 1)), budget, nextBudget: null, budgets: [], faults: [], dev: {}, innovation: 0, breakthroughs: [], startedDay: today() },
       });
       for (const id of staffIds.slice(0, PROJECT.teamSlots)) assignments.assign(job, id);
       projects.start(job);
@@ -322,8 +346,9 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
     upgradeShare: (n) => PROJECT_TYPES.upgrade.perSlot * n,
     // A Major Upgrade (bible §14.1) of finished car `carNumber` to `parts` (the same class; one or two slots changed).
     // Only the shape is checked here (Team.canUpgrade checks the rest).
-    startUpgrade({ carNumber, parts, budget = 'balanced', staffIds = [], cost = null }) {
-      if (api.active) return { ok: false, reason: 'A car is already being built' };
+    startUpgrade({ carNumber, parts, budget = 'balanced', staffIds = [], cost = null, bay = 'pit1' }) {
+      if (api.byBay(bay)) return { ok: false, reason: 'A car is already being built' };
+      if (api.inBay(carNumber)) return { ok: false, reason: 'This car is already in the bay' };
       const rec = cars.get(carNumber);
       if (!rec?.result) return { ok: false, reason: 'No such car' };
       const classId = rec.result.classId;
@@ -340,7 +365,7 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
         name: `Upgrade: ${rec.name}`,
         phaseTarget: Math.round(tier.target * share),
         slots: PROJECT.teamSlots,
-        data: { projectType: 'upgrade', carNumber, classId, parts: [...parts], oldParts: [...r.parts], slots, devScale: share, tier: tier.id, cost: cost ?? Math.round(carCost({ classId, parts }) * share), budget, nextBudget: null, budgets: [], faults: carried, dev: devFromCar(rec), innovation: r.innovation ?? 0, breakthroughs: [], startedDay: today() },
+        data: { bay, projectType: 'upgrade', carNumber, classId, parts: [...parts], oldParts: [...r.parts], slots, devScale: share, tier: tier.id, cost: cost ?? Math.round(carCost({ classId, parts }) * share), budget, nextBudget: null, budgets: [], faults: carried, dev: devFromCar(rec), innovation: r.innovation ?? 0, breakthroughs: [], startedDay: today() },
       });
       for (const id of staffIds.slice(0, PROJECT.teamSlots)) assignments.assign(job, id);
       projects.start(job);
@@ -350,6 +375,12 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
     inBay: (number) => !!number && projects.jobs.some((j) => j.type === 'upgrade' && j.data.carNumber === number),
     raceable: () => cars.list().filter((r) => !api.inBay(r.number)),
     typeOf: (job) => projectTypeOf(job?.data),
+    // Milestone 30c: every build running now (one per bay), the build in a bay, the build someone is on.
+    get builds() {
+      return projects.jobs;
+    },
+    byBay: (bay) => projects.jobs.find((j) => j.data.bay === bay) ?? null,
+    jobOf: (staffId) => assignments.jobOf(staffId),
     // Budget focus for the next phase (bible §14.7: it only changes between phases).
     setNextBudget(job, budget) {
       job.data.nextBudget = budget === job.data.budget ? null : budget;
@@ -365,7 +396,7 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
     },
     openFaults: (job) => job.data.faults.filter((f) => !f.fixed).length,
     team: (job) => projects.teamOf(job),
-    onTeam: (staffId) => !!api.active?.slots.includes(staffId),
+    onTeam: (staffId) => !!assignments.jobOf(staffId), // (Milestone 30c: on any build)
     // Debug helpers (?debug=1): a fault or a breakthrough now.
     debugFault(job) {
       return addFault(job, PHASES[job.phaseIndex]);
@@ -379,6 +410,7 @@ export function createCarProjects({ bus, rng, staff, isResting = () => false, to
       projects.load(s?.projects);
       cars.load(s?.cars);
       for (const j of projects.jobs) j.data.projectType ??= 'newCar';
+      for (const j of projects.jobs) j.data.bay ??= j.data.projectType === 'prototype' ? 'proto' : 'pit1'; // Milestone 30c: an older save's one build
       for (const r of cars.list()) if (r.result) r.result.projectType ??= 'newCar';
     },
   };

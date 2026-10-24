@@ -28,7 +28,7 @@ import { CHAMPIONSHIPS } from '../../data/championships.js';
 import { FACILITIES, EXPANSIONS } from '../../data/facilities.js';
 import { CAR_FAMILIES, FAMILY_NAMES, CLASSES } from '../../data/cars.js';
 import { VISIBLE_TIERS, VISIBLE_COMBOS } from '../../data/achievements.js';
-import { ALL_STAFF } from '../../data/staff.js';
+import { ALL_STAFF, GODS } from '../../data/staff.js';
 import { CLOCK } from '../../data/balance.js';
 import { familyOfCar } from './carVisual.js';
 import { TRACKS } from '../race/tracks.js';
@@ -41,7 +41,7 @@ const TIER_RANK = { club: 1, national: 2, world: 3 };
 const GRADED_FACILITIES = new Set(FACILITIES.filter((f) => !f.unlock?.secret).map((f) => f.id)); // never F34 / F35
 const NORMAL_WINGS = EXPANSIONS.filter((z) => !z.secret).map((z) => z.id);
 const VISIBLE_FAMILIES = new Set(Array.from({ length: 16 }, (_, i) => `V${String(i + 1).padStart(2, '0')}`)); // V17–V20 are secret
-const STAFF_BY_ID = Object.fromEntries(ALL_STAFF.map((d) => [d.id, d]));
+const STAFF_BY_ID = Object.fromEntries([...ALL_STAFF, ...GODS].map((d) => [d.id, d])); // (Milestone 30d: + the gods)
 const champ = (id) => CHAMPIONSHIPS.find((c) => c.id === id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
 // A game day (totalDays) → "Year Y, Month M".

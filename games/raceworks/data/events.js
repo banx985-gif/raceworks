@@ -188,6 +188,13 @@ export const EVENTS = [
     title: 'A special arrival: {name}', text: '{name} ({role}) has heard about {team}. They are on the Recruitment Special tab for {days} days — hire them before they go.',
     effects: [], choices: [{ id: 'look', label: 'Brilliant', line: 'Recruit → Special', effects: [], default: true }, { id: 'later', label: 'Later', line: 'They wait on the Special tab', effects: [] }],
   },
+  // Milestone 30d: a Works God's arrival (SEC-GOD-1 … 5, once each) — their own words ({arrival}; Havoc's "Something's
+  // not right in the garage…"), the same 56 days on the Special tab
+  {
+    id: 'EV_GOD_ARRIVAL', cls: 'staff', size: 'major', trigger: { type: 'fact', fact: 'godArrival' }, cooldownDays: 0,
+    title: '{name}, {title}', text: '{arrival} {name} ({role}, Divine) is on the Recruitment Special tab for {days} days — hire them before they go.',
+    effects: [], choices: [{ id: 'look', label: 'Wonderful', line: 'Recruit → Special', effects: [], default: true }, { id: 'later', label: 'Later', line: 'They wait on the Special tab', effects: [] }],
+  },
   {
     id: 'EV_UNDERDOG', cls: 'sponsor', size: 'major', trigger: { type: 'fact', fact: 'secretUnderdog' }, cooldownDays: 0,
     title: 'The underdog story', text: 'Everyone saw the slower car win. A sponsor wants the photos: "the team that beat the odds".',

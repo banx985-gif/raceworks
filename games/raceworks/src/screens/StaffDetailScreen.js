@@ -17,6 +17,7 @@ import { STAT_KEYS, STAT_NAMES, ROLES, TRAITS, DRIVER_RATINGS } from '../../data
 import { statusIconsOf } from '../ui/statusIcons.js';
 import { staffLine } from '../ui/garageMenus.js';
 import { traitLines } from '../systems/staffTraits.js';
+import { godOf, drawGodGlow, GOD_GOLD } from '../ui/godGlow.js'; // Milestone 30d
 import { ITEM_RULES, itemTypeById, itemGroupById } from '../../data/items.js'; // Milestone 25b
 
 const C = THEME.color;
@@ -52,7 +53,7 @@ export function createStaffDetailScreen({ layout, assets, team, garage, topBar, 
     let y = 0;
 
     // --- header ---
-    const headH = 470;
+    const headH = 470 + (godOf(s) ? 80 : 0); // (Milestone 30d: + a god's Divine badge)
     if (ctx) drawPanel(ctx, { x: 0, y, w, h: headH }, { radius: THEME.panel.radius });
     const pr = { x: 24, y: y + 24, w: 300, h: headH - 48 };
     if (ctx) {
@@ -60,6 +61,7 @@ export function createStaffDetailScreen({ layout, assets, team, garage, topBar, 
       ctx.beginPath();
       ctx.roundRect(pr.x, pr.y, pr.w, pr.h, 22);
       ctx.fill();
+      if (godOf(s)) drawGodGlow(ctx, pr.x + pr.w / 2, pr.y + pr.h * 0.55, pr.w * 0.62, pr.h * 0.5); // Milestone 30d: a small gold glow
       assets.drawContained(ctx, s.art, { x: pr.x + 10, y: pr.y + 10, w: pr.w - 20, h: pr.h - 20 }, 'bottom');
       assets.drawContained(ctx, ROLES[s.role].badge, { x: pr.x - 8, y: pr.y - 8, w: 96, h: 96 });
     }
@@ -69,8 +71,17 @@ export function createStaffDetailScreen({ layout, assets, team, garage, topBar, 
     if (ctx) {
       text(ctx, s.name, tx, ty, { size: S.title, bold: true, maxWidth: tw });
       text(ctx, staffLine(s), tx, ty + 70, { size: S.body, color: C.textMuted, maxWidth: tw });
+      // Milestone 30d: a god's title on a gold Divine badge
+      if (godOf(s)) {
+        const label = `Divine · ${godOf(s).title}`;
+        ctx.fillStyle = GOD_GOLD;
+        ctx.beginPath();
+        ctx.roundRect(tx, ty + 122, Math.min(tw, 60 + label.length * S.small * 0.56), S.small + 26, 14);
+        ctx.fill();
+        text(ctx, label, tx + 18, ty + 132, { size: S.small, bold: true, color: '#3b2a05', maxWidth: tw - 36 });
+      }
     }
-    ty += 130;
+    ty += 130 + (godOf(s) ? S.small + 40 : 0);
     const xpMax = team.staff.xpNeeded(s.level);
     const barRow = (label, value, max, color, right) => {
       if (ctx) {
@@ -144,7 +155,7 @@ export function createStaffDetailScreen({ layout, assets, team, garage, topBar, 
       const cardH = 80 + body + 20;
       if (ctx) {
         drawPanel(ctx, { x: 0, y, w, h: cardH }, { radius: THEME.panel.radius });
-        text(ctx, `${def?.name ?? t}${def?.signature ? ' · signature' : ''}`, 28, y + 22, { size: S.body, bold: true, color: C.purple });
+        text(ctx, `${def?.name ?? t}${def?.blessing ? ' · blessing' : def?.signature ? ' · signature' : ''}`, 28, y + 22, { size: S.body, bold: true, color: def?.blessing ? C.actionDark : C.purple }); // (Milestone 30d: a god's blessing)
         let ly = y + 74;
         for (const l of lines) ly += para(ctx, l, 28, ly, w - 56, { size: S.body, color: l.startsWith('Later') ? C.textMuted : l === def?.text ? C.text : C.actionDark });
       }

@@ -3,7 +3,7 @@ import { STATIONS } from './garage.js';
 import { PROPS, START_LAYOUT } from './facilities.js';
 
 const START_IDS = new Set(START_LAYOUT.map((p) => p.def));
-import { STAFF, ALL_STAFF, ROLES } from './staff.js';
+import { STAFF, ALL_STAFF, GODS, ROLES } from './staff.js';
 import { DRILL_ART } from './drills.js';
 import { CLASSES, PARTS, START_PARTS, BUILD_ART, CAR_FAMILIES } from './cars.js';
 import { BOTTOM_SLOTS, TOP_BAR } from './home.js';
@@ -64,7 +64,8 @@ export const ASSETS = {
 // all 50 (the Legendary / Secret 09–10 only through a ?debug=1 spawn until their special arrivals). Registered at boot,
 // loaded only when a board or a hire needs one.
 const STARTER_ART = new Set(STAFF.map((s) => s.art));
-export const STAFF_PORTRAITS = Object.fromEntries(ALL_STAFF.map((d) => d.art).filter((k) => !STARTER_ART.has(k)).map((k) => art('staff', k)));
+// (Milestone 30d: + the five Works Gods, staff_god01 … 05)
+export const STAFF_PORTRAITS = Object.fromEntries([...ALL_STAFF, ...GODS].map((d) => d.art).filter((k) => !STARTER_ART.has(k)).map((k) => art('staff', k)));
 
 // Milestone 9: every car family's two pictures and every part icon (about 17 MB in all). Registered at boot and loaded
 // a few at a time behind the game (main.js), so the first screen never waits for them; a picture still on its way

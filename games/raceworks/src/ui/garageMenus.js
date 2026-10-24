@@ -42,7 +42,7 @@ import { STATIONS } from '../../data/garage.js';
 import { BOTTOM_SLOTS } from '../../data/home.js';
 import { ROLES, TIERS } from '../../data/staff.js';
 import { STATUS_ORDER, STATUS_NAME } from './statusIcons.js';
-import { PHASES, BUDGETS, BUDGET_ORDER, CLASSES, PROJECT, PROJECT_TYPES } from '../../data/cars.js';
+import { PHASES, BUDGETS, BUDGET_ORDER, CLASSES, PROJECT, PROJECT_TYPES, BAYS } from '../../data/cars.js';
 import { leadRole } from '../systems/carProject.js';
 import { FOUNDER_FLAG } from '../../data/setup.js';
 import { COSTS } from '../../data/economy.js';
@@ -296,7 +296,7 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
     const sp = team.sponsors;
     return { id: 'sponsors', label: 'Sponsors', sub: `${sp.deals.length} of ${sp.slots()} slots · ${sp.offers.length} offer${sp.offers.length === 1 ? '' : 's'}`, icon: 'race_ui_02', accent: C.progress, onTap: () => open('sponsors') };
   };
-  const extraFor = { F12: () => [trainButton()], F13: () => [storeButton()], F15: () => [sponsorsButton(), hireButton()] };
+  const extraFor = { F12: () => [trainButton()], F13: () => [storeButton()], F15: () => [sponsorsButton(), hireButton()], F30: () => (team.cars.byBay('proto') ? [jobButton(team.cars.byBay('proto'), 'protoBuild')] : []) }; // (Milestone 30c: the prototype being built)
   // Milestone 29: the Store (bible §7) — a placeholder sheet only: the four rows, each "coming later". No billing (M31).
   menus.register('shopStore', () => ({
     title: STORE_TEXT.title,
@@ -322,9 +322,9 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
     } else if (def.id === 'F13') out.push(items.count ? `${items.count} item${items.count === 1 ? '' : 's'} waiting to be given` : { text: ITEM_TEXT.empty, color: C.textMuted });
     else if (def.id === 'F14') out.push(team.cars.cars.count ? `${team.cars.cars.count} car${team.cars.cars.count === 1 ? '' : 's'} · newest: ${team.cars.cars.latest()?.name ?? ''}` : { text: EMPTY_TEXT.cars, color: C.textMuted });
     else if (def.id === 'F30') { // Milestone 30b: the Prototype Bay
-      const job = team.cars.active;
+      const job = team.cars.byBay('proto'); // (Milestone 30c: its own bay)
       const why = team.prototypeWhy();
-      out.push(job && team.cars.typeOf(job) === 'prototype' ? `Building ${job.name} · ${Math.floor(team.cars.fraction(job) * 100)}% of ${team.cars.phase(job).name}` : why ? { text: why, color: C.bad } : `${team.careers.facts.prototypesBuilt ?? 0} research prototype${team.careers.facts.prototypesBuilt === 1 ? '' : 's'} built`);
+      out.push(job ? `Building ${job.name} · ${Math.floor(team.cars.fraction(job) * 100)}% of ${team.cars.phase(job).name}` : why ? { text: why, color: C.bad } : `${team.careers.facts.prototypesBuilt ?? 0} research prototype${team.careers.facts.prototypesBuilt === 1 ? '' : 's'} built`);
     } else if (def.id === 'F15') out.push(`${team.sponsors.deals.length} of ${team.sponsors.slots()} logo slots filled · ${team.sponsors.offers.length} offer${team.sponsors.offers.length === 1 ? '' : 's'}`);
     else if (FACILITY_ACTIONS[def.id]?.row === 'raceWeekend' || FACILITY_ACTIONS[def.id]?.row === 'championships') {
       const n = CH?.nextRound?.();
@@ -439,25 +439,62 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
       ],
     };
   });
+  // Milestone 30c: the bays. With one car bay the Pit Bay's sheet is the build's own sheet (or New car), as before; with
+  // two or more it lists the bays — each busy one opens its build's sheet ('buildJob') — and New car / Upgrade while one
+  // is free. The level line says how many car bays each level gives.
+  const bayLines = () =>
+    team.bays().filter((b) => b.kind === 'car').map((b) => (b.job ? `${b.name}: ${b.job.name} · ${cars().phase(b.job).name} ${Math.floor(cars().fraction(b.job) * 100)}%` : { text: `${b.name}: free`, color: C.good }));
+  const cars = () => team.cars;
+  const bayLevelLine = () => {
+    const lv = fac.facilityLevel('F02') || 1;
+    const next = BAYS.pitByLevel[lv + 1];
+    return { text: `Car bays: ${team.carBayCount()} (level ${lv} Pit Bay: ${BAYS.pitByLevel[lv]}${team.extensionOpen() ? ` · Bay Extension: +${BAYS.extension.bays}` : ''})${next ? ` · level ${lv + 1}: ${next}` : ''}`, color: C.actionDark };
+  };
+  const startButtons = () => {
+    const can = team.canStartCar();
+    return [
+      { id: 'newCar', label: 'New car', sub: can.ok ? 'Choose a class and parts' : can.reason, icon: assets ? liveryKey(assets, CLASSES.clubHatch.art, teamColourId(team)) : CLASSES.clubHatch.art, disabled: !can.ok, onTap: () => goBuilder() },
+      upgradeButton(), // Milestone 30b
+    ];
+  };
+  const jobButton = (job, id = `build_${job.id}`) => ({ id, label: `${team.bayName(job.data.bay)}: ${job.name}`, sub: `${PROJECT_TYPES[team.cars.typeOf(job)].name} · ${team.cars.phase(job).name} · ${Math.floor(team.cars.fraction(job) * 100)}%`, icon: job.data.bay === 'proto' ? 'facility_f30' : pitBay.art, accent: C.progress, onTap: () => open('buildJob', job.id) });
   menus.register('F02', () => {
-    const cars = team.cars;
-    const job = cars.active;
     const upgrade = upgradeOf(uidOf('F02'), pitBay, () => open('F02'));
-    if (!job) {
+    upgrade.lines.push(bayLevelLine());
+    if (team.carBayCount() <= 1) {
+      const job = cars().byBay('pit1');
+      if (job) return buildJobSheet(job, upgrade);
       const can = team.canStartCar();
       return stationSheet({
         title: pitBay.name,
         line: pitBay.purpose,
         art: pitBay.art,
         now: [can.ok ? 'Free: ready for a new car' : { text: `Free · ${can.reason}`, color: C.bad }, { text: atStation('F02'), color: C.textMuted }],
-        main: [
-          { id: 'newCar', label: 'New car', sub: can.ok ? 'Choose a class and parts' : can.reason, icon: assets ? liveryKey(assets, CLASSES.clubHatch.art, teamColourId(team)) : CLASSES.clubHatch.art, disabled: !can.ok, onTap: () => goBuilder() },
-          upgradeButton(), // Milestone 30b
-        ],
+        main: startButtons(),
         more: [garageButton()],
         upgrade,
       });
     }
+    const busy = team.bays().filter((b) => b.kind === 'car' && b.job);
+    return stationSheet({
+      title: pitBay.name,
+      line: `${team.carBayCount()} car bays · ${busy.length} building`,
+      art: pitBay.art,
+      now: [...bayLines(), { text: atStation('F02'), color: C.textMuted }],
+      main: startButtons(),
+      more: [...busy.map((b) => jobButton(b.job)), garageButton()],
+      upgrade,
+    });
+  });
+  menus.register('buildJob', (jobId) => {
+    const job = cars().builds.find((j) => j.id === jobId);
+    if (!job) return null;
+    return buildJobSheet(job, null);
+  });
+  // One build's sheet (Milestone 4's Pit Bay sheet; Milestone 30c: for the build in any bay).
+  function buildJobSheet(job, upgrade) {
+    const cars = team.cars;
+    const proto = job.data.bay === 'proto';
     const phase = cars.phase(job);
     const pct = Math.floor(cars.fraction(job) * 100);
     const days = cars.daysLeft(job);
@@ -488,16 +525,17 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
         title: 'Debug',
         buttons: [
           { id: 'dbgDays', label: '+5 days', accent: C.purple, onTap: () => debug.days(5) },
-          { id: 'dbgPhase', label: 'Finish phase', accent: C.purple, onTap: () => debug.finishPhase() },
+          { id: 'dbgPhase', label: 'Finish phase', accent: C.purple, onTap: () => debug.finishPhase(job) },
           { id: 'dbgFault', label: 'Fault now', accent: C.purple, onTap: () => cars.debugFault(job) },
           { id: 'dbgBreak', label: 'Breakthrough', accent: C.purple, onTap: () => cars.debugBreakthrough(job) },
         ],
       });
     }
+    const several = team.carBayCount() > 1 || proto;
     return stationSheet({
-      title: `${pitBay.name} · ${job.name}`,
+      title: `${team.bayName(job.data.bay)} · ${job.name}`,
       line: `Building: ${phase.stage.toLowerCase()} (${phase.name})`,
-      art: pitBay.art,
+      art: proto ? 'facility_f30' : pitBay.art,
       now: [`Phase ${job.phaseIndex + 1} of ${PHASES.length}: ${phase.name} · ${pct}% · about ${days} day${days === 1 ? '' : 's'} left`],
       main: [
         {
@@ -514,11 +552,11 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
           },
         },
       ],
-      more: [garageButton()],
+      more: [...(several ? [{ id: 'activeBuilds', label: 'All builds', sub: `${cars.builds.length} in the bays`, icon: pitBay.art, accent: C.progress, onTap: () => open(proto ? 'F30' : 'F02') }] : []), garageButton()],
       body,
-      upgrade,
+      ...(upgrade ? { upgrade } : {}),
     });
-  });
+  }
 
   // A worker's card (style guide §6, Milestone 29 on the shared station sheet): who they are, what they are doing now,
   // Train / Details, and an item for them.
@@ -551,7 +589,8 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
     menus.register(slot.id, () => {
       const menu = { title: slot.label, subtitle: slot.line, art: slot.icon, sections: [] };
       if (slot.id === 'build') {
-        const job = team.cars.active;
+        const builds = team.cars.builds; // Milestone 30c
+        const job = builds[0] ?? null;
         const wings = fac.expansions().filter((z) => z.state !== 'hidden');
         menu.sections = [
           // Milestone 30b: the four project types (bible §7 / §14.1), each greyed with its reason when it can't start now
@@ -559,7 +598,10 @@ export function createGarageMenus({ garage, team, assets = null, open, close = (
             const st = menuState(p.id) ?? {};
             return { id: p.id, label: p.label, sub: st.locked ?? p.line, icon: p.icon, disabled: !!st.locked, onTap: () => (st.locked ? say(st.locked) : menuRow(p.id)) };
           }) },
-          { columns: 1, buttons: [{ id: 'pitBay', label: job ? `Active build: ${job.name}` : 'Active builds', sub: job ? `${PROJECT_TYPES[team.cars.typeOf(job)].name} · ${team.cars.phase(job).name} · ${Math.floor(team.cars.fraction(job) * 100)}%` : 'Nothing in the bays now', icon: pitBay.art, accent: C.progress, onTap: () => open(pitBay.id) }] },
+          // Milestone 30c: every build in every bay (one build: the single row it always was)
+          builds.length > 1
+            ? { title: `Active builds · ${builds.length} of ${team.bays().length} bays`, columns: 1, buttons: builds.map((j) => jobButton(j)) }
+            : { columns: 1, buttons: [{ id: 'pitBay', label: job ? `Active build: ${job.name}` : 'Active builds', sub: job ? `${team.bayName(job.data.bay)} · ${PROJECT_TYPES[team.cars.typeOf(job)].name} · ${team.cars.phase(job).name} · ${Math.floor(team.cars.fraction(job) * 100)}%` : `Nothing in the bays now · ${team.carBayCount()} car bay${team.carBayCount() === 1 ? '' : 's'}`, icon: pitBay.art, accent: C.progress, onTap: () => (job ? open('buildJob', job.id) : open(pitBay.id)) }] },
           { columns: 1, buttons: [garageButton()] },
           // Milestone 10: Build → Facilities (Build Mode) and the Shop.
           {

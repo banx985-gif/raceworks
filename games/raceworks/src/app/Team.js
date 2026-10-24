@@ -69,7 +69,7 @@ import { createTeamMoney } from '../systems/economy.js';
 import { createRaces } from '../systems/races.js';
 import { partsOf, partsCost, changedSlots } from '../systems/carProject.js';
 import { unlockContext, checkCar } from '../systems/carCatalog.js';
-import { CLASSES, PROJECT_TYPES, RANK_ORDER } from '../../data/cars.js';
+import { CLASSES, PROJECT_TYPES, RANK_ORDER, BAYS } from '../../data/cars.js';
 import { createGarageFacilities } from '../systems/garageFacilities.js';
 import { createResearch } from '../systems/research.js';
 import { createRecruitment } from '../systems/recruitment.js';
@@ -179,6 +179,10 @@ export const SAVE_MIGRATIONS = {
   //   missing), the kind, and the save's boundary (the §44 trigger that wrote it; unknown for an older save). Every key
   //   the save had is carried over untouched.
   22: (record) => ({ ...record, data: { ...Object.fromEntries(RUN_BLOCKS.map((k) => [k, null])), ...record.data, kind: RUN_KIND, boundary: record.data.boundary ?? null } }),
+  //   23 → 24 (Milestone 30d): the Works Gods — the Divine tier, five more secrets (SEC-GOD-1 … 5), their run records
+  //   (clean builds, breakthroughs, Credits from paid sources) and A31 Pantheon. Nothing to change here — an older save has
+  //   no gods, no SEC-GOD facts and no Pantheon; secrets.load() rebuilds the new run records from what the save holds.
+  23: (record) => record,
 };
 // The §44 trigger names, for the boundary a save carries (the save inspector, the fallback note).
 const TRIGGER_LABEL = { ...SAVE_REASONS, ...Object.fromEntries(SAVE_TRIGGERS.flatMap((t) => [[t.id, t.label], ...t.events.map((e) => [e, t.label])])) };
@@ -209,8 +213,8 @@ export class Team {
       restModifier: (s) => ({ energyMult: 1 + (ENDURANCE.recoveryPct * Math.min(ENDURANCE.maxCamps, s.counters?.enduranceCamps ?? 0) + (this.items?.fitnessPct(s) ?? 0)) / 100 }),
       // Push Quality (bible §14.7): +10% Energy drain for the car's team.
       energyLossMultiplier: (s) => {
-        const job = this.cars?.active;
-        return job && job.slots.includes(s.id) ? 1 + BUDGETS[job.data.budget].energyPct / 100 : 1;
+        const job = this.cars?.jobOf(s.id); // (Milestone 30c: the build they are on)
+        return job ? 1 + BUDGETS[job.data.budget].energyPct / 100 : 1;
       },
     });
     this.cars = createCarProjects({
@@ -263,7 +267,7 @@ export class Team {
     bus.on('clock:day', () => {
       this.staff.dailyTick();
       this.training.dailyTick(); // Milestone 12: after the staff day (a finished course's Energy stays)
-      this.money.daily(this.cars.active); // the build's running cost for today (before it can finish)
+      for (const job of [...this.cars.builds]) this.money.daily(job); // each build's running cost for today (before it can finish) (Milestone 30c: every bay)
       this.cars.projects.dailyTick(); // after the staff day, so today's Energy counts
       this.money.dailyAfter(); // contract deadlines
       this.trackFounderDay();
@@ -381,11 +385,8 @@ export class Team {
     const classId = car.classId ?? 'clubHatch';
     const parts = car.parts ?? partsOf(classId);
     const proto = car.projectType === 'prototype';
-    if (this.cars.active) return { ok: false, reason: 'A car is already being built' };
-    if (proto) {
-      const why = this.prototypeWhy();
-      if (why) return { ok: false, reason: why };
-    } else if (this.facilities.bonus('carBays') < 1) return { ok: false, reason: 'Build a Pit Bay first' };
+    const why = proto ? this.prototypeWhy() : this.bayWhy('car'); // (Milestone 30c: a free bay of its kind, and free staff)
+    if (why) return { ok: false, reason: why };
     const legal = checkCar({ classId, parts }, unlockContext(this, { debugAll }));
     if (!legal.ok) return { ok: false, reason: legal.reasons[0] };
     return this.money.canStartCar(this.carPrice({ classId, parts, projectType: car.projectType }).total);
@@ -406,9 +407,9 @@ export class Team {
     const projectType = opts.projectType === 'prototype' ? 'prototype' : 'newCar';
     const can = this.canStartCar({ classId, parts, projectType }, { debugAll: !!opts.debugAll });
     if (!can.ok) return can;
-    const away = (opts.staffIds ?? []).find((id) => this.training.trainingOf(id)); // Milestone 12
-    if (away) return { ok: false, reason: `${this.get(away)?.name ?? 'Someone'} is away on a training course` };
-    const r = this.cars.start({ ...opts, classId, parts, projectType });
+    const crewWhy = this.crewWhy(opts.staffIds ?? []);
+    if (crewWhy) return { ok: false, reason: crewWhy };
+    const r = this.cars.start({ ...opts, classId, parts, projectType, bay: this.freeBay(projectType === 'prototype' ? 'prototype' : 'car').id });
     if (r.ok) {
       const price = this.carPrice({ classId, parts: r.job.data.parts, projectType });
       if (price.shell) this.money.chargeParts(`${r.job.name} (${CLASSES[classId].name} shell)`, price.shell);
@@ -419,10 +420,63 @@ export class Team {
 
   // --- Milestone 30b: Research Prototype and Major Upgrade (bible §14.1) ------------------------------------------
   // Why this team can't start a Research Prototype (null = it can): Rank B and the Prototype Bay standing.
+  // (Milestone 30c: and its bay free, and someone free to build it)
   prototypeWhy() {
     const P = PROJECT_TYPES.prototype;
     if (RANK_ORDER.indexOf(this.money.rank) < RANK_ORDER.indexOf(P.rank)) return `Research prototypes open at Rank ${P.rank}`;
     if (!this.facilities.builtIds().includes(P.facility)) return 'Build the Prototype Bay first';
+    return this.bayWhy('prototype');
+  }
+
+  // --- Milestone 30c: the build bays (data/cars.js BAYS) ----------------------------------------------------------
+  // Car bays from the Pit Bay's level (1 / 2 / 3), + the Bay Extension's once that wing is open.
+  pitBayCount() {
+    if (this.facilities.bonus('carBays') < 1) return 0;
+    return BAYS.pitByLevel[this.facilities.facilityLevel(BAYS.pitBay)] ?? BAYS.pitByLevel[1];
+  }
+  extensionOpen() {
+    return this.facilities.expansions().some((z) => z.id === BAYS.extension.zone && z.state === 'open');
+  }
+  carBayCount() {
+    const pit = this.pitBayCount();
+    return pit + (pit && this.extensionOpen() ? BAYS.extension.bays : 0);
+  }
+  // Every bay there is now: { id, kind 'car' | 'prototype', at (the station or zone it is on), name, job (or null) }.
+  bays() {
+    const out = [];
+    const pit = this.pitBayCount();
+    for (let i = 1; i <= pit; i++) out.push({ id: `pit${i}`, kind: 'car', at: BAYS.pitBay, name: pit > 1 ? `Pit Bay ${i}` : 'Pit Bay' });
+    if (pit && this.extensionOpen()) out.push({ id: 'pit4', kind: 'car', at: BAYS.extension.zone, name: 'Bay Extension' });
+    if (this.facilities.has(BAYS.prototype.facility)) out.push({ id: 'proto', kind: 'prototype', at: BAYS.prototype.facility, name: 'Prototype Bay' });
+    for (const b of out) b.job = this.cars.byBay(b.id);
+    return out;
+  }
+  bayName(id) {
+    return this.bays().find((b) => b.id === id)?.name ?? (id === 'proto' ? 'Prototype Bay' : id === 'pit4' ? 'Bay Extension' : 'Pit Bay');
+  }
+  freeBay(kind = 'car') {
+    return this.bays().find((b) => b.kind === kind && !b.job) ?? null;
+  }
+  // People who could join a new build now: not on another build, not away on a course.
+  freeStaff() {
+    return this.roster.filter((s) => !this.cars.jobOf(s.id) && !this.training.trainingOf(s.id));
+  }
+  // Why no new build of this kind can start now (null = it can): a free bay, someone free to build it.
+  bayWhy(kind = 'car') {
+    if (kind === 'car') {
+      const n = this.carBayCount();
+      if (n < 1) return 'Build a Pit Bay first';
+      if (!this.freeBay('car')) return n === 1 ? 'A car is already being built' : `All ${n} car bays are busy`;
+    } else if (!this.freeBay('prototype')) return 'The Prototype Bay is busy';
+    if (!this.freeStaff().length) return 'Everyone is on a build — hire more staff';
+    return null;
+  }
+  // A crew for a new build: nobody on another build or away on a course.
+  crewWhy(staffIds) {
+    const away = staffIds.find((id) => this.training.trainingOf(id)); // Milestone 12
+    if (away) return `${this.get(away)?.name ?? 'Someone'} is away on a training course`;
+    const busy = staffIds.find((id) => this.cars.jobOf(id));
+    if (busy) return `${this.get(busy)?.name ?? 'Someone'} is on ${this.cars.jobOf(busy).name}`;
     return null;
   }
   // A Major Upgrade's price: perSlot × slots of what a new build of the new recipe would cost today.
@@ -437,8 +491,9 @@ export class Team {
   upgradeWhy(carNumber, parts = null, { debugAll = false } = {}) {
     const rec = this.cars.cars.get(carNumber);
     if (!rec?.result) return 'Pick a finished car';
-    if (this.cars.active) return 'A car is already being built';
-    if (this.facilities.bonus('carBays') < 1) return 'Build a Pit Bay first';
+    if (this.cars.inBay(carNumber)) return 'This car is in the bay being upgraded';
+    const bay = this.bayWhy('car'); // (Milestone 30c: a free car bay)
+    if (bay) return bay;
     if (this.races.current?.carNumber === carNumber) return 'This car is in a race weekend: finish it first';
     if (!parts) return null;
     const n = changedSlots(rec.result.parts, parts).length;
@@ -453,10 +508,10 @@ export class Team {
   startUpgrade({ carNumber, parts, budget = 'balanced', staffIds = [], debugAll = false }) {
     const why = this.upgradeWhy(carNumber, parts, { debugAll });
     if (why) return { ok: false, reason: why };
-    const away = staffIds.find((id) => this.training.trainingOf(id));
-    if (away) return { ok: false, reason: `${this.get(away)?.name ?? 'Someone'} is away on a training course` };
+    const crewWhy = this.crewWhy(staffIds);
+    if (crewWhy) return { ok: false, reason: crewWhy };
     const price = this.upgradePrice(carNumber, parts);
-    const r = this.cars.startUpgrade({ carNumber, parts, budget, staffIds, cost: price.total });
+    const r = this.cars.startUpgrade({ carNumber, parts, budget, staffIds, cost: price.total, bay: this.freeBay('car').id });
     if (r.ok) this.money.chargeParts(r.job.name, price.total);
     return r;
   }

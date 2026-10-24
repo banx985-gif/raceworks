@@ -78,7 +78,7 @@ export function createEvents({ bus, team, seed = 'raceworks' }) {
     if (w.sponsorId && !team.sponsors.deals.some((d) => d.id === w.sponsorId)) return false;
     if (w.driver && !drivers().length) return false;
     if (w.role && !team.roster.some((s) => s.role === w.role)) return false;
-    if (w.building && !team.cars.active) return false;
+    if (w.building && !team.cars.builds.length) return false; // (Milestone 30c: any build)
     if (w.cars && team.cars.cars.count < w.cars) return false;
     if (w.champ && !team.championships.current) return false;
     return true;
@@ -94,7 +94,9 @@ export function createEvents({ bus, team, seed = 'raceworks' }) {
     const deal = w.sponsorId ? team.sponsors.deals.find((d) => d.id === w.sponsorId) : pickFrom(team.sponsors.deals);
     if (deal) out.sponsor = sponsorById(deal.id)?.name ?? deal.id;
     if (w.champ || def.cls === 'rival') out.rival = pickFrom(Object.values(RIVAL_TEAMS).filter((t) => !t.secret).map((t) => t.name));
-    if (team.cars.active) out.car = team.cars.active.name;
+    // Milestone 30c: one build named (rolled only when there are several, so a single build's events roll as before)
+    const builds = team.cars.builds;
+    if (builds.length) out.car = (builds.length > 1 ? pickFrom(builds) : builds[0]).name;
     return out;
   }
   // Numbers rolled when the event fires ({ min, max } → value, rounded to 10).

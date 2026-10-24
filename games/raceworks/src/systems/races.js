@@ -39,7 +39,8 @@
 //   stats — fixed into the race when it's made. A wet setup (Intermediate / Wet) is checked for Rain Runner when it is set
 //   and when the setup locks.
 import { Rng } from '../../../../core/Rng.js';
-import { raceCrew, crewPeople, effectSum } from './staffTraits.js';
+import { raceCrew, crewPeople, effectSum, effectProduct, teamEffect } from './staffTraits.js';
+import { GODS } from '../../data/staff.js'; // Milestone 30d
 import { createRaceSim, runQualifying, pitServiceTime, mechanicSecs } from '../race/raceSim.js';
 import { makeWeather, dryWeather, stateAt, forecast, forecastText, bestTyreFor, suitable } from '../race/weather.js';
 import { buildField, playerEntry } from '../race/field.js';
@@ -53,6 +54,8 @@ import { courseFromTrack } from '../race/lapCourse.js';
 import { strategyProfile, rivalProfile, forecastOf } from './raceStrategy.js';
 
 const HISTORY_KEEP = 30;
+// Milestone 30d (PLACEHOLDERS, DECISIONS.md): Havoc's race-day pace boost — this % quicker for this many laps
+export const GOD_RACE = { boostPct: 3, boostLaps: 3 };
 const RATING_STATS = ['SPD', 'ACC', 'COR', 'BRK', 'REL', 'EFF', 'TYR']; // Milestone 25: a car's rating = the mean of these
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const r3 = (v) => Math.round(v * 1000) / 1000;
@@ -97,6 +100,10 @@ export function createRaces({ bus, team }) {
     const wearPct = (team.facilities?.bonus('tyreWearPct') ?? 0) + trait('tyreWearPct');
     if (wearPct) player.tyreWearMult = 1 + wearPct / 100;
     if (trait('failurePct')) player.failureMult = Math.max(0, 1 + trait('failurePct') / 100);
+    // Milestone 30d: the Works Gods in the race crew — Bolt's retirements, Jinx's caution luck
+    const retireMult = effectProduct(crew, 'retireMult');
+    if (retireMult < 1) player.retireMult = retireMult;
+    if (trait('cautionLuckPct')) player.cautionLuckPct = trait('cautionLuckPct');
     // Milestone 16: the race Strategist (bible §10.8 race crew) and the garage's strategy effects, fixed now
     const strategist = raceCrew(team).strategist;
     const str = strategist?.stats.STR ?? STRATEGY.contractorStr;
@@ -105,7 +112,8 @@ export function createRaces({ bus, team }) {
     player.openTyres = TYRE_ORDER.filter((t) => team.research?.tyreOpen(t) ?? TYRES[t].unlocked);
     player.strategy = strategyProfile({ str, traits: strategist?.traits ?? [], workPct, autoPct: fx('autoStrategyPct'), tyres: player.openTyres });
     player.strategy.strategistId = strategist?.id ?? null;
-    const forecast = forecastOf({ str, workPct, forecastPts: fx('forecast') + trait('forecastPts'), uncertaintyPct: fx('forecastUncertaintyPct') }); // Milestone 17: + Weather Watch
+    let forecast = forecastOf({ str, workPct, forecastPts: fx('forecast') + trait('forecastPts'), uncertaintyPct: fx('forecastUncertaintyPct') }); // Milestone 17: + Weather Watch
+    if (trait('weatherCalls')) forecast = { accuracy: 100, uncertainty: 0 }; // Milestone 30d: Jinx — always right
     const { entries, grid } = buildField({ player, rivalPool: config.rivalPool, band: config.band, fieldSize: config.fieldSize, seed, rivalPct: team.rivalPct?.() ?? 0 }); // (Milestone 28: the New Game+ rival development)
     for (const e of entries) if (!e.isPlayer) {
       const rmec = 77 + ((e.crew ?? 80) - 80) / 2;
@@ -127,8 +135,18 @@ export function createRaces({ bus, team }) {
       for (const k of Object.keys(player.car)) if (all) add[k] = (add[k] ?? 0) + all;
       for (const [k, v] of Object.entries(add)) player.car[k] = (player.car[k] ?? 0) + v;
     }
+    // Milestone 30d: Havoc's one race-day swing, fixed now from the seed (a reload never rerolls it): a pace boost for a
+    // stint, else a spin, on a lap from the second to the second-last
+    if (kind === 'weekend' && teamEffect(team, 'chaosRace') > 0) {
+      const hr = new Rng(`havoc:${seed}`);
+      const boost = hr.next() < Math.min(100, teamEffect(team, 'chaosRace')) / 100;
+      const lap = 2 + Math.floor(hr.next() * Math.max(1, laps - 3));
+      player.chaos = boost ? { kind: 'boost', lap, laps: GOD_RACE.boostLaps, pct: GOD_RACE.boostPct } : { kind: 'spin', lap };
+    }
+    // which gods touch this race (the Weekend and Result screens say so): in the crew, or the whole team's
+    const blessings = GODS.filter((g) => team.get(g.id) && (crew.some((s) => s.id === g.id) || ['prizePct', 'chaosRace'].some((k) => effectSum([team.get(g.id)], k)))).map((g) => g.id);
     // (crewKnowledge, Milestone 19: + Street Package on street circuits, + Balance Artist on technical tracks)
-    return { n, kind, seed, trackId: track.id, laps, entries, grid, carNumber: rec.number, createdDay: team.clock.totalDays, state: null, status: 'ready', crew: crew.map((s) => s.id), crewKnowledge: trait('setupKnowledge') + (track.walls ? trait('setupKnowledgeStreet') : 0) + (WEEKEND.technicalProfiles.includes(track.profile) ? trait('setupKnowledgeTechnical') : 0), forecast, weather, raceType: config.raceType ?? 'standard', stints: [], comboKnowledgePct, sponsors, prizePct: kind === 'weekend' ? team.facilities?.bonus('prizePct') ?? 0 : 0, telemetry: (rec.result?.parts ?? []).some((id) => PARTS[id]?.telemetry) || (team.facilities?.bonus('telemetry') ?? 0) > 0 }; // Milestone 18: the race type (stint length and cap) and the stints driven
+    return { blessings, extraStints: trait('extraStints'), chaos: player.chaos ?? null, n, kind, seed, trackId: track.id, laps, entries, grid, carNumber: rec.number, createdDay: team.clock.totalDays, state: null, status: 'ready', crew: crew.map((s) => s.id), crewKnowledge: trait('setupKnowledge') + (track.walls ? trait('setupKnowledgeStreet') : 0) + (WEEKEND.technicalProfiles.includes(track.profile) ? trait('setupKnowledgeTechnical') : 0), forecast, weather, raceType: config.raceType ?? 'standard', stints: [], comboKnowledgePct, sponsors, prizePct: kind === 'weekend' ? (team.facilities?.bonus('prizePct') ?? 0) + teamEffect(team, 'prizePct') : 0, telemetry: (rec.result?.parts ?? []).some((id) => PARTS[id]?.telemetry) || (team.facilities?.bonus('telemetry') ?? 0) > 0 }; // Milestone 18: the race type (stint length and cap) and the stints driven
   }
 
   // Milestone 15: the setup locks (qualifying): the repair priority is paid through the ledger (Credits, and the Lead
@@ -520,7 +538,7 @@ export function createRaces({ bus, team }) {
       const rating = (car) => (car ? Math.round((RATING_STATS.reduce((t, k) => t + (car[k] ?? 0), 0) / RATING_STATS.length) * 10) / 10 : 0);
       const others = race.entries.filter((e) => !e.isPlayer).map((e) => rating(e.car));
       const ratings = { car: rating(playerE?.car), field: others.length ? Math.round((others.reduce((t, v) => t + v, 0) / others.length) * 10) / 10 : 0 };
-      const entry = { raceType: race.raceType ?? 'standard', driver: playerE?.driverId ?? null, ratings, champ: race.champ ?? null, swingWin, wet: !!result.weather?.wet, n: race.n, kind: race.kind, trackId: race.trackId, laps: race.laps, day: team.clock.totalDays, carNumber: race.carNumber, seed: race.seed, result, wear, prize, reputation, grid: race.grid, quali: race.quali ?? null, setupScore: race.quali?.setupScore ?? null, crew: race.crew ?? [], sponsors: race.sponsors ?? [], telemetry: !!race.telemetry, eff: race.entries.find((e) => e.isPlayer)?.car?.EFF ?? null, fuelStart: race.entries.find((e) => e.isPlayer)?.fuel ?? null, modes, stints: (race.stints ?? []).length }; // (Milestone 21: sponsor / contract facts)
+      const entry = { raceType: race.raceType ?? 'standard', driver: playerE?.driverId ?? null, ratings, champ: race.champ ?? null, swingWin, wet: !!result.weather?.wet, n: race.n, kind: race.kind, trackId: race.trackId, laps: race.laps, day: team.clock.totalDays, carNumber: race.carNumber, seed: race.seed, result, wear, prize, reputation, grid: race.grid, quali: race.quali ?? null, setupScore: race.quali?.setupScore ?? null, crew: race.crew ?? [], sponsors: race.sponsors ?? [], telemetry: !!race.telemetry, eff: race.entries.find((e) => e.isPlayer)?.car?.EFF ?? null, fuelStart: race.entries.find((e) => e.isPlayer)?.fuel ?? null, modes, stints: (race.stints ?? []).length, blessings: [...(race.blessings ?? [])], chaos: race.chaos ?? null }; // (Milestone 30d: the gods in this race) // (Milestone 21: sponsor / contract facts)
       api.history.push(entry);
       if (api.history.length > HISTORY_KEEP) api.history.shift();
       api.current = null;
@@ -556,7 +574,7 @@ export function createRaces({ bus, team }) {
 
     // --- Milestone 18: the Drive Stint (bible §25.1): how long, how many, and whether one can start now -----------------
     raceTypeOf: (race = cur()) => RACE_TYPES[race?.raceType] ?? RACE_TYPES.standard,
-    stintCap: (race = cur()) => api.raceTypeOf(race).stintCap,
+    stintCap: (race = cur()) => api.raceTypeOf(race).stintCap + (race?.extraStints ?? 0), // (Milestone 30d: + Zip)
     stintsLeft: (race = cur()) => Math.max(0, api.stintCap(race) - (race?.stints?.length ?? 0)),
     // → null (a stint can start) or the reason it can't
     stintWhy(sim, race = cur()) {

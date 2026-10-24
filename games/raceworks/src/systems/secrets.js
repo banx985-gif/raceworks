@@ -21,11 +21,16 @@
 //   .rules · .stage(id) · .whyFalse(id) · .rumours() · .accolades() · .finalPage · .prestigeTokens · .flags
 //   .accountFlag(id) · .unlockedIds() · .facts (core FactRegistry) · .setAccount({ load, save }) · .loadAccount()
 //   .notify(trigger, payload) (tests) · .debugForce(id) · .postEnding (hook)
+// Milestone 30d: the Works Gods' five secrets (data/secrets.js GOD_RULES) and their facts — clean builds, breakthroughs,
+//   the Pit Bay level and Bay Extension, Credits never bought (log.paidCredits: every Credit from a purchase / ad / tokens /
+//   debug ledger line), the race fields weatherChanged / incident / sponsors, the seasons' wins / winDrivers /
+//   sponsorsAtEnd, and two account records: the tracks where you set the fastest lap, and every god ever hired
+//   (records.gods: id → { runId, day, races }). A god's arrival is EV_GOD_ARRIVAL; godsHired() for the Records screen.
 import { SecretEngine, FactRegistry } from '../../../../core/SecretEngine.js';
 import { UnlockRunner } from '../../../../core/UnlockActions.js';
-import { TRIGGERS, REWARD_TYPES, CLUE, SECRET_READINGS as SR, SECRET_IDS, ACCOUNT_FLAGS, FINAL_RUMOUR_PAGE } from '../../data/secrets.js';
+import { TRIGGERS, REWARD_TYPES, CLUE, SECRET_READINGS as SR, SECRET_IDS, ACCOUNT_FLAGS, FINAL_RUMOUR_PAGE, GOD_READINGS as GR } from '../../data/secrets.js';
 import { PARTS } from '../../data/cars.js';
-import { ALL_STAFF, ROLES, STARTERS } from '../../data/staff.js';
+import { ALL_STAFF, ROLES, STARTERS, GODS, GOD_IDS } from '../../data/staff.js';
 import { RIVAL_TEAMS } from '../../data/rivals.js';
 import { CHAMPIONSHIPS } from '../../data/championships.js';
 import { familyOfCar } from './carVisual.js';
@@ -33,21 +38,22 @@ import { NGPLUS } from '../../data/ngplus.js'; // Milestone 28
 import { unlockContext, partState } from './carCatalog.js';
 
 const RANKS = ['E', 'D', 'C', 'B', 'A', 'S'];
-const STAFF_ALL_BY_ID = Object.fromEntries(ALL_STAFF.map((d) => [d.id, d]));
+const STAFF_ALL_BY_ID = Object.fromEntries([...ALL_STAFF, ...GODS].map((d) => [d.id, d])); // (Milestone 30d: + the gods)
+const PAID = new Set(GR.paidSources);
 const CURRENCY = REWARD_TYPES.filter((r) => r.currency).map((r) => r.id);
 const GHOST_IDS = new Set((RIVAL_TEAMS[SR.ghostTeam]?.drivers ?? []).map((d) => d.id));
 const CHAMP = Object.fromEntries(CHAMPIONSHIPS.map((c) => [c.id, c]));
 const REAL = new Set(SECRET_IDS);
 const r1 = (v) => Math.round(v * 10) / 10;
-const blankLog = () => ({ races: [], cars: [], months: [], timeline: [], drills: 0, monthStartCredits: null, hires: [], starters: [], standardDrivers: [], left: [], techDemoSeen: false, techDemoDone: false, ending: false });
+const blankLog = () => ({ races: [], cars: [], months: [], timeline: [], drills: 0, monthStartCredits: null, hires: [], starters: [], standardDrivers: [], left: [], techDemoSeen: false, techDemoDone: false, ending: false, cleanBuilds: 0, breakthroughs: 0, paidCredits: 0 }); // (Milestone 30d: the last three)
 
 // A race record made before Milestone 25: the new fields from what it has (nothing else can be known now).
 // Milestone 26: a record from before it has no best lap or pit errors (unknown: no lap record, no error counted).
 function upgradeRace(r) {
-  if (r.won !== undefined) return { bestLap: null, pitErrors: 0, ...r };
+  if (r.won !== undefined) return { bestLap: null, pitErrors: 0, weatherChanged: false, incident: false, sponsors: 0, ...r }; // (Milestone 30d: unknown before it — no change, no incident, no sponsors)
   const finished = !r.retired;
   const champ = r.champ ?? null;
-  return { ...r, won: r.pos === 1 && finished, finished, pole: r.grid === 1, fastestLap: false, wetClass: false, rain: !!r.wet, night: SR.nightTracks.includes(r.trackId), permanent: !SR.streetTracks.includes(r.trackId), tier: champ ? CHAMP[champ]?.tier ?? null : null, champRace: !!champ, season: null, raceType: 'standard', tyreLife: 0, spins: 0, damageHits: 0, damageRepairs: 0, mechFails: r.mechRetired ? 1 : 0, faults: 0, stops: 0, plannedStops: 0, energySave: false, topSpeed: 0, speedRecord: false, powerUnit: null, carRating: 0, fieldRating: 0, belowFieldPct: 0, fieldAbovePct: 0, ghostIn: false, ghostBeat: false, driver: null, bestLap: null, pitErrors: 0 };
+  return { ...r, won: r.pos === 1 && finished, finished, pole: r.grid === 1, fastestLap: false, wetClass: false, rain: !!r.wet, night: SR.nightTracks.includes(r.trackId), permanent: !SR.streetTracks.includes(r.trackId), tier: champ ? CHAMP[champ]?.tier ?? null : null, champRace: !!champ, season: null, raceType: 'standard', tyreLife: 0, spins: 0, damageHits: 0, damageRepairs: 0, mechFails: r.mechRetired ? 1 : 0, faults: 0, stops: 0, plannedStops: 0, energySave: false, topSpeed: 0, speedRecord: false, powerUnit: null, carRating: 0, fieldRating: 0, belowFieldPct: 0, fieldAbovePct: 0, ghostIn: false, ghostBeat: false, driver: null, bestLap: null, pitErrors: 0, weatherChanged: false, incident: false, sponsors: 0 };
 }
 
 export function createSecrets({ bus, team, rules = [] }) {
@@ -65,7 +71,12 @@ export function createSecrets({ bus, team, rules = [] }) {
   const races = () => log.races;
   const rankIndex = () => RANKS.indexOf(team.money.rank);
   const accountFlags = () => engine.account.flags;
-  const records = () => (engine.account.records ??= { topSpeed: {} });
+  const records = () => {
+    const r = (engine.account.records ??= { topSpeed: {} });
+    r.fastestLaps ??= {}; // Milestone 30d: trackId → the day your car first set a race's fastest lap there (any run)
+    r.gods ??= {}; // Milestone 30d: god id → { runId, day, races } when first hired (any run)
+    return r;
+  };
 
   // Each 10-race span in a row (SR.spanRaces): poles, fastest laps, mechanical ("gearbox") failures.
   function spans() {
@@ -103,6 +114,10 @@ export function createSecrets({ bus, team, rules = [] }) {
         startPartsOnly: !!car?.startPartsOnly,
         standardDriver: rs.length > 0 && rs.every((r) => r.driver && log.standardDrivers.includes(r.driver)),
         legacyCrew: rs.some((r) => (r.crew ?? []).some((id) => legacyIds().includes(id))),
+        // Milestone 30d
+        wins: rs.filter((r) => r.won).length,
+        winDrivers: new Set(rs.filter((r) => r.won).map((r) => r.driver ?? '?')).size,
+        sponsorsAtEnd: rs[rs.length - 1]?.sponsors ?? 0,
       };
     });
   }
@@ -151,6 +166,14 @@ export function createSecrets({ bus, team, rules = [] }) {
   const employed = (id) => !!team.get(id);
   const continuous = (id) => employed(id) && !log.left.includes(id);
   const secretFoundIds = () => SECRET_IDS.filter((id) => engine.everUnlocked(id));
+  // Milestone 30d: the races since the fourth of Bolt, Jinx, Zip and Kaching was first hired (a god hired in an earlier
+  // run counts from this run's first race), with a crash, spin or caution in them.
+  function incidentRacesAfterGods() {
+    const g = records().gods;
+    if (!GR.others.every((id) => g[id])) return 0;
+    const from = Math.max(...GR.others.map((id) => (g[id].runId === team.runId ? g[id].races ?? 0 : 0)));
+    return log.races.slice(from).filter((r) => r.incident).length;
+  }
 
   const facts = new FactRegistry()
     .define('run.rank', () => rankIndex())
@@ -217,7 +240,19 @@ export function createSecrets({ bus, team, rules = [] }) {
     .define('account.secretsFoundIds', () => secretFoundIds())
     // Milestone 28: the longest line of New Game+ runs in a row one of this run's Legacy Staff was carried through (their
     // person id, run to run: NG+1 → NG+2 → NG+3 = 3)
-    .define('account.legacyChain', () => Math.max(0, ...Object.values(team.ngPlus?.chains ?? {})));
+    .define('account.legacyChain', () => Math.max(0, ...Object.values(team.ngPlus?.chains ?? {})))
+    // Milestone 30d (the Works Gods)
+    .define('run.cleanBuilds', () => log.cleanBuilds ?? 0)
+    .define('run.breakthroughs', () => log.breakthroughs ?? 0)
+    .define('run.pitBayLevel', () => team.facilities?.facilityLevel?.('F02') ?? 0)
+    .define('run.bayExtension', () => !!team.extensionOpen?.())
+    .define('run.creditsEarned', () => team.money.credits - (log.paidCredits ?? 0))
+    .define('run.incidentRacesAfterGods', () => incidentRacesAfterGods())
+    .define('account.fastestLapTracks', () => Object.keys(records().fastestLaps).length)
+    .define('account.visibleCombos', () => facts.get('account.recipes').filter((id) => GR.combos.includes(id)).length)
+    .define('account.godsHired', () => GOD_IDS.filter((id) => records().gods[id]))
+    .define('account.godsHiredCount', () => GOD_IDS.filter((id) => records().gods[id]).length)
+    .define('account.otherGodsHired', () => GR.others.filter((id) => records().gods[id]).length);
 
   // --- rewards: one function per type; the runner fires each (type, id) once per run ----------------------------
   const ruleName = (a) => byId[a.secret]?.name ?? a.secret;
@@ -226,8 +261,9 @@ export function createSecrets({ bus, team, rules = [] }) {
       const d = STAFF_ALL_BY_ID[a.id];
       if (!d || !team.recruitment.specialArrival) return flags.push(`staffArrival:${a.id}`);
       const r = team.recruitment.specialArrival(a.id, a.days);
-      // Milestone 25: the Special Arrival event (M23) with their portrait
-      if (r?.ok) team.events?.fireSecret?.('EV_SPECIAL_ARRIVAL', { name: d.name, role: ROLES[d.role]?.name ?? d.role, days: a.days ?? SR.arrivalDays, art: d.art });
+      // Milestone 25: the Special Arrival event (M23) with their portrait (Milestone 30d: a god's own arrival card)
+      if (r?.ok && d.tier === 'divine') team.events?.fireSecret?.('EV_GOD_ARRIVAL', { name: d.name, title: d.title, role: ROLES[d.role]?.name ?? d.role, days: a.days ?? SR.arrivalDays, art: d.art, arrival: d.arrival });
+      else if (r?.ok) team.events?.fireSecret?.('EV_SPECIAL_ARRIVAL', { name: d.name, role: ROLES[d.role]?.name ?? d.role, days: a.days ?? SR.arrivalDays, art: d.art });
       return r;
     },
     part: (a) => flags.push(`part:${a.id}`), // the car builder reads the found secret (data/cars.js unlock.secret)
@@ -283,6 +319,7 @@ export function createSecrets({ bus, team, rules = [] }) {
   const bonusOf = (id) => afterEnding() + (runClues[id] ?? 0) + (accountFlags()[`clue:${id}`] ?? 0) + ngClue(id);
   const stage = (id) => {
     const s = rawStage(id);
+    if (!s && byId[id]?.cluesFromProgress) return 0; // Milestone 30d: Havoc — no bonus stage before his own progress
     return s >= CLUE.discovered ? s : Math.min(CLUE.discovered - 1, s + bonusOf(id));
   };
   const textOf = (rule, st) => (st >= CLUE.discovered ? rule.recipe : rule.clueStages?.[st - 1]?.text ?? '');
@@ -335,6 +372,12 @@ export function createSecrets({ bus, team, rules = [] }) {
       saveAccount();
     }
     const rt = entry.ratings ?? { car: 0, field: 0 };
+    // Milestone 30d: an account record of the tracks where your car set the race's fastest lap
+    if (entry.result?.fastestLap?.id === me.id && records().fastestLaps[trackId] == null) {
+      records().fastestLaps[trackId] = entry.day ?? team.clock.totalDays;
+      if (!rebuilding) saveAccount();
+    }
+    const allRows = rows;
     log.races.push({
       day: entry.day ?? team.clock.totalDays,
       trackId,
@@ -389,6 +432,10 @@ export function createSecrets({ bus, team, rules = [] }) {
       // Milestone 26 (the Records screen's lap records; Pit Perfect)
       bestLap: me.best ?? null,
       pitErrors: me.pitErrors ?? 0,
+      // Milestone 30d
+      weatherChanged: (entry.result?.weather?.changes ?? 0) > 0,
+      incident: (entry.result?.cautions?.length ?? 0) > 0 || allRows.some((r) => (r.spins ?? 0) > 0 || (r.contacts ?? 0) > 0 || (r.fails ?? []).includes('crash')),
+      sponsors: (entry.sponsors ?? []).length,
     });
     first('firstRace');
     if (me.pos <= 3 && me.status !== 'retired') first('firstPodium');
@@ -430,16 +477,30 @@ export function createSecrets({ bus, team, rules = [] }) {
   // --- triggers: the bus moments, wired once; facts first, then the rules indexed under it ---------------------------
   const before = {
     raceResult: ({ race }) => onRace(race),
-    carBuilt: ({ record }) => onCar(record),
+    carBuilt: ({ record, job }) => {
+      onCar(record);
+      if (job && !(job.data?.faults ?? []).length) log.cleanBuilds = (log.cleanBuilds ?? 0) + 1; // Milestone 30d (an upgrade too)
+    },
     monthEnd: () => onMonth(),
     drillDone: () => (log.drills += 1),
     seasonEnd: ({ record }) => record?.title && first('firstTitle'),
     sponsorSigned: () => first('firstSponsor'),
     rankUp: ({ rank }) => rank?.id && first(`rank${rank.id}`),
-    hire: ({ staff }) => staff && log.hires.push({ id: staff.id, tier: staff.tier ?? STAFF_ALL_BY_ID[staff.id]?.tier ?? null, day: team.clock.totalDays }),
+    hire: ({ staff }) => {
+      if (!staff) return;
+      log.hires.push({ id: staff.id, tier: staff.tier ?? STAFF_ALL_BY_ID[staff.id]?.tier ?? null, day: team.clock.totalDays });
+      // Milestone 30d: a god's first hire on this device (account-wide, any run)
+      if (GOD_IDS.includes(staff.id) && !records().gods[staff.id]) {
+        records().gods[staff.id] = { runId: team.runId, day: team.clock.totalDays, races: log.races.length };
+        saveAccount();
+      }
+    },
     runEnded: () => (log.ending = true),
   };
   bus.on('staff:letGo', ({ id }) => id && !log.left.includes(id) && log.left.push(id));
+  // Milestone 30d: breakthroughs this run, and every Credit that came from a paid source (or debug): never counted
+  bus.on('car:breakthrough', () => (log.breakthroughs = (log.breakthroughs ?? 0) + 1));
+  bus.on('economy:change', (line) => line?.currency === 'credits' && line.amount > 0 && PAID.has(line.category) && (log.paidCredits = (log.paidCredits ?? 0) + line.amount));
   bus.on('event:fired', ({ def }) => def?.id === 'EV_TECH_DEMO' && (log.techDemoSeen = true));
   bus.on('event:resolved', ({ def, choice }) => def?.id === 'EV_TECH_DEMO' && def.choices?.[choice]?.id === 'host' && (log.techDemoDone = true));
   // This run's part of the cross-run facts (set, never added: a reload can't count it twice); saved to the account
@@ -504,6 +565,15 @@ export function createSecrets({ bus, team, rules = [] }) {
     return account.save(engine.serializeAccount());
   }
 
+  // Milestone 30d: what a save from before it can tell — its cars' breakthroughs and zero-fault builds (upgrades unknown),
+  // the builds in the bays' breakthroughs so far, the paid / debug Credits still in its ledger.
+  function rebuildM30d() {
+    const cars = team.cars.cars.list().filter((c) => c.result);
+    log.breakthroughs = cars.reduce((t, c) => t + (c.result.breakthroughs?.length ?? 0), 0) + (team.cars.builds ?? []).reduce((t, j) => t + (j.data?.breakthroughs?.length ?? 0), 0);
+    log.cleanBuilds = cars.filter((c) => (c.result.faultsTotal ?? 1) === 0).length;
+    log.paidCredits = (team.money.economy.ledger ?? []).filter((l) => l.currency === 'credits' && l.amount > 0 && PAID.has(l.category)).reduce((t, l) => t + l.amount, 0);
+  }
+
   const api = {
     engine,
     facts,
@@ -545,7 +615,15 @@ export function createSecrets({ bus, team, rules = [] }) {
       return accountFlags().finalRumourPage != null ? FINAL_RUMOUR_PAGE : null;
     },
     runFlag: (id) => flags.includes(`flag:${id}`),
-    // How many of the 34 are found on this device (any run) / in this run.
+    // Milestone 30d: Prestige Tokens from elsewhere (A31 Pantheon), account-wide like the secrets' own
+    addPrestige(n) {
+      if (!(n > 0)) return;
+      accountFlags().prestigeTokens = (accountFlags().prestigeTokens ?? 0) + n;
+      saveAccount();
+    },
+    // Milestone 30d: the gods ever hired on this device (id → { runId, day, races }) and the god secrets' ids
+    godsHired: () => ({ ...records().gods }),
+    // How many of the 39 are found on this device (any run) / in this run.
     foundCount: () => secretFoundIds().length,
     // Secret ids found in this run, plus account-scope ones found in any run (what team.unlocks.secrets lists).
     unlockedIds: () => rules.filter((r) => engine.unlockedInRun(r.id) || (r.oncePerAccount && engine.account.history[r.id])).map((r) => r.id),
@@ -604,6 +682,7 @@ export function createSecrets({ bus, team, rules = [] }) {
         log = { ...blankLog(), ...JSON.parse(JSON.stringify(data.log)) };
         log.races = log.races.map(upgradeRace);
         if (!data.log.starters) setStarters(starters());
+        if (data.log.breakthroughs == null) rebuildM30d(); // Milestone 30d: a save from before it
         // Milestone 30b: "Research Prototype" now means the project type — a car logged under M25's class stand-in is
         // read again from its record (an older save's cars are all new builds)
         for (const c of log.cars) c.researchPrototype = (carRecord(c.number)?.result?.projectType ?? 'newCar') === SR.researchPrototype.projectType;
@@ -611,6 +690,7 @@ export function createSecrets({ bus, team, rules = [] }) {
       }
       log = blankLog();
       for (const rec of team.cars.cars.list()) onCar(rec);
+      rebuildM30d();
       for (const e of team.races.history) onRace(e, { rebuilding: true });
       if (team.championships.titles().length) first('firstTitle');
       log.monthStartCredits = team.money.credits;

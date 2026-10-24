@@ -25,7 +25,7 @@ export const ACHIEVEMENT_READINGS = {
   preparedCondition: 100,
   // "Discover 10 parts": part licences open beyond the six Start parts (the 44 non-prestige licences only)
   // "Employ one Elite in every role": a person of Elite tier or above in each of the five roles at once
-  eliteTiers: ['elite', 'legendary', 'secret'],
+  eliteTiers: ['elite', 'legendary', 'secret', 'divine'], // (Milestone 30d: a god is above Elite too)
   // "Unlock all normal expansions": the four wings (Bay Extension, Engineering Wing, Race Operations Wing, World Team
   // Annex) open — never the Ghost Annex (a secret)
   normalExpansions: 4,
@@ -55,6 +55,13 @@ const size = (id, s) => pay(id, ...REWARD_SIZES[s]);
 
 const RACE = ['raceResult'];
 const ach = (id, name, recipe, icon, triggerEvents, conds, reward, extra = {}) => ({ id, name, recipe, icon, ...A, triggerEvents, requiresAll: conds, rewardActions: size(id, reward), ...extra });
+
+// Milestone 30d: hidden achievements — not among the 30 visible (never in the completion %, the "of 30" count or the
+// Year-16 grade); the Records screen shows ??? until revealFact is above 0. A31 Pantheon: all five Works Gods hired
+// (account). Its icon is the achievement toast's own until Aaron draws one; its reward is Prestige Tokens (PLACEHOLDER +3).
+export const HIDDEN_ACHIEVEMENTS = [
+  { id: 'A31', name: 'Pantheon', recipe: 'Hire all five Works Gods (any runs)', icon: 'race_reward_10', ...A, hidden: true, revealFact: 'account.godsHiredCount', triggerEvents: ['hire'], requiresAll: [gte('account.godsHiredCount', 5, 'All five Works Gods hired')], rewardActions: [{ type: 'prestige', id: 'A31:prestige', amount: 3 }] },
+];
 
 export const ACHIEVEMENTS = [
   ach('A01', 'First Build', 'Complete first car', 'race_ui_01', ['carBuilt'], [has('run.timeline', 'firstCar', 'A car finished')], 'small'),

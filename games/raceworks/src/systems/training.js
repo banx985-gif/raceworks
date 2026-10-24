@@ -59,8 +59,7 @@ export function createTraining({ bus, team, seed = 'raceworks' }) {
   }
   const fac = () => team.facilities;
   const onCar = (id) => {
-    const job = team.cars.active;
-    return job && job.slots.includes(id) ? job : null;
+    return team.cars.jobOf(id); // (Milestone 30c: any build)
   };
   const courses = new TrainingSystem({
     rng: new Rng(`${seed}-training`),

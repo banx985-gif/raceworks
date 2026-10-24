@@ -77,6 +77,8 @@ export const FACTS = [
       'won', 'finished', 'pole', 'fastestLap', 'wetClass', 'rain', 'night', 'permanent', 'tier', 'champRace', 'season', 'raceType', 'tyreLife', 'spins', 'damageHits', 'damageRepairs', 'mechFails', 'faults', 'stops', 'plannedStops', 'energySave', 'topSpeed', 'speedRecord', 'powerUnit', 'carRating', 'fieldRating', 'belowFieldPct', 'fieldAbovePct', 'ghostIn', 'ghostBeat', 'driver',
       // Milestone 26: your best lap (seconds) and pit stops forced by a fault or taken outside the window
       'bestLap', 'pitErrors',
+      // Milestone 30d: the weather changed during the race · any spin, crash or caution in it (any car) · sponsors on the car
+      'weatherChanged', 'incident', 'sponsors',
     ],
   },
   { id: 'run.cars', scope: 'run', type: 'list', text: 'every finished car this run', fields: ['day', 'number', 'classId', 'quality', 'powerUnit', 'parts', 'family', 'combos', 'crew', 'spd', 'acc', 'cor', 'puTier', 'startPartsOnly', 'researchPrototype'] },
@@ -86,7 +88,7 @@ export const FACTS = [
   { id: 'run.familyWins', scope: 'run', type: 'list', text: 'each car visual family with the tracks it has won at', fields: ['family', 'tracks'] },
   {
     id: 'run.seasons', scope: 'run', type: 'list', mode: true, text: 'every finished championship season',
-    fields: ['champ', 'tier', 'title', 'pos', 'car', 'carClass', 'puGap', 'corOverSpd', 'races', 'rounds', 'complete', 'autoAll', 'manualAll', 'mechRetirements', 'startPartsOnly', 'standardDriver', 'legacyCrew'],
+    fields: ['champ', 'tier', 'title', 'pos', 'car', 'carClass', 'puGap', 'corOverSpd', 'races', 'rounds', 'complete', 'autoAll', 'manualAll', 'mechRetirements', 'startPartsOnly', 'standardDriver', 'legacyCrew', 'wins', 'winDrivers', 'sponsorsAtEnd'], // (Milestone 30d: wins, how many drivers won them, sponsors on the car in its last round)
   },
   // Milestone 25: counters and switches
   { id: 'run.poles', scope: 'run', type: 'number', text: 'pole positions (started P1)' },
@@ -116,6 +118,13 @@ export const FACTS = [
   { id: 'run.expansionsOpen', scope: 'run', type: 'number', text: 'garage wings open (the 4 normal ones; never the Ghost Annex)' },
   { id: 'run.sponsorDealsMet', scope: 'run', type: 'number', text: 'sponsor deals that ran their term with the obligation met' },
   { id: 'run.yearEnds', scope: 'run', type: 'list', text: 'each finished year with the Credits on hand as it turned', fields: ['year', 'credits'] },
+  // Milestone 30d (the Works Gods' secrets)
+  { id: 'run.cleanBuilds', scope: 'run', type: 'number', text: 'builds and upgrades finished with zero faults' },
+  { id: 'run.breakthroughs', scope: 'run', type: 'number', text: 'breakthroughs on this run’s builds' },
+  { id: 'run.pitBayLevel', scope: 'run', type: 'number', text: 'the Pit Bay’s level (0 without one)' },
+  { id: 'run.bayExtension', scope: 'run', type: 'boolean', text: 'the Bay Extension wing is open' },
+  { id: 'run.creditsEarned', scope: 'run', type: 'number', text: 'Credits on hand less every Credit this run got from a purchase, an ad, Racing Tokens or debug (never paid-for)' },
+  { id: 'run.incidentRacesAfterGods', scope: 'run', type: 'number', text: 'race weekends with a crash, spin or caution since the fourth god (Bolt, Jinx, Zip, Kaching) was first hired' },
   // run: race-mode usage (counters over run.races)
   { id: 'run.racesAutoOnly', scope: 'run', type: 'number', mode: true, text: 'race weekends run on Auto from start to flag' },
   { id: 'run.racesManual', scope: 'run', type: 'number', mode: true, text: 'race weekends with at least one manual command' },
@@ -134,6 +143,12 @@ export const FACTS = [
   { id: 'account.recipeCount', scope: 'account', type: 'number', text: 'engineering synergies (combos) discovered on this device' },
   { id: 'account.secretsFound', scope: 'account', type: 'number', text: 'different secrets (of the 34) ever found on this device' },
   { id: 'account.secretsFoundIds', scope: 'account', type: 'set', text: 'the secret ids ever found on this device' },
+  // Milestone 30d
+  { id: 'account.fastestLapTracks', scope: 'account', type: 'number', text: 'tracks where your car has set the race’s fastest lap (any run)' },
+  { id: 'account.visibleCombos', scope: 'account', type: 'number', text: 'of the 19 combos SYN01–SYN19, how many are discovered on this device' },
+  { id: 'account.godsHired', scope: 'account', type: 'set', text: 'the Works Gods ever hired on this device (GOD01–GOD05)' },
+  { id: 'account.godsHiredCount', scope: 'account', type: 'number', text: 'how many of the five Works Gods were ever hired on this device' },
+  { id: 'account.otherGodsHired', scope: 'account', type: 'number', text: 'how many of Bolt, Jinx, Zip and Kaching were ever hired on this device' },
   { id: 'account.legacyChain', scope: 'account', type: 'number', text: 'NG+ levels one Legacy Staff member was carried through in a row (by person id, run to run)' },
 ];
 export const FACT_IDS = new Set(FACTS.map((f) => f.id));
@@ -537,7 +552,94 @@ export const SECRET_RULES = [
     rewardActions: [{ type: 'accountFlag', id: 'perfectWeekend' }, { type: 'prestige', id: 'SEC-X-03', amount: 3 }, { type: 'accountFlag', id: 'finalRumourPage' }],
   },
 ];
-export const SECRET_IDS = SECRET_RULES.map((r) => r.id);
+
+// =====================================================================================================================
+// Milestone 30d: the Works Gods' secrets, SEC-GOD-1 … 5 (secrets 35–39; docs/M30d_WORKS_GODS.md, SERIES_WORKS_GODS.md).
+// The hardest in the game, late, never bought: no condition reads Racing Tokens, VIP, ads or purchases, and the Credits
+// one (run.creditsEarned) leaves out every Credit that came from one (GOD_READINGS.paidSources). No repeat-run easing
+// (RACEWORKS has none). Each sends a once-only arrival card (EV_GOD_ARRIVAL; 56 days on the Recruitment Special tab).
+// Havoc's clue stages start only once the other four have been hired (cluesFromProgress: no ending / NG+ / Heritage
+// bonus while his own progress is 0). Every number is a PLACEHOLDER (DECISIONS.md M30d).
+// =====================================================================================================================
+export const GOD_READINGS = {
+  // Kaching: "hold 500,000 Credits at once" — Credits on hand at a check moment (a race result, a month's end, a
+  // season's end, a sponsor deal or contract ending), less every Credit this run got from these ledger sources
+  credits: 500000,
+  paidSources: ['purchase', 'store', 'iap', 'ad', 'ads', 'vip', 'tokens', 'debug'],
+  // "4 sponsors active on the title car": a car carries at most 3 (data/sponsors.js SPONSOR_SLOTS: Rank A / S), so the
+  // reading is every slot filled — 3 sponsors on the car in the season's last round
+  titleSponsors: 3,
+  combos: Array.from({ length: 19 }, (_, i) => `SYN${String(i + 1).padStart(2, '0')}`), // SYN01–SYN19
+  others: ['GOD01', 'GOD02', 'GOD03', 'GOD04'],
+};
+const godArrival = (id) => [{ type: 'staffArrival', id, days: SECRET_READINGS.arrivalDays }];
+export const GOD_RULES = [
+  {
+    id: 'SEC-GOD-1', name: 'Bolt, God of Tinkering', category: 'god', ...RUN, triggerEvents: ['raceResult', 'carBuilt', 'rankUp', 'facilityBuilt'],
+    requiresAll: [
+      RANK_S,
+      streak('run.races', [w('mechRetired', 'eq', false), w('pitErrors', 'eq', 0)], 25, '25 race starts in a row with no mechanical retirement and no pit error'),
+      gte('run.cleanBuilds', 12, '12 builds or upgrades finished with zero faults this run'),
+      gte('run.pitBayLevel', 3, 'Pit Bay at level 3'),
+      eq('run.bayExtension', true, 'The Bay Extension open'),
+    ],
+    clueStages: clues('Mechanics tell of a cog that glows over the best pit crews.', 'A little old god with a golden wrench is said to visit garages where nothing ever breaks.', 'Twenty-five clean starts, a dozen flawless builds, a top-level Pit Bay with its extension — and a cog-haloed mechanic might knock.'),
+    recipe: 'Rank S; 25 race starts in a row with no mechanical retirement and no pit error; 12 builds or upgrades finished with zero faults this run; Pit Bay at level 3 and the Bay Extension open.',
+    rewardActions: godArrival('GOD01'),
+  },
+  {
+    id: 'SEC-GOD-2', name: 'Jinx, Goddess of Luck', category: 'god', ...RUN, triggerEvents: ['raceResult', 'carBuilt', 'comboFound'],
+    requiresAll: [
+      gte('run.breakthroughs', 10, '10 breakthroughs this run'),
+      gte('account.visibleCombos', 15, '15 of the 19 combos discovered (SYN01–SYN19, any run)'),
+      count('run.races', [WON, w('grid', 'gte', 10), w('weatherChanged', 'eq', true)], 1, 'Win a race started P10 or lower in which the weather changed'),
+    ],
+    clueStages: clues('A lucky cat has been seen on the pit wall when the rain comes.', 'A cat-eared strategist with a floating die loves teams that find hidden combos and win from the back.', 'Ten breakthroughs, fifteen combos, and a win from P10 or lower in changing weather.'),
+    recipe: '10 breakthroughs this run; 15 of the 19 combos (SYN01–SYN19) discovered on this device; win a race started P10 or lower in which the weather changed.',
+    rewardActions: godArrival('GOD02'),
+  },
+  {
+    id: 'SEC-GOD-3', name: 'Zip, God of Speed', category: 'god', ...RUN, triggerEvents: ['raceResult', 'seasonEnd'],
+    requiresAll: [
+      count('run.seasons', [w('champ', 'eq', 'C10'), w('title', 'eq', true), w('wins', 'gte', 4), w('winDrivers', 'eq', 1)], 1, 'Win the World Racing Championship winning at least 4 of its 6 rounds, every win by the same driver'),
+      gte('account.fastestLapTracks', 10, 'Set the fastest lap at 10 different tracks (any run)'),
+    ],
+    clueStages: clues('Something blond and very fast keeps setting lap records, then vanishing.', 'A winged-shoe driver only races for teams that dominate the world championship.', 'Win at least four World Championship rounds with one driver, and own the fastest lap at ten tracks.'),
+    recipe: 'Win the World Racing Championship (C10) winning at least 4 of its 6 rounds, all those wins by the same driver; set the race’s fastest lap at 10 different tracks (any run).',
+    rewardActions: godArrival('GOD03'),
+  },
+  {
+    id: 'SEC-GOD-4', name: 'Kaching, God of Fortune', category: 'god', ...RUN, triggerEvents: ['raceResult', 'monthEnd', 'seasonEnd', 'sponsorEnded', 'contractDone'],
+    requiresAll: [
+      gte('run.creditsEarned', GOD_READINGS.credits, 'Hold 500,000 Credits at once (never bought)'),
+      gte('run.sponsorDealsMet', 15, '15 sponsor deals completed successfully this run'),
+      count('run.seasons', [w('title', 'eq', true), w('sponsorsAtEnd', 'gte', GOD_READINGS.titleSponsors)], 1, 'Win a championship with all 3 sponsor slots filled on the title car'),
+    ],
+    clueStages: clues('Coins have been heard jingling in the team owners’ lounge.', 'A laughing god on a cushion of gold backs only the richest, best-sponsored teams.', 'Half a million Credits in the bank, fifteen sponsor deals done, and a title with a sponsor in every slot.'),
+    recipe: 'Hold 500,000 Credits at once (Credits from purchases, ads or tokens never count); 15 sponsor deals completed successfully this run; win a championship with all 3 sponsor slots filled on the title car.',
+    rewardActions: godArrival('GOD04'),
+  },
+  {
+    id: 'SEC-GOD-5', name: 'Havoc, God of Chaos', category: 'god', ...ACCOUNT, ngPlusMin: 1, cluesFromProgress: true, triggerEvents: ['raceResult'],
+    requiresAll: [
+      gte('account.otherGodsHired', 4, 'Bolt, Jinx, Zip and Kaching all hired at least once (any runs)'),
+      gte('account.ngPlus', 1, 'NG+1 or higher'),
+      gte('run.incidentRacesAfterGods', 1, 'Then a race weekend with a crash, spin or Safety Car'),
+    ],
+    // (the four gods and NG+ are 2 of the 3 conditions — stage 1 needs both, so his rumours start only once all four are hired)
+    clueStages: [
+      { text: 'Purple sparks in the garage at night. Nobody’s owning up.', minMet: { share: 0.6 } },
+      { text: 'The other gods have a little brother. They don’t talk about him.', minMet: { share: 0.63 } },
+      { text: 'With every other god on your books, in New Game+, the next crash will bring him.', minMet: { share: 0.66 } },
+    ],
+    recipe: 'Hire Bolt, Jinx, Zip and Kaching at least once (any runs); then, in NG+1 or higher, the next race weekend with a crash, spin or Safety Car brings him.',
+    rewardActions: godArrival('GOD05'),
+  },
+];
+export const GOD_SECRET_IDS = GOD_RULES.map((r) => r.id);
+// Every secret the game runs: the bible's 34 (§36) and the gods' 5 = 39 (the totals the Records and the ending show).
+export const ALL_SECRET_RULES = [...SECRET_RULES, ...GOD_RULES];
+export const SECRET_IDS = ALL_SECRET_RULES.map((r) => r.id);
 // The account-wide switches a reward can set (src/systems/secrets.js), with the words the Rumour Archive shows.
 export const ACCOUNT_FLAGS = {
   founderLoyaltyRecord: 'Founder Loyalty: kept a founding crew member to the end (permanent record)',

@@ -13,12 +13,12 @@ import { THEME } from '../../../../core/Theme.js';
 import { RECORDS_TEXT as T } from '../../data/achievements.js';
 import { TRACKS, TRACK_IDS, isVisibleTrack } from '../race/tracks.js';
 import { FAMILY_NAMES } from '../../data/cars.js';
-import { ALL_STAFF, ROLES } from '../../data/staff.js';
+import { ALL_STAFF, ROLES, GODS } from '../../data/staff.js'; // (Milestone 30d: + the gods)
 import { DRILLS } from '../../data/drills.js';
 import { fmt } from './moneyMenu.js';
 
 const C = THEME.color;
-const NAME = Object.fromEntries(ALL_STAFF.map((d) => [d.id, d]));
+const NAME = Object.fromEntries([...ALL_STAFF, ...GODS].map((d) => [d.id, d])); // (Milestone 30d: + the gods)
 const dateOf = (day) => `Y${Math.floor(day / 336) + 1} M${Math.floor((day % 336) / 28) + 1} D${(day % 28) + 1}`;
 const lap = (s) => (s == null ? T.empty : `${Math.floor(s / 60)}:${(s % 60).toFixed(3).padStart(6, '0')}`);
 const num = (v) => (v == null || v === 0 ? T.empty : fmt(v));
@@ -50,9 +50,11 @@ export function recordsMenu({ team, open = () => {}, menuRow = () => {} }) {
       ],
     },
     {
-      title: `Achievements · ${A.earnedList().length} of ${A.rules.length}`,
+      title: `Achievements · ${A.earnedList().length} of ${(A.visible ?? A.rules).length}`,
       columns: 2,
-      buttons: A.rules.map((r) => {
+      // (Milestone 30d: the visible 30, then a hidden one — ??? until it is revealed)
+      buttons: [...(A.visible ?? A.rules), ...(A.hidden ?? [])].map((r) => {
+        if (r.hidden && !A.revealed(r.id)) return { id: `ach_${r.id}`, label: '???', sub: 'A hidden achievement', icon: r.icon, accent: C.outline, onTap: () => {} };
         const got = A.earned(r.id) ? A.engine.account.history[r.id].first : null;
         return { id: `ach_${r.id}`, label: `${got ? '✓ ' : ''}${r.name}`, sub: got ? `${dateOf(got.day ?? 0)} · ${r.recipe}` : r.recipe, icon: r.icon, accent: got ? C.good : C.outline, onTap: () => {} };
       }),
@@ -82,8 +84,15 @@ export function recordsMenu({ team, open = () => {}, menuRow = () => {} }) {
   const people = Object.entries(team.careers.people).filter(([, p]) => p.races || p.wins || p.carsBuilt || p.daysEmployed);
   const here = (id) => !!team.get(id);
   people.sort((a, b) => Number(here(b[0])) - Number(here(a[0])) || (b[1].wins ?? 0) - (a[1].wins ?? 0));
+  // Milestone 30d: the Works Gods — each one's name once their secret is found or they were hired (any run), else ???
+  const godsHired = team.secrets?.godsHired?.() ?? {};
+  const godFound = (g) => !!godsHired[g.id] || !!team.secrets?.engine?.everUnlocked?.(`SEC-GOD-${Number(g.id.slice(3))}`);
   const staffTab = [
     { lines: [line('Most race wins by one person', A.record('personWins'), (v) => (v == null ? T.empty : fmt(v)))] },
+    {
+      title: 'The Works Gods',
+      lines: GODS.map((g) => (godFound(g) ? { text: `${g.name}, ${g.title} (${ROLES[g.role].name})${godsHired[g.id] ? ' · hired' : ' · arrived'}${team.get(g.id) ? ' · on the team' : ''}`, color: C.actionDark } : { text: '???', color: C.textMuted })),
+    },
     {
       title: 'Careers',
       lines: people.length

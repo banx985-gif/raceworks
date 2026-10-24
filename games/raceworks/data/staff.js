@@ -24,6 +24,8 @@ export const TIERS = {
   elite: { name: 'Elite', statCap: 400, traitSlots: 2 },
   legendary: { name: 'Legendary', statCap: 520, traitSlots: 2, signature: true },
   secret: { name: 'Secret', statCap: 650, traitSlots: 3, signature: true },
+  // Milestone 30d: the Works Gods (SERIES_WORKS_GODS.md) — above Secret / Prestige; their signature trait is the blessing
+  divine: { name: 'Divine', statCap: 650, traitSlots: 3, signature: true },
 };
 
 // --- traits (Milestone 13: the trait framework) ----------------------------------------------------------------------
@@ -99,6 +101,22 @@ export const TRAITS = {
   threeMovesAhead: { name: 'Three Moves Ahead', text: 'Always three moves ahead of the other pit walls.', effects: { crewPct: 6 }, strategy: 'Race planning +40 STR' },
   grandmaster: { name: 'Grandmaster', signature: true, text: 'Plays a race like chess.', effects: { crewPct: 10, tyreWearPct: -6 }, strategy: 'Race planning +60 STR' },
   futureSight: { name: 'Future Sight', signature: true, text: 'Seems to know what happens next.', effects: { crewPct: 12, failurePct: -10 }, strategy: 'Race planning +80 STR' },
+  // Milestone 30d: the Works Gods' blessings (blessing: true — a signature trait the staff card calls a blessing). The
+  // text is the card's plain words; every number is a PLACEHOLDER (DECISIONS.md M30d, tuned in the M36 balance pass).
+  //   faultMult / breakthroughMult   × the car team's fault / breakthrough chance (src/systems/carProject.js)
+  //   buildSpeedPct                  + % progress in the build phases while they work on it
+  //   chaosBuild                     % chance at each build phase they work on: a free breakthrough (else one fault)
+  //   retireMult                     × the chance a race failure is a retirement (the race crew)
+  //   weatherCalls                   the race Strategist's forecast is exact (the weather calls are always right)
+  //   cautionLuckPct                 + % chance a caution comes while your planned stop is near (the race Strategist)
+  //   extraStints                    + Drive Stints a race (the race Driver: never tires)
+  //   prizePct / sponsorPct          + % race prize money / sponsor payouts (the whole team, while employed)
+  //   chaosRace                      % chance the one race-day swing is a big pace boost for a stint (else a spin)
+  godBolt: { name: 'Cog Halo', signature: true, blessing: true, text: 'Builds he works on get half the faults. As Lead Mechanic: pit stops 20% quicker and half the chance of a mechanical retirement.', effects: { faultMult: 0.5, pitServicePct: -20, retireMult: 0.5 } },
+  godJinx: { name: 'Lucky Die', signature: true, blessing: true, text: 'Breakthroughs ×1.5 on builds she works on. As race Strategist: her weather calls are always right, and a Safety Car is a little more likely to come at a good moment for you.', effects: { breakthroughMult: 1.5, weatherCalls: 1, cautionLuckPct: 25 } },
+  godZip: { name: 'Winged Shoes', signature: true, blessing: true, text: 'Fastest learner: build phases he works on run 15% faster. As Driver: +60 Qualifying and +60 Racecraft, and he never tires during a Drive Stint.', ratings: { qualifying: 60, racecraft: 60 }, effects: { buildSpeedPct: 15, extraStints: 1 } },
+  godKaching: { name: 'Coin Cushion', signature: true, blessing: true, text: '+20% race prize money and +20% sponsor payouts for the whole team while he’s employed.', effects: { prizePct: 20, sponsorPct: 20 } },
+  godHavoc: { name: 'Chaos Sparks', signature: true, blessing: true, text: 'Wild: at each build phase he works on, 70% a big boost (a free breakthrough), 30% a small setback (one fault). On race day, one random swing per race: 70% a big pace boost for a stint, 30% a spin. Strong on average, never safe.', effects: { chaosBuild: 70, chaosRace: 70 } },
 };
 
 // --- eligibility (bible §11 "Initial eligibility") -------------------------------------------------------------------
@@ -194,6 +212,39 @@ export const ALL_STAFF = [
   row('STR10', 'Oracle Rey', 'secret', 24, [167, 182, 150, 446, 164], 5700, 'futureSight', E.secret('SEC-STAFF-S5')),
 ];
 
+// Milestone 30d: the Works Gods (SERIES_WORKS_GODS.md; card docs/M30d_WORKS_GODS.md) — five more people, never part of
+// the 50 above (ALL_STAFF / ROSTER stay the bible's §11 list, so no recruitment board ever draws them). One per role,
+// Divine tier, Level 1 with strong stats in their role (like the Prestige staff), Prestige salary, the blessing as their
+// signature trait. Each arrives only through their own secret's arrival event (SEC-GOD-1 … 5, data/secrets.js GOD_RULES).
+//   title       their god title (staff card, arrival card, Records)
+//   arrival     the arrival card's words (Havoc's is his own: "Something's not right in the garage…")
+//   footPad     transparent rows under the feet in the art (of its 615 px), so they stand on the same feet line as
+//               everyone else (Kaching: the bottom of his coin cushion). Measured on Cowork's stand-ins (24 Oct) — re-measure
+//               when the RACEWORKS outfit versions replace them.
+// PLACEHOLDERS (DECISIONS.md M30d): the stats and salaries.
+const god = (id, name, title, role, primary, salary, trait, footPad, arrival) => {
+  const stats = { MEC: 182, ENG: 182, AER: 182, STR: 182, DRV: 182 };
+  stats[ROLES[role].primaryStat] = primary;
+  return { id, name, title, role, tier: 'divine', startLevel: 1, stats, salary, traits: [trait], art: `staff_${id.toLowerCase()}`, footPad, arrival, eligibility: { text: `Secret SEC-GOD-${Number(id.slice(3))}`, all: [{ secret: `SEC-GOD-${Number(id.slice(3))}`, waits: 'Milestone 30d (the Works Gods)' }] } };
+};
+export const GODS = [
+  god('GOD01', 'Bolt', 'God of Tinkering', 'mechanic', 460, 5700, 'godBolt', 7, 'A little old god with a golden wrench and a glowing cog over his head is standing at your garage door.'),
+  god('GOD02', 'Jinx', 'Goddess of Luck', 'strategist', 460, 5700, 'godJinx', 6, 'A cat-eared goddess is sitting on your pit wall, a glowing die floating over her shoulder. She winks.'),
+  god('GOD03', 'Zip', 'God of Speed', 'driver', 460, 5700, 'godZip', 6, 'Something blond and very fast just did three laps of your test track and stopped at the garage. He wants a seat.'),
+  god('GOD04', 'Kaching', 'God of Fortune', 'engineer', 460, 5700, 'godKaching', 9, 'Coins jingle in the owners’ lounge: a laughing god on a cushion of gold wants to back your team.'),
+  god('GOD05', 'Havoc', 'God of Chaos', 'aero', 460, 5700, 'godHavoc', 6, 'Something’s not right in the garage… purple sparks, a cracked little crown, and a grin. The other gods’ little brother has arrived.'),
+];
+export const GOD_IDS = GODS.map((d) => d.id);
+// What each god does in a race weekend, in a line (the Weekend and Result screens; Milestone 30d)
+export const GOD_RACE_TEXT = {
+  GOD01: 'Lead Mechanic: pit stops 20% quicker · mechanical retirements halved',
+  GOD02: 'Strategist: the forecast is always right · a caution is likelier near your stop',
+  GOD03: 'Driver: +60 Qualifying and Racecraft · one more Drive Stint (he never tires)',
+  GOD04: '+20% prize money (and sponsor payouts) for the team',
+  GOD05: 'One wild swing this race: 70% a burst of pace, 30% a spin',
+};
+export const isGod = (idOrPerson) => GOD_IDS.includes(typeof idOrPerson === 'string' ? idOrPerson : idOrPerson?.id) || idOrPerson?.tier === 'divine';
+
 // The five founder choices (spec §2; Milestone 3's starters Sam, Tessa and Mara plus Nia and Ben from Milestone 4b).
 export const FOUNDER_IDS = ['DRV01', 'MEC01', 'ENG01', 'AER01', 'STR01'];
 export const STAFF = FOUNDER_IDS.map((id) => ALL_STAFF.find((d) => d.id === id));
@@ -201,7 +252,7 @@ export const STAFF = FOUNDER_IDS.map((id) => ALL_STAFF.find((d) => d.id === id))
 export const CANDIDATE_ROWS = ALL_STAFF.filter((d) => !FOUNDER_IDS.includes(d.id));
 // Everyone recruitment reads (the founder choices are candidates too when not on the team — spec §2; the founder never).
 export const ROSTER = ALL_STAFF;
-export const staffDefById = (id) => ALL_STAFF.find((d) => d.id === id) ?? null;
+export const staffDefById = (id) => ALL_STAFF.find((d) => d.id === id) ?? GODS.find((d) => d.id === id) ?? null; // (Milestone 30d: + the gods)
 
 // The default starting team (Sam, Tessa and Mara) — a new game now builds its team from the founder (data/setup.js).
 export const STARTERS = ['DRV01', 'MEC01', 'ENG01'];

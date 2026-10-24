@@ -22,6 +22,10 @@
 // someone let go leaves the floor; someone on a training course walks to the course's station and stays there until it
 // ends (their day counts as training: no Energy used), then goes back to work.
 //
+// Milestone 30c: several builds at once — one build show per bay (showOf(bay)): the Pit Bay's bays side by side on its
+// platform (smaller when there are two or three), the Bay Extension's in that wing, a prototype on the Prototype Bay; each
+// crew works at its own build's phase stations; one stage chip per build; reveal(bay) and focusBay(bay).
+//
 // Plan space (grid, pathing, positions) is flat; only drawing and tapping go through the IsoProjection.
 import { THEME, font } from '../../../../core/Theme.js';
 import { Grid } from '../../../../core/Grid.js';
@@ -46,6 +50,7 @@ import { liveryKey, teamColourId, carArtKey } from '../ui/livery.js';
 import { structuralCombos } from '../systems/combos.js'; // Milestone 22
 import { visualFamily } from '../systems/carVisual.js';
 import { sponsorById } from '../../data/sponsors.js'; // Milestone 25b: the Sponsor Wall's logo slots
+import { godOf, drawGodGlow, footShift } from '../ui/godGlow.js'; // Milestone 30d
 
 const C = THEME.color;
 const S = THEME.size;
@@ -274,14 +279,14 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
       const at = team.training.stationFor(t.courseId, (id) => !!stationById(id));
       if (at) return { ...a.routine, idleSec: 0.3, stops: [{ at, spot: at === 'F12' ? 0 : 1, sec: Infinity, activity: 'training', training: t.courseId }] };
     }
-    const job = team.cars.active;
+    const job = team.cars.jobOf(a.staffId); // (Milestone 30c: the build this person is on)
     const i = job ? job.slots.indexOf(a.staffId) : -1;
     if (i < 0) return a.routine;
     const phase = PHASES[job.phaseIndex].id;
     const ids = (PHASE_STATIONS[phase] ?? []).filter((id) => stationById(id));
-    if (!ids.length) ids.push('F02');
+    if (!ids.length) ids.push(job.data.bay === 'proto' && stationById('F30') ? 'F30' : 'F02'); // (a prototype's crew: the Prototype Bay)
     const at = ids[i % ids.length];
-    return { ...a.routine, idleSec: 0.6, stops: [{ at, spot: Math.floor(i / ids.length), slot: i, phase, sec: 25, activity: 'working', project: true }] };
+    return { ...a.routine, idleSec: 0.6, stops: [{ at, spot: Math.floor(i / ids.length), slot: i, phase, sec: 25, activity: 'working', project: true, jobId: job.id }] };
   }
   function updateWorker(a, dt) {
     a.update(dt, grid);
@@ -365,18 +370,44 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
     return !!a && (a.phase === 'resting' || a.phase === 'toRest');
   };
 
-  // --- the visible build in the Pit Bay ---------------------------------------------------
-  // busy: the clock is running and someone on the car's team is working (the work sparks and smoke).
-  const show = createBuildShow({ assets, pixelScale: () => renderer.pixelScale, busy: () => !clock.paused && !!team.cars.active && workers.some((a) => a.phase === 'working' && a.stop?.project) });
-  bus.on('car:fault', () => show.event('smoke'));
-  bus.on('car:breakthrough', () => show.event('sparkle'));
-  bus.on('car:fix', () => show.event('fix'));
-  const bayFloor = () => {
-    const fp = stationById('F02')?.fp ?? { col: 6, row: 2 };
-    return iso.corner(fp.col + 2, fp.row + 2.4); // the middle of the bay's platform
+  // --- the visible builds: one show per bay (Milestone 30c) --------------------------------
+  // busy: the clock is running and someone on that build's team is working (the work sparks and smoke).
+  const shows = new Map(); // bay id → its build show
+  const showOf = (bay) => {
+    if (!shows.has(bay))
+      shows.set(bay, createBuildShow({ assets, pixelScale: () => renderer.pixelScale, busy: () => {
+        const job = team.cars.byBay(bay);
+        return !clock.paused && !!job && workers.some((a) => a.phase === 'working' && a.stop?.project && (a.stop.jobId ? a.stop.jobId === job.id : bay === 'pit1'));
+      } }));
+    return shows.get(bay);
   };
-  const showView = () => {
-    const job = team.cars.active;
+  const show = showOf('pit1'); // the first Pit Bay's (tests, older code)
+  const showForJob = (job) => showOf(job?.data?.bay ?? 'pit1');
+  bus.on('car:fault', ({ job }) => showForJob(job).event('smoke'));
+  bus.on('car:breakthrough', ({ job }) => showForJob(job).event('sparkle'));
+  bus.on('car:fix', ({ job }) => showForJob(job).event('fix'));
+  // Where a bay's car sits (world) and how wide it is drawn. One Pit Bay bay: the middle of its platform (as before);
+  // two or three: smaller, spread corner to corner. The Bay Extension's: near the top of the wing; the Prototype Bay's: its
+  // platform. PLACEHOLDER spots (DECISIONS.md, M30c).
+  function bayAnchor(bay) {
+    if (bay === 'proto') {
+      const fp = stationById('F30')?.fp;
+      return fp ? { at: iso.corner(fp.col + 2, fp.row + 2.4), width: 300 } : null;
+    }
+    if (bay === 'pit4') {
+      const z = EXPANSIONS.find((x) => x.id === 'bay');
+      return z ? { at: iso.corner(z.col + z.w / 2, z.row + 2.6), width: 300 } : null;
+    }
+    const fp = stationById('F02')?.fp ?? { col: 6, row: 2 };
+    const n = Math.max(1, team.pitBayCount?.() ?? 1);
+    if (n === 1) return { at: iso.corner(fp.col + 2, fp.row + 2.4), width: 300 };
+    const k = (Number(bay.slice(3)) - 0.5) / n;
+    return { at: iso.corner(fp.col + 0.5 + k * 3, fp.row + 1 + k * 3), width: n === 2 ? 210 : 160 };
+  }
+  const bayFloor = () => bayAnchor('pit1').at;
+  const showView = (bay = 'pit1') => {
+    const job = team.cars.byBay(bay);
+    const anchor = bayAnchor(bay) ?? bayAnchor('pit1');
     const classId = job?.data.classId ?? 'clubHatch';
     const vis = visualFamily({ classId, parts: job?.data.parts ?? [], combos: structuralCombos({ classId, parts: job?.data.parts ?? [] }), secrets: new Set(team.unlocks?.secrets ?? []), debugSecrets: !!team.combos?.debugSecrets }); // the car this build becomes (Milestone 22: the resolver; Milestone 25: + found secret families)
     const last = team.cars.cars.latest();
@@ -385,9 +416,9 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
       fraction: job ? team.cars.fraction(job) : 0,
       carKey: liveryKey(assets, vis.showcase, teamColourId(team), team.sponsors?.decals() ?? []), // (Milestone 22: + sponsors)
       partKeys: (job?.data.parts ?? []).map((id) => PARTS[id].art),
-      at: bayFloor(),
-      width: 300,
-      lastCar: last?.result ? carArtKey(assets, team, last) : null, // Milestone 22: its resolved family, colour, sponsors
+      at: anchor.at,
+      width: anchor.width,
+      lastCar: bay === 'pit1' && last?.result ? carArtKey(assets, team, last) : null, // Milestone 22: its resolved family, colour, sponsors (Milestone 30c: on the first bay only)
     };
   };
 
@@ -588,14 +619,22 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
       const r = stationById('F02')?.rect;
       if (r) camera.centerOn(r.x + r.w / 2, r.y + r.h * 0.6);
     },
+    // Milestone 30c: bring a bay into view (the one a build has just started in).
+    focusBay(bay = 'pit1') {
+      const a = bayAnchor(bay);
+      if (a) camera.centerOn(a.at.x, a.at.y - 60);
+      else this.focusPitBay();
+    },
+    showOf, // (tests)
+    bayAnchor,
     // Bring a station into the middle of the view (a facility just built).
     focus(uid) {
       const r = stationByUid(uid)?.rect;
       if (r) camera.centerOn(r.x + r.w / 2, r.y + r.h * 0.6);
     },
     // The finished car's moment on the bay: a flash and a gold sparkle.
-    reveal() {
-      show.event('reveal');
+    reveal(bay = 'pit1') {
+      showOf(bay ?? 'pit1').event('reveal'); // (Milestone 30c: on the bay it was built in)
     },
     taps,
     moves,
@@ -709,7 +748,7 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
 
     // Real time (runs while paused too): the build show's effects, the banner message, the new-facility glow.
     update(dt) {
-      show.update(dt);
+      for (const sh of shows.values()) sh.update(dt); // (Milestone 30c: every bay's show)
       if (note && (note.t += dt) > REFUSED_SEC * (note.bad ? 1 : 1.6)) note = null;
       if (flash && (flash.t += dt) > FLASH_SEC) flash = null;
     },
@@ -837,7 +876,10 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
           const pose = characterPose(it, simTime, workers.indexOf(it) * 1.7, POSE);
           pose.flip = 1;
           if (simpleFigures()) pose.bob = pose.tilt = 0; // Milestone 25b: Low graphics
-          drawCharacter(ctx, assets, staffOf(it)?.art, r.x + r.w / 2, r.y + r.h, r.w, r.h, pose);
+          // Milestone 30d: a god gets a small gold glow behind them, and stands on the same feet line (their art has a
+          // few empty rows under the feet — Kaching's under his coin cushion)
+          if (godOf(staffOf(it))) drawGodGlow(ctx, r.x + r.w / 2, r.y + r.h * 0.6, r.w * 0.75, r.h * 0.5, simpleFigures() ? 0.6 : 1);
+          drawCharacter(ctx, assets, staffOf(it)?.art, r.x + r.w / 2, r.y + r.h + footShift(staffOf(it), r.h), r.w, r.h, pose);
         } else {
           const lifted = moving?.st === it;
           const r = lifted ? stationRect(it, movingFp()) : it.rect;
@@ -847,9 +889,13 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
           ctx.globalAlpha = 1;
           if (it.id === 'F15' && !lifted) drawLogoSlots(ctx, r); // Milestone 25b
           if (!it.def.prop && !lifted) drawLevelBadge(ctx, it, r);
-          if (it.id === 'F02' && !lifted) show.draw(ctx, showView());
+          // (Milestone 30c: each Pit Bay bay's build — the first always, as before, the others only while building —
+          // and the Prototype Bay's prototype)
+          if (it.id === 'F02' && !lifted) for (let k = 1; k <= Math.max(1, team.pitBayCount?.() ?? 1); k++) if (k === 1 || team.cars.byBay(`pit${k}`)) showOf(`pit${k}`).draw(ctx, showView(`pit${k}`));
+          if (it.id === 'F30' && !lifted && team.cars.byBay('proto')) showOf('proto').draw(ctx, showView('proto'));
         }
       }
+      if (team.cars.byBay('pit4')) showOf('pit4').draw(ctx, showView('pit4')); // Milestone 30c: the Bay Extension's build
       assets.detail = 1;
       if (moving) drawMovingFootprint(ctx);
       camera.restore(ctx);
@@ -1102,11 +1148,17 @@ export function createGarageScreen({ renderer, layout, assets, bus, sheet, openM
       const tw = ctx.measureText(st.def.name).width + 28;
       chip(st.def.name, foot.x - tw / 2, foot.y + 8, tw);
     }
-    const job = team.cars.active;
+    // Each build's stage (Milestone 30c: one chip per build — a single Pit Bay build's above the bay, as before; the
+    // others above their own car)
     const bayStation = stationById('F02');
-    if (job && bayStation) {
-      const bay = bayStation.rect;
-      const top = camera.worldToScreen(bay.x + bay.w / 2, bay.y);
+    const single = (team.pitBayCount?.() ?? 1) <= 1;
+    for (const job of team.cars.builds) {
+      const bayId = job.data.bay ?? 'pit1';
+      const anchor = bayAnchor(bayId);
+      let top;
+      if (bayId === 'pit1' && single && bayStation) top = camera.worldToScreen(bayStation.rect.x + bayStation.rect.w / 2, bayStation.rect.y);
+      else if (anchor) top = camera.worldToScreen(anchor.at.x, anchor.at.y - anchor.width * 0.75);
+      else continue;
       const label = PHASES[job.phaseIndex].stage;
       const faults = team.cars.openFaults(job);
       const faultLabel = faults ? `${faults} fault${faults > 1 ? 's' : ''}` : '';

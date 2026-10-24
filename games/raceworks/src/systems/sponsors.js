@@ -24,6 +24,7 @@ import { SPONSORS, sponsorById, SPONSOR_SLOTS, DEAL_DAYS, DEAL_MONTH_DAYS, SPONS
 import { raceFacts, carFacts, matchWhere, testPredicate } from './sponsorFacts.js';
 import { typeCheck } from './contracts.js';
 import { contractType } from '../../data/contracts.js';
+import { teamEffect } from './staffTraits.js';
 
 const round10 = (n) => Math.round(n / 10) * 10;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -35,6 +36,8 @@ export function createSponsors({ bus, team, seed = 'raceworks' }) {
   const today = () => team.clock.totalDays;
   const rng = new Rng(`${seed}-sponsors`);
   const rankId = () => team.money.rank;
+  // Milestone 30d: Kaching — every sponsor payout (stipend, race bonus, completion bonus) + sponsorPct % while he's employed
+  const pay = (n) => (teamEffect(team, 'sponsorPct') ? Math.round((n * (1 + teamEffect(team, 'sponsorPct') / 100)) / 10) * 10 : n);
 
   const api = {
     deals: [], // { id, startDay, endDay, stipend, bonusCredits, completion, counts, seen, monthsChecked, monthNets, stipendsPaid, lastStipendDay, met, completionPaid, bonusesPaid, renewal }
@@ -163,7 +166,7 @@ export function createSponsors({ bus, team, seed = 'raceworks' }) {
       deal.met = true;
       if (!deal.completionPaid) {
         deal.completionPaid = true;
-        team.money.economy.add('credits', deal.completion, `Sponsor bonus: ${sponsorById(deal.id).name} (obligation met)`, 'sponsor');
+        team.money.economy.add('credits', pay(deal.completion), `Sponsor bonus: ${sponsorById(deal.id).name} (obligation met)`, 'sponsor');
       }
       bus?.emit('sponsor:met', { deal, def: sponsorById(deal.id) });
     },
@@ -176,8 +179,8 @@ export function createSponsors({ bus, team, seed = 'raceworks' }) {
         const def = sponsorById(deal.id);
         if (deal.seen.bonus.includes(entry.n) || !matchWhere(f, def.bonus.when)) continue;
         deal.seen.bonus.push(entry.n);
-        deal.bonusesPaid += deal.bonusCredits;
-        team.money.economy.add('credits', deal.bonusCredits, `Sponsor race bonus: ${def.name} (${def.bonus.text})`, 'sponsor');
+        deal.bonusesPaid += pay(deal.bonusCredits);
+        team.money.economy.add('credits', pay(deal.bonusCredits), `Sponsor race bonus: ${def.name} (${def.bonus.text})`, 'sponsor');
       }
       // a championship round raced is a round that existed during the deal, even if it came due before it
       if (entry.champ) api.signal('roundDue', roundKey(entry.champ), {}, live);
@@ -198,7 +201,7 @@ export function createSponsors({ bus, team, seed = 'raceworks' }) {
         if (!(deal.startDay < day && day <= deal.endDay) || deal.lastStipendDay === day || deal.stipendsPaid >= DEAL_DAYS / DEAL_MONTH_DAYS) continue;
         deal.lastStipendDay = day;
         deal.stipendsPaid++;
-        team.money.economy.add('credits', api.stipendNow(deal), `Sponsor stipend: ${sponsorById(deal.id).name} (${deal.stipendsPaid} of 6)`, 'sponsor');
+        team.money.economy.add('credits', pay(api.stipendNow(deal)), `Sponsor stipend: ${sponsorById(deal.id).name} (${deal.stipendsPaid} of 6)`, 'sponsor');
       }
     },
     // Each deal month that has ended: its net Credits (in − out, every ledger line of those 28 days).

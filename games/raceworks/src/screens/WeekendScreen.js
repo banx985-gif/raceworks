@@ -19,6 +19,8 @@ import { TRACKS, geoOf } from '../race/tracks.js';
 import { drawMinimap } from '../race/trackDraw.js';
 import { SETUP_AXES, TYRES, FUEL, FUEL_ORDER, REPAIR, REPAIR_ORDER, RACE_ICONS, WEEKEND, DRIVE_LAP } from '../../data/race.js';
 import { raceClock } from './RaceScreen.js';
+import { GODS, GOD_RACE_TEXT } from '../../data/staff.js'; // Milestone 30d
+import { drawGodGlow } from '../ui/godGlow.js';
 
 const C = THEME.color;
 const S = THEME.size;
@@ -97,6 +99,27 @@ export function createWeekendScreen({ layout, assets, team, topBar, onStartRace,
       if (ctx) text(ctx, R.forecastLine(), 24, y + 140, { size: S.body, bold: true, color: R.weather() === 'dry' ? C.actionDark : C.progress, maxWidth: w - 48 });
       note('Qualifying runs in the start’s weather; the race follows the real weather (the forecast can be wrong)', y + 196);
       y += h + 20;
+    }
+
+    // --- Milestone 30d: the Works Gods in this race (only when one is) ---
+    {
+      const gods = GODS.filter((g) => (wk.blessings ?? []).includes(g.id));
+      if (gods.length) {
+        const rowH = 150;
+        const h = 120 + gods.length * rowH;
+        card(h, 'normal');
+        if (ctx) text(ctx, 'The Works Gods in this race', 24, y + 24, { size: S.heading, bold: true, color: C.actionDark, maxWidth: w - 48 });
+        gods.forEach((g, i) => {
+          const yy = y + 110 + i * rowH;
+          if (ctx) {
+            drawGodGlow(ctx, 84, yy + 64, 64, 60);
+            assets.drawContained(ctx, g.art, { x: 34, y: yy, w: 100, h: 130 }, 'bottom');
+            text(ctx, `${g.name}, ${g.title}`, 156, yy + 12, { size: S.body, bold: true, maxWidth: w - 180 });
+            para(ctx, GOD_RACE_TEXT[g.id] ?? '', 156, yy + 60, w - 180, { size: S.small, color: C.textMuted, maxLines: 2 });
+          }
+        });
+        y += h + 20;
+      }
     }
 
     // --- practice ---

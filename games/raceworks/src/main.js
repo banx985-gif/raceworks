@@ -78,7 +78,7 @@ import { drawResearchBanner, researchBannerHeight } from './ui/researchBanner.js
 import { createEventCard } from './ui/eventCard.js'; // Milestone 23
 import { NODE } from './systems/research.js';
 import { comboById } from '../data/combos.js';
-import { SYNTHETIC_RULES, SECRET_RULES } from '../data/secrets.js'; // Milestone 24 (synthetic: ?debug=1&synthetic=1 only) · Milestone 25
+import { SYNTHETIC_RULES, ALL_SECRET_RULES } from '../data/secrets.js'; // Milestone 24 (synthetic: ?debug=1&synthetic=1 only) · Milestone 25 · Milestone 30d: + the 5 god secrets (39)
 import { createRecruitScreen } from './screens/RecruitScreen.js';
 import { createTrainScreen } from './screens/TrainScreen.js';
 import { checkStaffData } from './systems/staffCheck.js';
@@ -116,6 +116,7 @@ import { STORE_TEXT, MAIN_MENU_TEXT, BACK_TEXT, SAVE_TEXT, EMPTY_TEXT } from '..
 import { SAVE_STORAGE, SAVE_TRIGGERS, OTHER_SAVE_EVENTS, AUTOSAVE_MS, ACCOUNT_VERSION, SAVE_WORDS } from '../data/save.js';
 import { createRunCheck, validateAccount, ACCOUNT_MIGRATIONS, blankAccount } from './app/saveCheck.js';
 import { createSaveInspector } from './ui/saveInspector.js';
+import { GODS } from '../data/staff.js'; // Milestone 30d
 const COL = THEME.color;
 
 const W = 1080;
@@ -243,7 +244,7 @@ debug.log(`seeded rng check: ${rng.int(0, 9999)} (same every reload)`);
 // Pause / 1× / 2× / 4× drive its core Clock, which now ticks days.
 // Milestone 25: a Legendary / Prestige arrival's portrait loads as it arrives (its event card shows it).
 bus.on('recruit:arrival', ({ card }) => card?.art && assets.isPending?.(card.art) && assets.ensure([card.art]));
-const team = new Team({ bus, seed: 'raceworks', secretRules: debug.enabled && new URLSearchParams(window.location.search).get('synthetic') === '1' ? SYNTHETIC_RULES : SECRET_RULES });
+const team = new Team({ bus, seed: 'raceworks', secretRules: debug.enabled && new URLSearchParams(window.location.search).get('synthetic') === '1' ? SYNTHETIC_RULES : ALL_SECRET_RULES });
 const clock = team.clock;
 let teamReady = false;
 bus.on('clock:speed', ({ speed }) => debug.log(speed ? `speed ${speed}×` : 'game paused'));
@@ -405,34 +406,33 @@ const goTrain = (id = null) => {
 };
 // A finished car: set when the project completes, opened after the reveal has played on the bay.
 let pendingCar = null;
-bus.on('project:complete', ({ record }) => {
+bus.on('project:complete', ({ job, record }) => {
   if (!record) return; // Milestone 30b: an upgrade changes its car ('car:upgraded' below)
   debug.log(`car finished: ${record.name}, Quality ${record.result.quality}, ${record.days} days`);
   const onGarage = router.currentName === 'garage';
-  if (onGarage) garage.reveal();
+  if (onGarage) garage.reveal(job?.data?.bay); // (Milestone 30c: on its own bay)
   pendingCar = { number: record.number, wait: onGarage ? 2.6 : 0 };
 });
 // Milestone 30b: a finished upgrade — the same reveal on the bay, then its car's screen.
-bus.on('car:upgraded', ({ record }) => {
+bus.on('car:upgraded', ({ job, record }) => {
   if (!record) return;
   debug.log(`car upgraded: ${record.name}, Quality ${record.result.quality}`);
   const onGarage = router.currentName === 'garage';
-  if (onGarage) garage.reveal();
+  if (onGarage) garage.reveal(job?.data?.bay);
   pendingCar = { number: record.number, wait: onGarage ? 2.6 : 0 };
 });
 bus.on('car:fault', ({ fault }) => debug.log(`fault in ${fault.phase} (${fault.stat})`));
 bus.on('car:breakthrough', ({ breakthrough }) => debug.log(`breakthrough in ${breakthrough.phase}: ${breakthrough.kind}`));
 bus.on('project:phase', ({ phase, summary }) => debug.log(`${phase.name} done in ${summary.days} days`));
-// ?debug=1: skip days / finish the phase from the Pit Bay sheet.
+// ?debug=1: skip days / finish the phase from a build's sheet (Milestone 30c: that build's phase).
 const carDebug = {
   days(n) {
-    for (let i = 0; i < n && team.cars.active; i++) clock.advanceDay();
+    for (let i = 0; i < n && team.cars.builds.length; i++) clock.advanceDay();
   },
-  finishPhase() {
-    const job = team.cars.active;
+  finishPhase(job = team.cars.active) {
     if (!job) return;
     const i = job.phaseIndex;
-    while (team.cars.active === job && job.phaseIndex === i) clock.advanceDay();
+    for (let d = 0; d < 1000 && team.cars.builds.includes(job) && job.phaseIndex === i; d++) clock.advanceDay(); // (a build with no crew never moves)
   },
 };
 // ---------------------------------------------------------------------------
@@ -674,10 +674,10 @@ function openMenuRow(id) {
 // Locked rows say why (the same rules the sheets use); badges for what is waiting.
 function menuState(id) {
   if (!teamReady) return {};
-  if (id === 'carBuilder' && team.cars.active) return { locked: 'A car is already being built (Pit Bay)' };
+  if (id === 'carBuilder') { const why = team.bayWhy('car'); if (why) return { locked: why }; } // (Milestone 30c: a free car bay)
   // Milestone 30b
-  if (id === 'upgradeProject') { const why = team.cars.active ? 'A car is already being built' : !team.cars.cars.count ? 'Build a car first' : team.cars.cars.list().every((r) => team.upgradeWhy(r.number)) ? team.upgradeWhy(team.cars.cars.latest().number) : null; return why ? { locked: why } : {}; }
-  if (id === 'researchPrototype') { const why = team.cars.active ? 'A car is already being built' : team.prototypeWhy(); return why ? { locked: why } : {}; }
+  if (id === 'upgradeProject') { const why = !team.cars.cars.count ? 'Build a car first' : team.cars.cars.list().every((r) => team.upgradeWhy(r.number)) ? team.upgradeWhy(team.cars.cars.latest().number) : null; return why ? { locked: why } : {}; }
+  if (id === 'researchPrototype') { const why = team.prototypeWhy(); return why ? { locked: why } : {}; } // (its own bay, Milestone 30c)
   if (id === 'train' && !team.training.open()) return { locked: team.training.lockedText };
   if (id === 'raceWeekend' && !team.races.current && !team.races.canRace) return { locked: 'Build a car first (Pit Bay)' };
   if (id === 'store') return { badge: team.items.count || null, sub: `${team.items.count} of ${team.items.max} · kit that raises a stat for good` };
@@ -1194,7 +1194,7 @@ const carBuilderScreen = createCarBuilderScreen({
     debug.log(r.ok ? `car started: ${r.job.name} (${opts.budget}, ${r.job.data.tier}, parts ${r.job.data.parts.join(' ')}, team ${opts.staffIds.join(', ')})` : `car not started: ${r.reason}`);
     if (!r.ok) return toast(r.reason);
     router.go('garage');
-    garage.focusPitBay?.();
+    garage.focusBay?.(r.job.data.bay); // (Milestone 30c: the bay it went to)
   },
 });
 const carResultScreen = createCarResultScreen({ layout, assets, team, topBar: screenBar, goCarGarage, goUpgrade: (carNumber) => goBuilder({ mode: 'upgrade', carNumber }), debugEnabled: debug.enabled, toast: (x) => toast(x) });
@@ -1222,6 +1222,9 @@ const resultLines = (e) => {
       if (me?.damage) bits.push(`damage ${me.damage}% at the flag`);
       out.push({ text: bits.join(' · '), color: wx.wet ? COL.progress : COL.textMuted });
     }
+    // Milestone 30d: the Works Gods in this race — who blessed it, and how Havoc's swing went
+    const gods = GODS.filter((g) => (e.blessings ?? []).includes(g.id));
+    if (gods.length) out.push({ text: `Works Gods: ${gods.map((g) => g.id === 'GOD05' && me?.havoc ? `Havoc (${me.havoc === 'boost' ? 'a burst of pace' : 'a spin'})` : g.name).join(' · ')}`, color: COL.actionDark });
   } else out.push({ text: `Test race at ${TRACKS[e.trackId].name}: no prize money`, color: COL.textMuted });
   // Milestone 20: the championship after this round
   if (e.champ) {

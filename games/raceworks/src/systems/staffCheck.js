@@ -6,7 +6,7 @@
 //   Legendary / Secret are special-arrival only · the founder rule: the five founder choices are Standard, level 1,
 //   one per role, start-eligible, and the founder data (data/setup.js) points at them.
 // Runs in Node (tests/raceworks/m13.test.mjs, with the portrait files) and at boot with ?debug=1 (no file check).
-import { ALL_STAFF, TRAITS, TIERS, ROLES, STAT_KEYS, TRAIT_RATING_RANGE, DRIVER_RATINGS, FOUNDER_IDS } from '../../data/staff.js';
+import { ALL_STAFF, GODS, TRAITS, TIERS, ROLES, STAT_KEYS, TRAIT_RATING_RANGE, DRIVER_RATINGS, FOUNDER_IDS } from '../../data/staff.js';
 import { FOUNDERS, START_CANDIDATES } from '../../data/setup.js';
 import { RANKS } from '../../data/economy.js';
 import { RESEARCH } from '../../data/research.js';
@@ -118,5 +118,29 @@ export function checkStaffData({ roster = ALL_STAFF, traits = TRAITS, portraitEx
   if (founderRoles.size !== 5) out.push('founders: not one per role');
   for (const f of FOUNDERS) for (const id of f.team ?? []) if (!byId[id]?.eligibility?.start) bad(f.id, `starting team member ${id} is not a start row`);
   for (const id of START_CANDIDATES) if (!/candidate/i.test(byId[id]?.eligibility?.text ?? '')) bad(id, 'listed as a start candidate but the row says otherwise');
+  return out;
+}
+
+// Milestone 30d: the Works Gods (data/staff.js GODS) — five rows, one per role, Divine tier, Level 1, stats within the
+// Divine cap, exactly one trait: their blessing (a signature trait with blessing: true and known effect keys), their own
+// portrait (staff_god01 …), special arrival only through their own secret (SEC-GOD-1 … 5), a title and arrival words.
+export function checkGodData({ gods = GODS, traits = TRAITS, portraitExists = null } = {}) {
+  const out = [];
+  const bad = (id, msg) => out.push(`${id}: ${msg}`);
+  if (gods.length !== 5) out.push(`gods: ${gods.length} rows, not 5`);
+  if (new Set(gods.map((d) => d.role)).size !== 5) out.push('gods: not one per role');
+  gods.forEach((d, i) => {
+    const n = i + 1;
+    if (d.id !== `GOD0${n}`) bad(d.id, `id should be GOD0${n}`);
+    if (d.tier !== 'divine' || !TIERS.divine) bad(d.id, 'not Divine tier');
+    if (d.startLevel !== 1) bad(d.id, 'gods arrive at Level 1');
+    for (const k of STAT_KEYS) if (!Number.isInteger(d.stats?.[k]) || d.stats[k] < 1 || d.stats[k] > TIERS.divine.statCap) bad(d.id, `${k} outside 1–${TIERS.divine.statCap}`);
+    if (d.traits.length !== 1 || !traits[d.traits[0]]?.blessing || !traits[d.traits[0]]?.signature) bad(d.id, 'one trait: the blessing (signature)');
+    for (const k of Object.keys(traits[d.traits[0]]?.effects ?? {})) if (!TRAIT_EFFECTS[k]) bad(d.id, `blessing: unknown effect ${k}`);
+    if (d.art !== `staff_${d.id.toLowerCase()}`) bad(d.id, `portrait key ${d.art}`);
+    if (portraitExists && !portraitExists(d.art)) bad(d.id, `portrait ${d.art}.png is missing`);
+    if (!(d.eligibility?.all ?? []).some((c) => c.secret === `SEC-GOD-${n}`)) bad(d.id, `special arrival only, through SEC-GOD-${n}`);
+    if (!d.title || !d.arrival || !(d.salary > 0)) bad(d.id, 'title, arrival words and salary');
+  });
   return out;
 }

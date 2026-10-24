@@ -24,11 +24,11 @@
 import { SecretEngine } from '../../../../core/SecretEngine.js';
 import { AccountRecords } from '../../../../core/AccountRecords.js';
 import { TRIGGERS, SECRET_READINGS as SR, SECRET_IDS } from '../../data/secrets.js';
-import { ACHIEVEMENTS, ACHIEVEMENT_READINGS as AR, COMPLETION, VISIBLE_TIERS, VISIBLE_COMBOS, RECORDS, PRESTIGE_READINGS as PR, RECORDS_TEXT } from '../../data/achievements.js';
+import { ACHIEVEMENTS, HIDDEN_ACHIEVEMENTS, ACHIEVEMENT_READINGS as AR, COMPLETION, VISIBLE_TIERS, VISIBLE_COMBOS, RECORDS, PRESTIGE_READINGS as PR, RECORDS_TEXT } from '../../data/achievements.js';
 import { CHAMPIONSHIPS } from '../../data/championships.js';
 import { FACILITIES, EXPANSIONS } from '../../data/facilities.js';
 import { PARTS } from '../../data/cars.js';
-import { ALL_STAFF } from '../../data/staff.js';
+import { ALL_STAFF, GODS } from '../../data/staff.js';
 import { unlockContext, partState } from './carCatalog.js';
 
 const ACCOUNT_VERSION = 1; // the account block's shape (raise with a step in loadAccount)
@@ -36,11 +36,13 @@ const VISIBLE_CHAMPS = CHAMPIONSHIPS.filter((c) => c.type !== 'secret').map((c) 
 const VISIBLE_FACILITIES = FACILITIES.filter((f) => !f.prop && !f.unlock?.secret).map((f) => f.id);
 const NORMAL_WINGS = EXPANSIONS.filter((z) => !z.secret).map((z) => z.id);
 const DISCOVERABLE_PARTS = SR.licences.filter((id) => !PARTS[id]?.unlock?.start);
-const NAME = Object.fromEntries(ALL_STAFF.map((d) => [d.id, d.name]));
+const NAME = Object.fromEntries([...ALL_STAFF, ...GODS].map((d) => [d.id, d.name])); // (Milestone 30d: + the gods)
 const blankLog = () => ({ yearEnds: [], peakCredits: 0, sponsorMet: 0, tiers: [], runEarned: [] }); // (Milestone 28: runEarned)
 const blankSets = () => ({ championships: [], research: [], parts: [], facilities: [], tiers: [] });
 
-export function createAchievements({ bus, team, rules = ACHIEVEMENTS }) {
+// Milestone 30d: + the hidden ones (A31 Pantheon) — earned like the others, but outside the visible 30: completion, the
+//   Records count and the grade read visible() only; Pantheon pays Prestige Tokens (through team.secrets).
+export function createAchievements({ bus, team, rules = [...ACHIEVEMENTS, ...HIDDEN_ACHIEVEMENTS] }) {
   const facts = team.secrets.facts;
   let log = blankLog(); // this run (the slot)
   let account = { load: async () => null, save: async () => {} };
@@ -49,6 +51,7 @@ export function createAchievements({ bus, team, rules = ACHIEVEMENTS }) {
   const now = () => ({ day: team.clock.totalDays, year: team.clock.year, runId: team.runId });
   const recs = new AccountRecords({ defs: RECORDS, now });
   const byId = Object.fromEntries(rules.map((r) => [r.id, r]));
+  const visible = rules.filter((r) => !r.hidden);
 
   // --- the Milestone 26 facts (data/secrets.js FACTS lists them for the validator) --------------------------------
   const races = () => team.secrets.log.races;
@@ -78,11 +81,12 @@ export function createAchievements({ bus, team, rules = ACHIEVEMENTS }) {
       if (a.type === 'credits') team.money.economy.add('credits', a.amount, reason, 'achievement');
       else if (a.type === 'tokens') team.money.economy.add('tokens', a.amount, reason, 'achievement');
       else if (a.type === 'rp') team.research.addRp(a.amount, reason);
+      else if (a.type === 'prestige') team.secrets?.addPrestige?.(a.amount); // Milestone 30d
     }
   }
   const rewardText = (rule) => {
     const a = Object.fromEntries((rule.rewardActions ?? []).map((x) => [x.type, x.amount]));
-    return [a.credits ? `+${a.credits.toLocaleString('en-US')} Credits` : '', a.rp ? `+${a.rp} RP` : '', a.tokens ? `+${a.tokens} Racing Tokens` : ''].filter(Boolean).join(' · ');
+    return [a.credits ? `+${a.credits.toLocaleString('en-US')} Credits` : '', a.rp ? `+${a.rp} RP` : '', a.tokens ? `+${a.tokens} Racing Tokens` : '', a.prestige ? `+${a.prestige} Prestige Tokens` : ''].filter(Boolean).join(' · ');
   };
   // The engine has already written it into the account history (once ever); pay, announce, save.
   function granted(got) {
@@ -214,7 +218,7 @@ export function createAchievements({ bus, team, rules = ACHIEVEMENTS }) {
   const visibleCombos = () => (team.combos?.records?.data ? Object.keys(team.combos.records.data.discovered ?? {}) : []).filter((id) => VISIBLE_COMBOS.includes(id));
   function completion() {
     const counts = {
-      achievements: [rules.filter((r) => earned(r.id)).length, rules.length],
+      achievements: [visible.filter((r) => earned(r.id)).length, visible.length], // (Milestone 30d: the visible 30 only)
       championships: [sets.championships.length, VISIBLE_CHAMPS.length],
       research: [sets.research.length, 36],
       combos: [visibleCombos().length, VISIBLE_COMBOS.length],
@@ -275,12 +279,16 @@ export function createAchievements({ bus, team, rules = ACHIEVEMENTS }) {
 
   const api = {
     rules,
+    visible, // Milestone 30d: the 30 visible (rules less the hidden ones)
+    hidden: rules.filter((r) => r.hidden),
+    // Milestone 30d: a hidden achievement shows once its revealFact is above 0 (Pantheon: the first god hired)
+    revealed: (id) => !!byId[id] && (!byId[id].hidden || earned(id) || (facts.get(byId[id].revealFact) ?? 0) > 0),
     engine,
     facts,
     earned,
-    earnedList: () => rules.filter((r) => earned(r.id)).map((r) => ({ ...r, when: engine.account.history[r.id].first })),
+    earnedList: () => visible.filter((r) => earned(r.id)).map((r) => ({ ...r, when: engine.account.history[r.id].first })), // (Milestone 30d: visible)
     // Milestone 28: the achievements this run earned or met again (ids, in order)
-    runEarned: () => [...log.runEarned],
+    runEarned: () => log.runEarned.filter((id) => !byId[id]?.hidden), // (Milestone 30d: the grade never counts a hidden one)
     check,
     checkAll,
     completion,

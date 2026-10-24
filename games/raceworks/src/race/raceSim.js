@@ -321,6 +321,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     const w = sim.weather;
     let time = baseOf(w)[c.id][k] * (1 + c.segU) * (1 + c.damagePct / 100);
     if (c.failLapsLeft > 0) time *= 1 + c.failPct / 100;
+    if (c.boostLeft > 0) time *= 1 - (e.chaos?.pct ?? 0) / 100; // Milestone 30d: Havoc's burst of pace
     time *= tyreFactor(c.tyre, c.wear) * (1 + PACE_MODES[c.pace].time) * (1 + ORDERS[c.order].time) * (1 + fuelNow(c).time);
     time *= weatherPace(c.tyre, w) * (w === 'storm' ? 1 + (e.stormPacePct ?? 0) / 100 : 1); // Milestone 17
     time *= gripTime[k]; // Milestone 19: a low-grip surface is slower
@@ -417,8 +418,15 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     const last = sim.cautions[sim.cautions.length - 1];
     if (last && x < last.endX + K.cooldownLaps) return;
     if (laps - x < K.lastLaps) return;
-    if (!rng.chance(K.chance[kind] ?? 0)) return;
+    if (!rng.chance(Math.min(1, (K.chance[kind] ?? 0) * cautionLuck()))) return;
     startCaution(reason, K.minLaps + Math.floor(rng.next() * (K.maxLaps - K.minLaps + 1)));
+  }
+  // Milestone 30d: Jinx as race Strategist — a caution is a little likelier while your planned stop is near (a cheap stop)
+  function cautionLuck() {
+    const c = sim.cars.find((x) => byId[x.id].isPlayer);
+    const pct = c ? byId[c.id].cautionLuckPct ?? 0 : 0;
+    if (!pct || c.finished || c.retired || c.pit || !c.plan?.stops || !c.plan.pitLap) return 1;
+    return c.plan.pitLap - nextStopLap(c) <= CAUTION.stopAheadLaps.strong ? 1 + pct / 100 : 1;
   }
   function startCaution(reason, len) {
     const from = leaderLaps();
@@ -625,6 +633,8 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     let kind = failureOutcome(rng.next(), e, c);
     // a forced stop needs laps to make it; too late, the fault just costs pace
     if (kind === 'forcedPit' && (!pit || c.pit || lapsLeft(c) < STRATEGY.minLapsLeftToPit)) kind = 'paceLoss';
+    // Milestone 30d: Bolt as Lead Mechanic — a retirement is only kept with retireMult's chance (else it is damage)
+    if (kind === 'retire' && (e.retireMult ?? 1) < 1 && rng.next() >= e.retireMult) kind = 'damage';
     if (kind === 'paceLoss') {
       c.failLapsLeft = f.paceLossLaps;
       c.failPct = f.paceLossPct;
@@ -662,6 +672,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     if (c.best === null || lt < c.best) c.best = lt;
     c.lapStartT = crossT;
     if (c.failLapsLeft > 0) c.failLapsLeft--;
+    havocLap(c, k); // Milestone 30d
     // Milestone 17: the caution ends when the leader completes its last lap (or at the flag)
     if (sim.caution && (k >= sim.caution.toLap || k >= laps)) endCaution();
     if (k >= laps || sim.leaderFinished) {
@@ -680,6 +691,22 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     c.heat = clamp(c.heat + H[c.pace] + (c.fuel === 'rich' ? H.rich : 0) + (track.engineHeat ?? 0), 0, 1); // Milestone 19: + a hot track
     lapFailureRoll(c);
     if (!c.retired) replan(c);
+  }
+
+  // Milestone 30d: Havoc's one race-day swing (entry.chaos, fixed when the race was made): on its lap a pace boost for a
+  // few laps (c.boostLeft), or a spin.
+  function havocLap(c, k) {
+    if (c.boostLeft > 0) c.boostLeft--;
+    const ch = byId[c.id].chaos;
+    if (!ch || c.chaosDone || k < ch.lap || c.retired || c.finished) return;
+    c.chaosDone = ch.kind;
+    if (ch.kind === 'boost') {
+      c.boostLeft = ch.laps;
+      log('chaos', [c.id], `${nameOf(c.id)}: Havoc's sparks — a burst of pace!`, { boost: true });
+    } else {
+      log('chaos', [c.id], `Havoc's chaos: ${nameOf(c.id)} spins!`, { boost: false });
+      spin(c);
+    }
   }
 
   // Milestone 16: a pit decision of yours that differs from Auto's plan (bible §11 STR08 / §36 SEC-STAFF-L5) — recorded
@@ -1117,10 +1144,11 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
           topSpeed: Math.round((c.vmax ?? 0) * 3.6 * 10) / 10,
           saveUsed: !!c.saveUsed,
           plannedStops: c.plannedStops ?? 0,
+          havoc: c.chaosDone ?? null, // Milestone 30d: 'boost' | 'spin' | null
         };
       }),
       // Milestone 17: the weather the race saw (start, every state, any rain), its cautions and incidents
-      weather: { start: wx.start, states: [...new Set([wx.start, ...sim.events.filter((x) => x.kind === 'weather').map((x) => x.to)])], wet: sim.wetSeen },
+      weather: { start: wx.start, states: [...new Set([wx.start, ...sim.events.filter((x) => x.kind === 'weather').map((x) => x.to)])], wet: sim.wetSeen, changes: sim.events.filter((x) => x.kind === 'weather').length }, // (Milestone 30d: changes)
       cautions: sim.cautions.map((k) => ({ ...k })),
       incidents: sim.incidents,
     };
@@ -1237,6 +1265,7 @@ export function createRaceSim({ track, geo, entries, laps, seed, grid = null, ru
     for (let k = kB + 1; k <= kN && !c.finished && !c.retired; k++) crossLine(c, k, sim.t);
     return c.s - before;
   };
+  sim.cautionLuck = () => cautionLuck(); // Milestone 30d (tests): the caution chance multiplier Jinx gives right now
   sim.debugCaution = (reason = 'debug caution') => {
     if (sim.caution || sim.done || sim.leaderFinished) return false;
     startCaution(reason, CAUTION.minLaps);

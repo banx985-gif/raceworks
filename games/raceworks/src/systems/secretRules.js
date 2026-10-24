@@ -80,7 +80,7 @@ function checkCond(c, path, errors) {
 
 // Milestone 26: { achievement: true } checks a visible achievement (data/achievements.js) with the same rules, except
 // that it has no clue stages (it is never hidden), must be an account rule, and pays Credits / RP / Racing Tokens.
-const ACH_REWARDS = new Set(['credits', 'rp', 'tokens']);
+const ACH_REWARDS = new Set(['credits', 'rp', 'tokens', 'prestige']); // (Milestone 30d: + Prestige Tokens — A31 Pantheon)
 export function validateRule(r, { achievement = false } = {}) {
   const errors = [];
   if (!r || typeof r.id !== 'string' || !ID.test(r.id)) return ['a rule needs an id'];

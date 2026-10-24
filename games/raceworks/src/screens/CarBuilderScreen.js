@@ -259,7 +259,9 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
       }
       y += slotH + 12;
     }
-    const free = team.roster.filter((s) => !teamIds.includes(s.id) && !team.training.trainingOf(s.id)); // Milestone 12: not away on a course
+    const free = team.roster.filter((s) => !teamIds.includes(s.id) && !team.training.trainingOf(s.id) && !team.cars.jobOf(s.id)); // Milestone 12: not away on a course (Milestone 30c: nor on another build)
+    const onBuilds = team.roster.filter((s) => team.cars.jobOf(s.id));
+    if (onBuilds.length) y += para(ctx, `On other builds: ${onBuilds.map((s) => ` (${team.cars.jobOf(s.id).name})`).join(', ')}`, 8, y, w - 16, { size: S.small, color: C.textMuted }) + 12;
     if (free.length) {
       if (ctx) text(ctx, 'Available', 8, y + 6, { size: S.body, bold: true, color: C.textMuted });
       y += 56;
@@ -361,7 +363,7 @@ export function createCarBuilderScreen({ layout, assets, team, topBar, onStart, 
       parts = rec ? [...rec.result.parts] : partsOf('clubHatch');
       budget = 'balanced';
       openList = null;
-      teamIds = team.roster.filter((s) => !team.training.trainingOf(s.id)).map((s) => s.id).slice(0, PROJECT.teamSlots); // everyone here (not on a course), ready to go
+      teamIds = team.freeStaff().map((s) => s.id).slice(0, PROJECT.teamSlots); // everyone here (not on a course; Milestone 30c: nor on another build), ready to go
       panel.scrollY = 0;
     },
     onDragStart: (p) => panel.beginDrag(p),

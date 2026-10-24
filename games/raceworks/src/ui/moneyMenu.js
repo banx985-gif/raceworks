@@ -38,6 +38,8 @@ export function moneyMenu({ slot, team, goMainMenu = null, debug = null, toast =
         `Rank ${m.rank} · ${repLine}`,
         `This month: in ${fmt(month.in)} · out ${fmt(month.out)} · net ${signed(month.net)}`,
         `Every month (day 1): salaries ${fmt(m.salaryBill())}${m.upkeepBill() ? ` · car upkeep ${fmt(m.upkeepBill())}` : ''}${team.sponsors?.deals.length ? ` · sponsor stipends +${fmt(team.sponsors.deals.reduce((t, d) => t + team.sponsors.stipendNow(d), 0))}` : ''}`,
+        // Milestone 30c: every build's running cost, each day it is in its bay
+        ...(team.cars.builds.length ? [`Every day while building: ${team.cars.builds.map((j) => `${j.name} ${fmt(m.carDailyCost(j))}`).join(' · ')} = ${fmt(team.cars.builds.reduce((t, j) => t + m.carDailyCost(j), 0))} Credits`] : []),
         ...debtLines,
       ],
       // Milestone 29: the Store (Racing Tokens, Remove Ads, VIP — a placeholder until Milestone 31)
