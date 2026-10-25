@@ -10,13 +10,14 @@
     <meta name="apple-mobile-web-app-title" content="RACEWORKS" />
     <title>RACEWORKS</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="icon" href="assets/branding/pwa/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/branding/pwa/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="assets/branding/pwa/icon-192.png" />
     <link rel="apple-touch-icon" href="assets/branding/pwa/apple-touch-icon-180.png" />
     <link rel="stylesheet" href="styles/app.css" />
   </head>
   <body>
     <canvas id="game" aria-label="RACEWORKS"></canvas>
-    <script type="module" src="src/main.js"></script>
+    <script type="module" src="app.js"></script>
     <script>
       // Installable web app: only when served over http(s), so opening the
       // file straight from the PC keeps working.
