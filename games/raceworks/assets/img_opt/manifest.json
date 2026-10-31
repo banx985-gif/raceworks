@@ -2608,5 +2608,185 @@
   "webp": 30940,
   "png": 157879,
   "original": 265198
+ },
+ "race_cast_gus": {
+  "folder": "cast",
+  "recipe": "0a0bebd6ead8f33e310b42c3907dfe990f1c2425|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 55048,
+  "png": 368669,
+  "original": 368669
+ },
+ "race_cast_rex": {
+  "folder": "cast",
+  "recipe": "2b5d1a96485044c80eecc833b9455a831807b64f|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 55248,
+  "png": 357790,
+  "original": 357790
+ },
+ "race_cast_tess": {
+  "folder": "cast",
+  "recipe": "95eda38c7b36b325dbee3024f7acf0e9edf3b144|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 67294,
+  "png": 427418,
+  "original": 427418
+ },
+ "race_cast_pip": {
+  "folder": "cast",
+  "recipe": "5f6462d51c8811dab23c8fc61a3a0d0147f25670|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 59536,
+  "png": 373139,
+  "original": 373139
+ },
+ "race_cast_ron": {
+  "folder": "cast",
+  "recipe": "ee0df24fd86b03db22e96f685038fad0df8df01e|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 54434,
+  "png": 356191,
+  "original": 356191
+ },
+ "race_cast_ziggy": {
+  "folder": "cast",
+  "recipe": "54b9f9877959cdf72e8c5d4439744d053d4a9207|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 70642,
+  "png": 374268,
+  "original": 374268
+ },
+ "race_cast_marco": {
+  "folder": "cast",
+  "recipe": "43b6a8198f063da29661f82e6cff85138f91bef1|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 52906,
+  "png": 321273,
+  "original": 321273
+ },
+ "race_cast_theo": {
+  "folder": "cast",
+  "recipe": "fec433bdeb3de4de7f047abe63e43971d02af70f|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 54050,
+  "png": 339791,
+  "original": 339791
+ },
+ "race_cast_nova": {
+  "folder": "cast",
+  "recipe": "a7f0ae8586f1c8bfff7ab38165371421e121e78f|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 71034,
+  "png": 393606,
+  "original": 393606
+ },
+ "race_cast_skye": {
+  "folder": "cast",
+  "recipe": "d2b3ea18d6145dbc8d495ac85a9e4d77887c1c09|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 58698,
+  "png": 411635,
+  "original": 411635
+ },
+ "race_cast_brock": {
+  "folder": "cast",
+  "recipe": "89efefc44b34bfdd97f46d4da5c93dbe26a6133c|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 55250,
+  "png": 342344,
+  "original": 342344
+ },
+ "race_cast_victor": {
+  "folder": "cast",
+  "recipe": "93513884eea9598e476a7b50d5ab0c04c76ecde1|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 45896,
+  "png": 332197,
+  "original": 332197
+ },
+ "race_cast_ollie": {
+  "folder": "cast",
+  "recipe": "526b8c542d64fe29645066c9e3b5fee3abcbfd32|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 51888,
+  "png": 351498,
+  "original": 351498
+ },
+ "race_cast_ruth": {
+  "folder": "cast",
+  "recipe": "6e75cfdfa19eca8dbc0bf965a4065394694b4744|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 67162,
+  "png": 404481,
+  "original": 404481
+ },
+ "race_cast_kai": {
+  "folder": "cast",
+  "recipe": "4212d3cb9055b2870e2dd725ee349ffe1173af05|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 61744,
+  "png": 378429,
+  "original": 378429
+ },
+ "race_cast_gloria": {
+  "folder": "cast",
+  "recipe": "2a846f80416087380c553669c3cfd7867755995d|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 55468,
+  "png": 401366,
+  "original": 401366
+ },
+ "race_cast_soraya": {
+  "folder": "cast",
+  "recipe": "3f2c20704677916a28463e7810254716dc3bf6d2|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 55182,
+  "png": 365955,
+  "original": 365955
+ },
+ "race_cast_blake": {
+  "folder": "cast",
+  "recipe": "b95b161bd153d55646d9f6b803b64aa6962b56bd|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 63510,
+  "png": 358951,
+  "original": 358951
+ },
+ "race_cast_marcus": {
+  "folder": "cast",
+  "recipe": "5a61ff0e78f617625021a2a34589ddc4e692f8c5|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 42488,
+  "png": 283931,
+  "original": 283931
+ },
+ "race_cast_vera": {
+  "folder": "cast",
+  "recipe": "b00f403eb0e4d12486d4831e7f54367e928f3b9b|512x512|q0.85",
+  "w": 512,
+  "h": 512,
+  "webp": 62802,
+  "png": 418222,
+  "original": 418222
  }
 }
