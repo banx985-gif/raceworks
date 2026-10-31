@@ -2563,5 +2563,50 @@
   "webp": 257428,
   "png": 1326620,
   "original": 2151401
+ },
+ "race_vfx_04": {
+  "folder": "vfx",
+  "recipe": "63637b985cea78cf9390602ad3dd6c6638ff2413|393x410|q0.85",
+  "w": 393,
+  "h": 410,
+  "webp": 23568,
+  "png": 231185,
+  "original": 231185
+ },
+ "race_vfx_07": {
+  "folder": "vfx",
+  "recipe": "61dd31b91e6d06c5730e235acbff4067073b6c73|417x397|q0.85",
+  "w": 417,
+  "h": 397,
+  "webp": 33038,
+  "png": 271171,
+  "original": 271171
+ },
+ "race_vfx_08": {
+  "folder": "vfx",
+  "recipe": "a80db3b7e6c6dc4e1a7b017cb8e963ef34e52ab7|407x395|q0.85",
+  "w": 407,
+  "h": 395,
+  "webp": 31022,
+  "png": 151067,
+  "original": 255823
+ },
+ "race_vfx_11": {
+  "folder": "vfx",
+  "recipe": "8743b448e8d467c457a4404a5f5fe6261ae64537|396x391|q0.85",
+  "w": 396,
+  "h": 391,
+  "webp": 16286,
+  "png": 151516,
+  "original": 185757
+ },
+ "race_vfx_12": {
+  "folder": "vfx",
+  "recipe": "abe3aceb26c9be949adc99f9b003b6acd39a45bd|408x421|q0.85",
+  "w": 408,
+  "h": 421,
+  "webp": 30940,
+  "png": 157879,
+  "original": 265198
  }
 }
