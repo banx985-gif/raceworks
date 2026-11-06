@@ -2788,5 +2788,50 @@
   "webp": 62802,
   "png": 418222,
   "original": 418222
+ },
+ "facility_f25": {
+  "folder": "facilities",
+  "recipe": "e9e9d6bdd435743746974d1a51fd397a1e8cfb7a|414x474|q0.85",
+  "w": 414,
+  "h": 474,
+  "webp": 82052,
+  "png": 429670,
+  "original": 429670
+ },
+ "facility_f27": {
+  "folder": "facilities",
+  "recipe": "1bb955ff29d138f47a6cf38c8851e6dcccf124a9|413x453|q0.85",
+  "w": 413,
+  "h": 453,
+  "webp": 65396,
+  "png": 355562,
+  "original": 355562
+ },
+ "facility_f28": {
+  "folder": "facilities",
+  "recipe": "fa0739224c44a97a3e95f609d31ad34a5ed77bb8|420x511|q0.85",
+  "w": 420,
+  "h": 511,
+  "webp": 86252,
+  "png": 431510,
+  "original": 431510
+ },
+ "facility_f31": {
+  "folder": "facilities",
+  "recipe": "a3681f170b37b402dd3226d1535d9987943d4160|406x497|q0.85",
+  "w": 406,
+  "h": 497,
+  "webp": 91072,
+  "png": 440401,
+  "original": 440401
+ },
+ "race_prop_10": {
+  "folder": "props",
+  "recipe": "97f9cb8127baab461d0adf89bf4525ac02f1552b|402x557|q0.85",
+  "w": 402,
+  "h": 557,
+  "webp": 66960,
+  "png": 381579,
+  "original": 381579
  }
 }
